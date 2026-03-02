@@ -194,6 +194,9 @@ export function AuthorStudioProjectPanel({
           <button className="button-soft" onClick={() => onAddBlock("gameplay")} disabled={!canEdit}>
             + Gameplay
           </button>
+          <button className="button-soft" onClick={() => onAddBlock("choice")} disabled={!canEdit}>
+            + Choix
+          </button>
           <button className="button-soft" onClick={() => onAddBlock("hero_profile")} disabled={!canEdit}>
             + Fiche Hero
           </button>

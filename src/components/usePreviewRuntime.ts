@@ -7,10 +7,11 @@ import {
   isGameplayPointClickCompleted,
   requiredHotspotIds,
 } from "@/components/author-studio-core";
-import { ProjectMeta, StoryBlock } from "@/lib/story";
+import { ProjectMeta, DialogueBlock, StoryBlock } from "@/lib/story";
 
 export interface PreviewRuntimeState {
   currentBlockId: string | null;
+  currentDialogueLineId: string | null;
   variables: Record<string, number>;
   inventory: Record<string, number>;
   ended: boolean;
@@ -43,6 +44,7 @@ export function usePreviewRuntime({
       if (!targetBlockId) {
         return {
           currentBlockId: null,
+          currentDialogueLineId: null,
           variables,
           inventory,
           ended: true,
@@ -57,9 +59,25 @@ export function usePreviewRuntime({
       const nextVariables = block
         ? applyEffects(variables, block.entryEffects ?? [])
         : variables;
+
+      if (block && block.type === "dialogue") {
+        return {
+          currentBlockId: targetBlockId,
+          currentDialogueLineId: block.startLineId || block.lines[0]?.id || null,
+          variables: nextVariables,
+          inventory,
+          ended: false,
+          gameplayFoundHotspotIds: [],
+          gameplayDisabledHotspotIds: [],
+          gameplayOverlayVisibility: {},
+          gameplayMessage: null,
+        } as PreviewRuntimeState;
+      }
+
       if (!block || block.type !== "gameplay") {
         return {
           currentBlockId: targetBlockId,
+          currentDialogueLineId: null,
           variables: nextVariables,
           inventory,
           ended: false,
@@ -77,6 +95,7 @@ export function usePreviewRuntime({
 
       return {
         currentBlockId: targetBlockId,
+        currentDialogueLineId: null,
         variables: nextVariables,
         inventory,
         ended: false,
@@ -148,7 +167,7 @@ export function usePreviewRuntime({
   const continuePreview = useCallback(() => {
     if (!previewState || !previewBlock) return;
 
-    if (previewBlock.type === "dialogue") return;
+    if (previewBlock.type === "dialogue" || previewBlock.type === "choice") return;
 
     if (previewBlock.type === "gameplay") {
       const foundSet = new Set(previewState.gameplayFoundHotspotIds);
@@ -169,18 +188,48 @@ export function usePreviewRuntime({
 
   const pickPreviewChoice = useCallback(
     (choiceId: string) => {
-      if (!previewState || !previewBlock || previewBlock.type !== "dialogue") return;
+      if (!previewState || !previewBlock) return;
 
-      const choice = previewBlock.choices.find((item) => item.id === choiceId);
-      if (!choice) return;
+      // Handle dialogue responses (internal line navigation or external block)
+      if (previewBlock.type === "dialogue") {
+        const resp = previewBlock.lines
+          .flatMap((line) => line.responses)
+          .find((r) => r.id === choiceId);
+        if (!resp) return;
 
-      setPreviewState(
-        buildPreviewState(
-          choice.targetBlockId,
-          applyEffects(previewState.variables, choice.effects),
-          previewState.inventory,
-        ),
-      );
+        const nextVariables = applyEffects(previewState.variables, resp.effects);
+
+        if (resp.targetLineId) {
+          // Internal navigation — stay in same block, move to target line
+          setPreviewState({
+            ...previewState,
+            currentDialogueLineId: resp.targetLineId,
+            variables: nextVariables,
+          });
+          return;
+        }
+
+        // External navigation — go to target block (or end)
+        setPreviewState(
+          buildPreviewState(resp.targetBlockId, nextVariables, previewState.inventory),
+        );
+        return;
+      }
+
+      // Handle choice block options
+      if (previewBlock.type === "choice") {
+        const choice = previewBlock.choices.find((item) => item.id === choiceId);
+        if (!choice) return;
+
+        setPreviewState(
+          buildPreviewState(
+            choice.targetBlockId,
+            applyEffects(previewState.variables, choice.effects),
+            previewState.inventory,
+          ),
+        );
+        return;
+      }
     },
     [buildPreviewState, previewBlock, previewState],
   );

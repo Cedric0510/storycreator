@@ -1,13 +1,13 @@
 # Contrat `story.json` (Studio Auteur)
 
 Ce document fige le format exporte par l outil auteur pour la partie lecture.
-Version courante: `schemaVersion = "1.1.0"`.
+Version courante: `schemaVersion = "1.2.0"`.
 
 ## Racine
 
 ```json
 {
-  "schemaVersion": "1.1.0",
+  "schemaVersion": "1.2.0",
   "exportedAt": "2026-02-24T10:00:00.000Z",
   "project": {
     "id": "project_xxx",
@@ -46,7 +46,7 @@ Version courante: `schemaVersion = "1.1.0"`.
 
 Chaque bloc contient au minimum:
 - `id`: string
-- `type`: `title | cinematic | dialogue | gameplay`
+- `type`: `title | cinematic | dialogue | choice | gameplay`
 - `name`: string
 - `position`: `{ x: number, y: number }`
 - `notes`: string
@@ -71,15 +71,41 @@ Chaque bloc contient au minimum:
 
 ### `dialogue`
 
-- `speaker`: string
-- `line`: string
+Bloc de dialogue multi-lignes. Chaque ligne represente une replique avec ses propres reponses.
+Les reponses peuvent pointer vers une autre ligne interne (navigation intra-bloc) ou vers un bloc
+externe (sortie). Les deux cibles sont mutuellement exclusives.
+
 - `backgroundPath`: string | null
 - `characterPath`: string | null
+- `npcProfileBlockId`: string | null
+- `npcImageAssetId`: string | null
+- `startLineId`: string (id de la ligne de depart)
+- `lines[]`:
+  - `id`: string
+  - `speaker`: string
+  - `text`: string
+  - `voicePath`: string | null
+  - `responses[]` (max 4 par ligne):
+    - `id`: string
+    - `label`: `A | B | C | D`
+    - `text`: string
+    - `targetLineId`: string | null (navigation interne vers une autre ligne)
+    - `targetBlockId`: string | null (navigation externe vers un autre bloc)
+    - `effects[]`: `{ variableId, variableName, delta }`
+
+### `choice`
+
+Bloc de choix autonome (decision narrative sans dialogue).
+
+- `prompt`: string (question ou contexte affiche au joueur)
+- `backgroundPath`: string | null
 - `voicePath`: string | null
 - `choices[]` (max 4):
 - `id`: string
 - `label`: `A | B | C | D`
-- `text`: string
+- `text`: string (texte court du bouton)
+- `description`: string (detail ou consequence visible)
+- `imagePath`: string | null (illustration de l option)
 - `targetBlockId`: string | null
 - `effects[]`: `{ variableId, variableName, delta }`
 

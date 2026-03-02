@@ -49,11 +49,14 @@ import {
   defaultGameplayHotspotActionDraft,
   defaultGameplayOverlayDraft,
   describeEffect,
+  lineIdFromHandle,
   normalizeDelta,
   normalizeRectPercent,
+  rebuildEdgesFromNodes,
   removeItemReferences,
   removeNodeReferences,
   removeVariableReferences,
+  responseIdFromHandle,
 } from "@/components/author-studio-core";
 import {
   PlatformRole,
@@ -62,13 +65,19 @@ import {
 import {
   BLOCK_LABELS,
   BlockType,
+  ChoiceBlock,
   CHOICE_LABELS,
+  DialogueBlock,
+  DialogueLine,
+  DialogueResponse,
   GameplayHotspotClickActionType,
   ProjectMeta,
   StoryBlock,
   ValidationIssue,
   blockTypeColor,
   createBlock,
+  createDefaultLine,
+  createDefaultResponse,
   createId,
   normalizeHeroProfile,
   normalizeStoryBlock,
@@ -436,7 +445,7 @@ export function AuthorStudioApp() {
 
     setProject(normalizedProject);
     setNodes(normalizedNodes);
-    setEdges(payload.edges);
+    setEdges(rebuildEdgesFromNodes(normalizedNodes));
     hydrateAssetRefs(payload.assetRefs ?? {});
     setGameplayPlacementTarget(null);
     setGameplayDragState(null);
@@ -449,8 +458,8 @@ export function AuthorStudioApp() {
     markStudioClean(
       buildStudioChangeFingerprint(
         normalizedProject,
-        payload.nodes,
-        payload.edges,
+        normalizedNodes,
+        rebuildEdgesFromNodes(normalizedNodes),
         payload.assetRefs ?? {},
       ),
     );
@@ -480,6 +489,18 @@ export function AuthorStudioApp() {
             void ensureAssetPreviewSrc(assetId);
           }
         }
+
+        if (selectedBlock.type === "dialogue") {
+          if (selectedBlock.backgroundAssetId) void ensureAssetPreviewSrc(selectedBlock.backgroundAssetId);
+          if (selectedBlock.characterAssetId) void ensureAssetPreviewSrc(selectedBlock.characterAssetId);
+          if (selectedBlock.npcImageAssetId) void ensureAssetPreviewSrc(selectedBlock.npcImageAssetId);
+          if (selectedBlock.npcProfileBlockId) {
+            const npcBlock = blockById.get(selectedBlock.npcProfileBlockId);
+            if (npcBlock?.type === "npc_profile" && npcBlock.defaultImageAssetId) {
+              void ensureAssetPreviewSrc(npcBlock.defaultImageAssetId);
+            }
+          }
+        }
         return;
       }
 
@@ -507,7 +528,7 @@ export function AuthorStudioApp() {
     return () => {
       window.clearTimeout(timer);
     };
-  }, [ensureAssetPreviewSrc, gameplayDragState, selectedBlock]);
+  }, [blockById, ensureAssetPreviewSrc, gameplayDragState, selectedBlock]);
 
   useEffect(() => {
     const timer = window.setTimeout(() => {
@@ -521,10 +542,15 @@ export function AuthorStudioApp() {
         if (block.backgroundAssetId) wantedAssetIds.add(block.backgroundAssetId);
       } else if (block.type === "cinematic") {
         if (block.backgroundAssetId) wantedAssetIds.add(block.backgroundAssetId);
+        if (block.videoAssetId) wantedAssetIds.add(block.videoAssetId);
+        if (block.voiceAssetId) wantedAssetIds.add(block.voiceAssetId);
       } else if (block.type === "dialogue") {
         if (block.backgroundAssetId) wantedAssetIds.add(block.backgroundAssetId);
         if (block.characterAssetId) wantedAssetIds.add(block.characterAssetId);
         if (block.npcImageAssetId) wantedAssetIds.add(block.npcImageAssetId);
+        for (const line of block.lines) {
+          if (line.voiceAssetId) wantedAssetIds.add(line.voiceAssetId);
+        }
         if (block.npcProfileBlockId) {
           const npcBlock = blockById.get(block.npcProfileBlockId);
           if (npcBlock && npcBlock.type === "npc_profile") {
@@ -534,12 +560,20 @@ export function AuthorStudioApp() {
             }
           }
         }
+      } else if (block.type === "choice") {
+        if (block.backgroundAssetId) wantedAssetIds.add(block.backgroundAssetId);
+        if (block.voiceAssetId) wantedAssetIds.add(block.voiceAssetId);
+        for (const choice of block.choices) {
+          if (choice.imageAssetId) wantedAssetIds.add(choice.imageAssetId);
+        }
       } else if (block.type === "npc_profile") {
         for (const imageAssetId of block.imageAssetIds) {
           wantedAssetIds.add(imageAssetId);
         }
+        if (block.defaultImageAssetId) wantedAssetIds.add(block.defaultImageAssetId);
       } else if (block.type === "gameplay") {
         if (block.backgroundAssetId) wantedAssetIds.add(block.backgroundAssetId);
+        if (block.voiceAssetId) wantedAssetIds.add(block.voiceAssetId);
         for (const overlay of block.overlays) {
           if (overlay.assetId) wantedAssetIds.add(overlay.assetId);
         }
@@ -608,12 +642,37 @@ export function AuthorStudioApp() {
   );
 
   const setConnection = useCallback(
-    (sourceId: string, sourceHandle: string, targetId: string | null) => {
+    (sourceId: string, sourceHandle: string, targetId: string | null, targetHandle?: string | null) => {
+      const targetLineId = lineIdFromHandle(targetHandle);
+
       setNodes((current) =>
         current.map((node) => {
           if (node.id !== sourceId) return node;
 
           if (node.data.block.type === "dialogue") {
+            const respId = responseIdFromHandle(sourceHandle);
+            if (!respId) return node;
+
+            return {
+              ...node,
+              data: {
+                ...node.data,
+                block: {
+                  ...node.data.block,
+                  lines: node.data.block.lines.map((line) => ({
+                    ...line,
+                    responses: line.responses.map((resp) =>
+                      resp.id === respId
+                        ? { ...resp, targetBlockId: targetId, targetLineId: targetLineId }
+                        : resp,
+                    ),
+                  })),
+                },
+              },
+            };
+          }
+
+          if (node.data.block.type === "choice") {
             const label = choiceLabelFromHandle(sourceHandle);
             if (!label) return node;
 
@@ -623,10 +682,10 @@ export function AuthorStudioApp() {
                 ...node.data,
                 block: {
                   ...node.data.block,
-                  choices: node.data.block.choices.map((choice) =>
-                    choice.label === label
-                      ? { ...choice, targetBlockId: targetId }
-                      : choice,
+                  choices: node.data.block.choices.map((option) =>
+                    option.label === label
+                      ? { ...option, targetBlockId: targetId }
+                      : option,
                   ),
                 },
               },
@@ -663,7 +722,7 @@ export function AuthorStudioApp() {
         );
 
         if (!targetId) return withoutCurrent;
-        return [...withoutCurrent, buildEdge(sourceId, targetId, sourceHandle)];
+        return [...withoutCurrent, buildEdge(sourceId, targetId, sourceHandle, undefined, targetHandle ?? undefined)];
       });
 
       touchProject();
@@ -691,7 +750,6 @@ export function AuthorStudioApp() {
               ...node.data,
               block: {
                 ...node.data.block,
-                speaker: npcBlock.npcName.trim() || node.data.block.speaker,
                 npcProfileBlockId: npcBlockId,
                 npcImageAssetId: selectedNpcImage,
               },
@@ -835,15 +893,24 @@ export function AuthorStudioApp() {
       }
 
       if (sourceNode.type === "dialogue") {
+        const respId = responseIdFromHandle(connection.sourceHandle);
+        if (!respId) return;
+        const handle = `resp-${respId}`;
+        setConnection(connection.source, handle, connection.target, connection.targetHandle);
+        logAction("link", `${sourceNode.name} resp ${respId} -> ${connection.target}`);
+        return;
+      }
+
+      if (sourceNode.type === "choice") {
         const label = choiceLabelFromHandle(connection.sourceHandle);
         if (!label) return;
         const handle = `choice-${label}`;
-        setConnection(connection.source, handle, connection.target);
+        setConnection(connection.source, handle, connection.target, connection.targetHandle);
         logAction("link", `${sourceNode.name} choix ${label} -> ${connection.target}`);
         return;
       }
 
-      setConnection(connection.source, "next", connection.target);
+      setConnection(connection.source, "next", connection.target, connection.targetHandle);
       logAction("link", `${sourceNode.name} -> ${connection.target}`);
     },
     [blockById, canEdit, linkNpcProfileToDialogue, logAction, setConnection, setStatusMessage],
@@ -915,44 +982,447 @@ export function AuthorStudioApp() {
     logAction("set_start_block", blockId);
   };
 
-  const addDialogueChoice = () => {
+  /* ---------- Dialogue: lines & responses ---------- */
+
+  const addDialogueLine = () => {
     if (!canEdit || !selectedBlock || selectedBlock.type !== "dialogue") return;
+    const newLine = createDefaultLine();
+    updateSelectedBlock((block) => {
+      if (block.type !== "dialogue") return block;
+      return { ...block, lines: [...block.lines, newLine] };
+    });
+    logAction("add_dialogue_line", `${selectedBlock.id} line ${newLine.id}`);
+  };
+
+  const removeDialogueLine = (lineId: string) => {
+    if (!canEdit || !selectedBlock || selectedBlock.type !== "dialogue") return;
+    if (selectedBlock.lines.length <= 1) return;
+    const removedLine = selectedBlock.lines.find((l) => l.id === lineId);
+    if (!removedLine) return;
+
+    // Collect source handles of responses that have connections
+    const removedRespHandles = new Set(
+      removedLine.responses
+        .filter((r) => r.targetBlockId || r.targetLineId)
+        .map((r) => `resp-${r.id}`),
+    );
+
+    // Single pass: remove edges FROM removed responses + edges TARGETING this line handle
+    setEdges((current) =>
+      current.filter((edge) => {
+        if (edge.source === selectedBlock.id && removedRespHandles.has(edge.sourceHandle ?? "")) {
+          return false;
+        }
+        if (edge.target === selectedBlock.id && edge.targetHandle === `line-${lineId}`) {
+          return false;
+        }
+        return true;
+      }),
+    );
+
+    // Clear any internal references to this line from other lines' responses
+    updateSelectedBlock((block) => {
+      if (block.type !== "dialogue") return block;
+      const newLines = block.lines
+        .filter((l) => l.id !== lineId)
+        .map((l) => ({
+          ...l,
+          responses: l.responses.map((r) =>
+            r.targetLineId === lineId ? { ...r, targetLineId: null } : r,
+          ),
+        }));
+      const startLineId =
+        block.startLineId === lineId ? (newLines[0]?.id ?? block.startLineId) : block.startLineId;
+      return { ...block, lines: newLines, startLineId };
+    });
+    logAction("remove_dialogue_line", `${selectedBlock.id} line ${lineId}`);
+  };
+
+  const updateDialogueLineField = (lineId: string, field: string, value: string | null) => {
+    if (!canEdit || !selectedBlock || selectedBlock.type !== "dialogue") return;
+    updateSelectedBlock((block) => {
+      if (block.type !== "dialogue") return block;
+      return {
+        ...block,
+        lines: block.lines.map((l) =>
+          l.id === lineId ? { ...l, [field]: value } : l,
+        ),
+      };
+    });
+  };
+
+  const onDialogueLineVoiceInput = useCallback(
+    (lineId: string) =>
+      createAssetInputHandler("voiceAssetId", (_, assetId) => {
+        updateBlock(selectedBlockId!, (block) => {
+          if (block.type !== "dialogue") return block;
+          return {
+            ...block,
+            lines: block.lines.map((l) =>
+              l.id === lineId ? { ...l, voiceAssetId: assetId } : l,
+            ),
+          };
+        });
+      }),
+    [createAssetInputHandler, selectedBlockId, updateBlock],
+  );
+
+  const renderLineVoiceAttachment = useCallback(
+    (lineId: string, assetId: string | null) => (
+      <div className="asset-line">
+        <small>{getAssetFileName(assetId)}</small>
+        <button
+          className="button-secondary"
+          onClick={() => {
+            if (!canEdit || !selectedBlockId) return;
+            updateBlock(selectedBlockId, (block) => {
+              if (block.type !== "dialogue") return block;
+              return {
+                ...block,
+                lines: block.lines.map((l) =>
+                  l.id === lineId ? { ...l, voiceAssetId: null } : l,
+                ),
+              };
+            });
+          }}
+          disabled={!canEdit || !assetId}
+        >
+          x
+        </button>
+      </div>
+    ),
+    [canEdit, getAssetFileName, selectedBlockId, updateBlock],
+  );
+
+  const addDialogueLineResponse = (lineId: string) => {
+    if (!canEdit || !selectedBlock || selectedBlock.type !== "dialogue") return;
+    const line = selectedBlock.lines.find((l) => l.id === lineId);
+    if (!line || line.responses.length >= 4) return;
+    const label = CHOICE_LABELS[line.responses.length];
+    const newResp = createDefaultResponse(label);
+    updateSelectedBlock((block) => {
+      if (block.type !== "dialogue") return block;
+      return {
+        ...block,
+        lines: block.lines.map((l) =>
+          l.id === lineId ? { ...l, responses: [...l.responses, newResp] } : l,
+        ),
+      };
+    });
+    logAction("add_dialogue_response", `${selectedBlock.id} line ${lineId} resp ${newResp.id}`);
+  };
+
+  const removeDialogueLineResponse = (lineId: string, responseId: string) => {
+    if (!canEdit || !selectedBlock || selectedBlock.type !== "dialogue") return;
+    const line = selectedBlock.lines.find((l) => l.id === lineId);
+    if (!line || line.responses.length <= 1) return;
+    const removed = line.responses.find((r) => r.id === responseId);
+    if (!removed) return;
+    if (removed.targetBlockId || removed.targetLineId) {
+      setEdges((current) =>
+        current.filter(
+          (edge) =>
+            !(edge.source === selectedBlock.id && edge.sourceHandle === `resp-${removed.id}`),
+        ),
+      );
+    }
+    updateSelectedBlock((block) => {
+      if (block.type !== "dialogue") return block;
+      return {
+        ...block,
+        lines: block.lines.map((l) =>
+          l.id === lineId
+            ? { ...l, responses: l.responses.filter((r) => r.id !== responseId) }
+            : l,
+        ),
+      };
+    });
+    logAction("remove_dialogue_response", `${selectedBlock.id} resp ${responseId}`);
+  };
+
+  const updateDialogueResponseField = (
+    lineId: string,
+    responseId: string,
+    field: "text" | "targetLineId" | "targetBlockId",
+    value: string,
+  ) => {
+    if (!canEdit || !selectedBlock || selectedBlock.type !== "dialogue") return;
+
+    if (field === "targetBlockId") {
+      // Clear internal target when setting external
+      updateSelectedBlock((block) => {
+        if (block.type !== "dialogue") return block;
+        return {
+          ...block,
+          lines: block.lines.map((l) =>
+            l.id === lineId
+              ? {
+                  ...l,
+                  responses: l.responses.map((r) =>
+                    r.id === responseId
+                      ? { ...r, targetBlockId: value || null, targetLineId: null }
+                      : r,
+                  ),
+                }
+              : l,
+          ),
+        };
+      });
+      setConnection(selectedBlock.id, `resp-${responseId}`, value || null);
+      return;
+    }
+
+    if (field === "targetLineId") {
+      // Remove any existing edge for this response first
+      const resp = selectedBlock.lines
+        .flatMap((l) => l.responses)
+        .find((r) => r.id === responseId);
+      if (resp?.targetBlockId || resp?.targetLineId) {
+        // Clear old edge
+        setEdges((current) =>
+          current.filter(
+            (edge) =>
+              !(edge.source === selectedBlock.id && edge.sourceHandle === `resp-${responseId}`),
+          ),
+        );
+      }
+
+      if (value) {
+        // Internal routing → self-edge: targetBlockId = same block, targetLineId = target line
+        updateSelectedBlock((block) => {
+          if (block.type !== "dialogue") return block;
+          return {
+            ...block,
+            lines: block.lines.map((l) =>
+              l.id === lineId
+                ? {
+                    ...l,
+                    responses: l.responses.map((r) =>
+                      r.id === responseId
+                        ? { ...r, targetLineId: value, targetBlockId: null }
+                        : r,
+                    ),
+                  }
+                : l,
+            ),
+          };
+        });
+        // Create self-edge
+        setEdges((current) => [
+          ...current,
+          buildEdge(selectedBlock.id, selectedBlock.id, `resp-${responseId}`, undefined, `line-${value}`),
+        ]);
+      } else {
+        // Clear internal target
+        updateSelectedBlock((block) => {
+          if (block.type !== "dialogue") return block;
+          return {
+            ...block,
+            lines: block.lines.map((l) =>
+              l.id === lineId
+                ? {
+                    ...l,
+                    responses: l.responses.map((r) =>
+                      r.id === responseId
+                        ? { ...r, targetLineId: null, targetBlockId: null }
+                        : r,
+                    ),
+                  }
+                : l,
+            ),
+          };
+        });
+      }
+      touchProject();
+      return;
+    }
+
+    // text field
+    updateSelectedBlock((block) => {
+      if (block.type !== "dialogue") return block;
+      return {
+        ...block,
+        lines: block.lines.map((l) =>
+          l.id === lineId
+            ? {
+                ...l,
+                responses: l.responses.map((r) =>
+                  r.id === responseId ? { ...r, [field]: value } : r,
+                ),
+              }
+            : l,
+        ),
+      };
+    });
+  };
+
+  /* ---------- Dialogue: response effects ---------- */
+
+  const addResponseEffect = (lineId: string, responseId: string) => {
+    if (!canEdit || !selectedBlock || selectedBlock.type !== "dialogue") return;
+    const fallbackVariableId = project.variables[0]?.id;
+    if (!fallbackVariableId) {
+      setStatusMessage("Ajoute d'abord une variable globale.");
+      return;
+    }
+    updateSelectedBlock((block) => {
+      if (block.type !== "dialogue") return block;
+      return {
+        ...block,
+        lines: block.lines.map((l) =>
+          l.id === lineId
+            ? {
+                ...l,
+                responses: l.responses.map((r) =>
+                  r.id === responseId
+                    ? { ...r, effects: [...r.effects, { variableId: fallbackVariableId, delta: 1 }] }
+                    : r,
+                ),
+              }
+            : l,
+        ),
+      };
+    });
+  };
+
+  const updateResponseEffect = (
+    lineId: string,
+    responseId: string,
+    effectIndex: number,
+    key: "variableId" | "delta",
+    value: string,
+  ) => {
+    updateSelectedBlock((block) => {
+      if (block.type !== "dialogue") return block;
+      return {
+        ...block,
+        lines: block.lines.map((l) =>
+          l.id === lineId
+            ? {
+                ...l,
+                responses: l.responses.map((r) =>
+                  r.id === responseId
+                    ? {
+                        ...r,
+                        effects: r.effects.map((eff, idx) =>
+                          idx === effectIndex
+                            ? { ...eff, [key]: key === "delta" ? normalizeDelta(value) : value }
+                            : eff,
+                        ),
+                      }
+                    : r,
+                ),
+              }
+            : l,
+        ),
+      };
+    });
+  };
+
+  const removeResponseEffect = (lineId: string, responseId: string, effectIndex: number) => {
+    updateSelectedBlock((block) => {
+      if (block.type !== "dialogue") return block;
+      return {
+        ...block,
+        lines: block.lines.map((l) =>
+          l.id === lineId
+            ? {
+                ...l,
+                responses: l.responses.map((r) =>
+                  r.id === responseId
+                    ? { ...r, effects: r.effects.filter((_, idx) => idx !== effectIndex) }
+                    : r,
+                ),
+              }
+            : l,
+        ),
+      };
+    });
+  };
+
+  const addChoiceOption = () => {
+    if (!canEdit || !selectedBlock || selectedBlock.type !== "choice") return;
     if (selectedBlock.choices.length >= 4) return;
 
     const label = CHOICE_LABELS[selectedBlock.choices.length];
     updateSelectedBlock((block) => {
-      if (block.type !== "dialogue") return block;
+      if (block.type !== "choice") return block;
       return {
         ...block,
         choices: [
           ...block.choices,
           {
-            id: createId("choice"),
+            id: createId("option"),
             label,
             text: "",
+            description: "",
+            imageAssetId: null,
             targetBlockId: null,
             effects: [],
           },
         ],
       };
     });
-    logAction("add_choice", `${selectedBlock.id} choix ${label}`);
+    logAction("add_choice_option", `${selectedBlock.id} option ${label}`);
   };
 
-  const removeDialogueChoice = () => {
-    if (!canEdit || !selectedBlock || selectedBlock.type !== "dialogue") return;
+  const removeChoiceOption = () => {
+    if (!canEdit || !selectedBlock || selectedBlock.type !== "choice") return;
     if (selectedBlock.choices.length <= 1) return;
 
     const removed = selectedBlock.choices[selectedBlock.choices.length - 1];
     setConnection(selectedBlock.id, `choice-${removed.label}`, null);
     updateSelectedBlock((block) => {
-      if (block.type !== "dialogue") return block;
+      if (block.type !== "choice") return block;
       return {
         ...block,
         choices: block.choices.slice(0, -1),
       };
     });
-    logAction("remove_choice", `${selectedBlock.id} choix ${removed.label}`);
+    logAction("remove_choice_option", `${selectedBlock.id} option ${removed.label}`);
+  };
+
+  const updateChoiceOptionDescription = (optionId: string, description: string) => {
+    if (!canEdit || !selectedBlock || selectedBlock.type !== "choice") return;
+    updateSelectedBlock((block) => {
+      if (block.type !== "choice") return block;
+      return {
+        ...block,
+        choices: block.choices.map((option) =>
+          option.id === optionId ? { ...option, description } : option,
+        ),
+      };
+    });
+  };
+
+  const setChoiceOptionImage = (optionId: string, file: File) => {
+    if (!canEdit || !selectedBlock || selectedBlock.type !== "choice") return;
+    const assetId = registerAsset(file);
+    void ensureAssetPreviewSrc(assetId);
+    updateSelectedBlock((block) => {
+      if (block.type !== "choice") return block;
+      return {
+        ...block,
+        choices: block.choices.map((option) =>
+          option.id === optionId ? { ...option, imageAssetId: assetId } : option,
+        ),
+      };
+    });
+    logAction("set_choice_option_image", `${selectedBlock.id} option ${optionId}`);
+  };
+
+  const clearChoiceOptionImage = (optionId: string) => {
+    if (!canEdit || !selectedBlock || selectedBlock.type !== "choice") return;
+    updateSelectedBlock((block) => {
+      if (block.type !== "choice") return block;
+      return {
+        ...block,
+        choices: block.choices.map((option) =>
+          option.id === optionId ? { ...option, imageAssetId: null } : option,
+        ),
+      };
+    });
+    logAction("clear_choice_option_image", `${selectedBlock.id} option ${optionId}`);
   };
 
   const addVariable = () => {
@@ -1133,7 +1603,7 @@ export function AuthorStudioApp() {
     field: "text" | "targetBlockId",
     value: string,
   ) => {
-    if (!selectedBlock || selectedBlock.type !== "dialogue") return;
+    if (!selectedBlock || selectedBlock.type !== "choice") return;
 
     if (field === "targetBlockId") {
       const choice = selectedBlock.choices.find((item) => item.id === choiceId);
@@ -1147,13 +1617,15 @@ export function AuthorStudioApp() {
     }
 
     updateSelectedBlock((block) => {
-      if (block.type !== "dialogue") return block;
-      return {
-        ...block,
-        choices: block.choices.map((choice) =>
-          choice.id === choiceId ? { ...choice, [field]: value } : choice,
-        ),
-      };
+      if (block.type === "choice") {
+        return {
+          ...block,
+          choices: block.choices.map((option) =>
+            option.id === choiceId ? { ...option, [field]: value } : option,
+          ),
+        };
+      }
+      return block;
     });
   };
 
@@ -1197,32 +1669,21 @@ export function AuthorStudioApp() {
   };
 
   const addChoiceEffect = (choiceId: string) => {
-    if (!selectedBlock || selectedBlock.type !== "dialogue") return;
+    if (!selectedBlock || selectedBlock.type !== "choice") return;
     const fallbackVariableId = project.variables[0]?.id;
     if (!fallbackVariableId) {
       setStatusMessage("Ajoute d'abord une variable globale.");
       return;
     }
 
+    const addEffect = <T extends { id: string; effects: { variableId: string; delta: number }[] }>(choice: T): T =>
+      choice.id === choiceId
+        ? { ...choice, effects: [...choice.effects, { variableId: fallbackVariableId, delta: 1 }] }
+        : choice;
+
     updateSelectedBlock((block) => {
-      if (block.type !== "dialogue") return block;
-      return {
-        ...block,
-        choices: block.choices.map((choice) =>
-          choice.id === choiceId
-            ? {
-                ...choice,
-                effects: [
-                  ...choice.effects,
-                  {
-                    variableId: fallbackVariableId,
-                    delta: 1,
-                  },
-                ],
-              }
-            : choice,
-        ),
-      };
+      if (block.type === "choice") return { ...block, choices: block.choices.map(addEffect) };
+      return block;
     });
   };
 
@@ -1232,42 +1693,33 @@ export function AuthorStudioApp() {
     key: "variableId" | "delta",
     value: string,
   ) => {
-    updateSelectedBlock((block) => {
-      if (block.type !== "dialogue") return block;
+    const patchEffect = <T extends { id: string; effects: { variableId: string; delta: number }[] }>(choice: T): T => {
+      if (choice.id !== choiceId) return choice;
       return {
-        ...block,
-        choices: block.choices.map((choice) => {
-          if (choice.id !== choiceId) return choice;
-          return {
-            ...choice,
-            effects: choice.effects.map((effect, index) =>
-              index === effectIndex
-                ? {
-                    ...effect,
-                    [key]: key === "delta" ? normalizeDelta(value) : value,
-                  }
-                : effect,
-            ),
-          };
-        }),
+        ...choice,
+        effects: choice.effects.map((effect, index) =>
+          index === effectIndex
+            ? { ...effect, [key]: key === "delta" ? normalizeDelta(value) : value }
+            : effect,
+        ),
       };
+    };
+
+    updateSelectedBlock((block) => {
+      if (block.type === "choice") return { ...block, choices: block.choices.map(patchEffect) };
+      return block;
     });
   };
 
   const removeChoiceEffect = (choiceId: string, effectIndex: number) => {
+    const dropEffect = <T extends { id: string; effects: { variableId: string; delta: number }[] }>(choice: T): T =>
+      choice.id === choiceId
+        ? { ...choice, effects: choice.effects.filter((_, index) => index !== effectIndex) }
+        : choice;
+
     updateSelectedBlock((block) => {
-      if (block.type !== "dialogue") return block;
-      return {
-        ...block,
-        choices: block.choices.map((choice) =>
-          choice.id === choiceId
-            ? {
-                ...choice,
-                effects: choice.effects.filter((_, index) => index !== effectIndex),
-              }
-            : choice,
-        ),
-      };
+      if (block.type === "choice") return { ...block, choices: block.choices.map(dropEffect) };
+      return block;
     });
   };
 
@@ -2231,13 +2683,27 @@ export function AuthorStudioApp() {
               onAssetInput={onAssetInput}
               renderAssetAttachment={renderAssetAttachment}
               renderAssetAttachmentWithRemove={renderAssetAttachmentWithRemove}
-              onAddDialogueChoice={addDialogueChoice}
-              onRemoveDialogueChoice={removeDialogueChoice}
+              onAddDialogueLine={addDialogueLine}
+              onRemoveDialogueLine={removeDialogueLine}
+              onUpdateDialogueLineField={updateDialogueLineField}
+              onDialogueLineVoiceInput={onDialogueLineVoiceInput}
+              renderLineVoiceAttachment={renderLineVoiceAttachment}
+              onAddDialogueLineResponse={addDialogueLineResponse}
+              onRemoveDialogueLineResponse={removeDialogueLineResponse}
+              onUpdateDialogueResponseField={updateDialogueResponseField}
               onUpdateChoiceField={updateChoiceField}
               onUnlinkDialogueNpcProfile={unlinkNpcProfileFromDialogue}
+              onAddChoiceOption={addChoiceOption}
+              onRemoveChoiceOption={removeChoiceOption}
+              onUpdateChoiceOptionDescription={updateChoiceOptionDescription}
+              onSetChoiceOptionImage={setChoiceOptionImage}
+              onClearChoiceOptionImage={clearChoiceOptionImage}
               onAddBlockEntryEffect={addBlockEntryEffect}
               onUpdateBlockEntryEffect={updateBlockEntryEffect}
               onRemoveBlockEntryEffect={removeBlockEntryEffect}
+              onAddResponseEffect={addResponseEffect}
+              onUpdateResponseEffect={updateResponseEffect}
+              onRemoveResponseEffect={removeResponseEffect}
               onAddChoiceEffect={addChoiceEffect}
               onUpdateChoiceEffect={updateChoiceEffect}
               onRemoveChoiceEffect={removeChoiceEffect}
@@ -2334,245 +2800,367 @@ export function AuthorStudioApp() {
 
       {previewOpen && (
         <div className="preview-overlay">
-          <div className="preview-modal">
-            <header className="preview-header">
-              <div>
-                <h2>Preview de lecture</h2>
-                <p>
-                  Bloc courant:{" "}
-                  <strong>{previewBlock ? `${previewBlock.name} (${previewBlock.type})` : "fin"}</strong>
-                </p>
-              </div>
-              <div className="row-inline">
-                <button className="button-secondary" onClick={startPreview}>
-                  Restart
-                </button>
-                <button className="button-secondary" onClick={() => setPreviewOpen(false)}>
-                  Fermer
-                </button>
-              </div>
-            </header>
+          {/* Left wing — reserved for future options */}
+          <div className="preview-wing preview-wing-left" />
 
-            <div className="preview-body">
-              <section className="preview-scene">
-                {!previewBlock && (
-                  <div className="preview-end">
-                    <h3>Fin de parcours</h3>
-                    <p>Le parcours est termine ou aucune cible n a ete definie.</p>
+          {/* Smartphone device */}
+          <div className="preview-device">
+            <div className="preview-device-notch" />
+            <div className="preview-device-screen">
+              {/* ── Status bar ── */}
+              <header className="preview-status-bar">
+                <span className="preview-status-block">
+                  {previewBlock ? previewBlock.name : "Fin"}
+                </span>
+                <div className="row-inline" style={{ gap: 4 }}>
+                  <button className="preview-status-btn" onClick={startPreview} title="Restart">↺</button>
+                  <button className="preview-status-btn" onClick={() => setPreviewOpen(false)} title="Fermer">✕</button>
+                </div>
+              </header>
+
+              {/* ── Content viewport ── */}
+              <div className="preview-device-viewport">
+
+              {/* ── END ── */}
+              {!previewBlock && (
+                <div className="preview-vn-end">
+                  <h3>Fin de parcours</h3>
+                  <p>Le parcours est terminé ou aucune cible n&apos;a été définie.</p>
+                </div>
+              )}
+
+              {/* ── TITLE ── */}
+              {previewBlock?.type === "title" && (() => {
+                const bgSrc = assetPreviewSrcById[previewBlock.backgroundAssetId ?? ""];
+                return (
+                  <div className="preview-vn-scene" style={bgSrc ? { backgroundImage: `url(${bgSrc})` } : undefined}>
+                    <div className="preview-vn-title-content">
+                      <h2 className="preview-vn-title-heading">{previewBlock.storyTitle || "Titre"}</h2>
+                      <p className="preview-vn-title-sub">{previewBlock.subtitle}</p>
+                      <button
+                        className="preview-vn-styled-btn"
+                        style={{
+                          backgroundColor: previewBlock.buttonStyle.backgroundColor,
+                          color: previewBlock.buttonStyle.textColor,
+                          borderColor: previewBlock.buttonStyle.borderColor,
+                          borderRadius: `${previewBlock.buttonStyle.radius}px`,
+                          fontSize: `${previewBlock.buttonStyle.fontSize}px`,
+                        }}
+                        onClick={continuePreview}
+                      >
+                        Continuer
+                      </button>
+                    </div>
                   </div>
-                )}
+                );
+              })()}
 
-                {previewBlock?.type === "title" && (
-                  <div className="preview-card">
-                    <h3>{previewBlock.storyTitle}</h3>
-                    <p>{previewBlock.subtitle || "Sous titre vide"}</p>
-                    <button
-                      className="button-primary"
-                      style={{
-                        backgroundColor: previewBlock.buttonStyle.backgroundColor,
-                        color: previewBlock.buttonStyle.textColor,
-                        borderColor: previewBlock.buttonStyle.borderColor,
-                        borderRadius: `${previewBlock.buttonStyle.radius}px`,
-                        fontSize: `${previewBlock.buttonStyle.fontSize}px`,
-                      }}
-                      onClick={continuePreview}
-                    >
-                      Continuer
-                    </button>
+              {/* ── CINEMATIC ── */}
+              {previewBlock?.type === "cinematic" && (() => {
+                const bgSrc = assetPreviewSrcById[previewBlock.backgroundAssetId ?? ""];
+                const videoSrc = assetPreviewSrcById[previewBlock.videoAssetId ?? ""];
+                const voiceSrc = assetPreviewSrcById[previewBlock.voiceAssetId ?? ""];
+                return (
+                  <div className="preview-vn-scene" style={bgSrc ? { backgroundImage: `url(${bgSrc})` } : undefined}>
+                    {videoSrc && (
+                      <video
+                        className="preview-vn-video"
+                        src={videoSrc}
+                        controls
+                        autoPlay
+                        playsInline
+                      />
+                    )}
+                    {voiceSrc && (
+                      <audio className="preview-vn-audio" src={voiceSrc} controls autoPlay />
+                    )}
+                    <div className="preview-vn-textbox">
+                      <div className="preview-vn-textbox-inner">
+                        {previewBlock.heading && (
+                          <span className="preview-vn-speaker">{previewBlock.heading}</span>
+                        )}
+                        <p className="preview-vn-text">{previewBlock.body || "…"}</p>
+                      </div>
+                      <button className="preview-vn-next-btn" onClick={continuePreview}>▶</button>
+                    </div>
                   </div>
-                )}
+                );
+              })()}
 
-                {previewBlock?.type === "cinematic" && (
-                  <div className="preview-card">
-                    <h3>{previewBlock.heading}</h3>
-                    <p>{previewBlock.body || "Texte cinematic vide"}</p>
-                    <button className="button-primary" onClick={continuePreview}>
-                      Continuer
-                    </button>
-                  </div>
-                )}
+              {/* ── DIALOGUE ── */}
+              {previewBlock?.type === "dialogue" && (() => {
+                const bgSrc = assetPreviewSrcById[previewBlock.backgroundAssetId ?? ""];
+                const charSrc = assetPreviewSrcById[previewBlock.characterAssetId ?? ""];
+                const npcImgSrc = assetPreviewSrcById[previewBlock.npcImageAssetId ?? ""];
 
-                {previewBlock?.type === "dialogue" && (
-                  (() => {
-                    const linkedNpc =
-                      previewBlock.npcProfileBlockId
-                        ? blockById.get(previewBlock.npcProfileBlockId)
-                        : null;
-                    const previewSpeaker =
-                      linkedNpc && linkedNpc.type === "npc_profile" && linkedNpc.npcName.trim()
-                        ? linkedNpc.npcName
-                        : previewBlock.speaker;
+                const linkedNpc =
+                  previewBlock.npcProfileBlockId
+                    ? blockById.get(previewBlock.npcProfileBlockId)
+                    : null;
+                const npcDefaultImgSrc =
+                  linkedNpc && linkedNpc.type === "npc_profile" && linkedNpc.defaultImageAssetId
+                    ? assetPreviewSrcById[linkedNpc.defaultImageAssetId]
+                    : undefined;
 
-                    return (
-                      <div className="preview-card">
-                        <h3>{previewSpeaker || "Personnage"}</h3>
-                        <p>{previewBlock.line || "Ligne vide"}</p>
-                        <div className="preview-choice-grid">
-                          {previewBlock.choices.map((choice) => (
-                            <button
-                              key={choice.id}
-                              className="button-soft preview-choice"
-                              onClick={() => pickPreviewChoice(choice.id)}
-                            >
-                              <strong>{choice.label}</strong>
-                              <span>{choice.text || "Choix vide"}</span>
-                              {choice.effects.length > 0 && (
-                                <small>
-                                  {choice.effects
-                                    .map((effect) => {
-                                      const variableName =
-                                        variableNameById.get(effect.variableId) ?? effect.variableId;
-                                      return `${variableName} ${describeEffect(effect.delta)}`;
-                                    })
-                                    .join(" | ")}
-                                </small>
-                              )}
-                            </button>
-                          ))}
+                const currentLine = previewBlock.lines.find(
+                  (l) => l.id === previewState?.currentDialogueLineId,
+                ) ?? previewBlock.lines.find(
+                  (l) => l.id === previewBlock.startLineId,
+                ) ?? previewBlock.lines[0];
+                if (!currentLine) return null;
+
+                const speakerName =
+                  linkedNpc && linkedNpc.type === "npc_profile" && linkedNpc.npcName.trim()
+                    ? linkedNpc.npcName
+                    : currentLine.speaker;
+
+                const voiceSrc = assetPreviewSrcById[currentLine.voiceAssetId ?? ""];
+                const portraitSrc = npcImgSrc || npcDefaultImgSrc || charSrc;
+                const sl = previewBlock.sceneLayout;
+
+                return (
+                  <div className="preview-vn-scene">
+                    {/* Background — positioned via sceneLayout */}
+                    {bgSrc && (
+                      <img
+                        className="preview-vn-bg-layer"
+                        src={bgSrc}
+                        alt=""
+                        style={{
+                          left: `${sl.background.x}%`,
+                          top: `${sl.background.y}%`,
+                          width: `${sl.background.width}%`,
+                          height: `${sl.background.height}%`,
+                        }}
+                      />
+                    )}
+
+                    {/* Character portrait — positioned via sceneLayout */}
+                    {portraitSrc && (
+                      <img
+                        className="preview-vn-char-layer"
+                        src={portraitSrc}
+                        alt={speakerName || "Personnage"}
+                        style={{
+                          left: `${sl.character.x}%`,
+                          top: `${sl.character.y}%`,
+                          width: `${sl.character.width}%`,
+                          height: `${sl.character.height}%`,
+                        }}
+                      />
+                    )}
+
+                    {/* Voice audio */}
+                    {voiceSrc && (
+                      <audio
+                        key={currentLine.id}
+                        className="preview-vn-audio"
+                        src={voiceSrc}
+                        controls
+                        autoPlay
+                      />
+                    )}
+
+                    {/* Textbox + responses */}
+                    <div className="preview-vn-dialogue-area">
+                      <div className="preview-vn-textbox">
+                        <div className="preview-vn-textbox-inner">
+                          <span className="preview-vn-speaker">{speakerName || "Personnage"}</span>
+                          <p className="preview-vn-text">{currentLine.text || "…"}</p>
                         </div>
                       </div>
-                    );
-                  })()
-                )}
-
-                {previewBlock?.type === "hero_profile" && (
-                  <div className="preview-card">
-                    <h3>Fiche Hero</h3>
-                    <p>Bloc visuel de reference hero.</p>
-                    <button className="button-primary" onClick={continuePreview}>
-                      Continuer
-                    </button>
+                      <div className="preview-vn-responses">
+                        {currentLine.responses.map((resp) => (
+                          <button
+                            key={resp.id}
+                            className="preview-vn-response-btn"
+                            onClick={() => pickPreviewChoice(resp.id)}
+                          >
+                            <strong>{resp.label}</strong>
+                            <span>{resp.text || "…"}</span>
+                          </button>
+                        ))}
+                      </div>
+                    </div>
                   </div>
-                )}
+                );
+              })()}
 
-                {previewBlock?.type === "npc_profile" && (
-                  <div className="preview-card">
-                    <h3>{previewBlock.npcName || "PNJ"}</h3>
-                    <p>{previewBlock.npcLore || "Lore PNJ vide."}</p>
-                    <button className="button-primary" onClick={continuePreview}>
-                      Continuer
-                    </button>
+              {/* ── CHOICE ── */}
+              {previewBlock?.type === "choice" && (() => {
+                const bgSrc = assetPreviewSrcById[previewBlock.backgroundAssetId ?? ""];
+                const voiceSrc = assetPreviewSrcById[previewBlock.voiceAssetId ?? ""];
+                return (
+                  <div className="preview-vn-scene" style={bgSrc ? { backgroundImage: `url(${bgSrc})` } : undefined}>
+                    {voiceSrc && (
+                      <audio className="preview-vn-audio" src={voiceSrc} controls autoPlay />
+                    )}
+                    <div className="preview-vn-choice-area">
+                      <h3 className="preview-vn-choice-prompt">{previewBlock.prompt || "Choisissez…"}</h3>
+                      <div className="preview-vn-choice-grid">
+                        {previewBlock.choices.map((option) => {
+                          const imgSrc = assetPreviewSrcById[option.imageAssetId ?? ""];
+                          return (
+                            <button
+                              key={option.id}
+                              className="preview-vn-choice-btn"
+                              onClick={() => pickPreviewChoice(option.id)}
+                            >
+                              {imgSrc && <img className="preview-vn-choice-img" src={imgSrc} alt={option.label} />}
+                              <strong>{option.label}</strong>
+                              <span>{option.text || "…"}</span>
+                              {option.description && <small>{option.description}</small>}
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </div>
                   </div>
-                )}
+                );
+              })()}
 
-                {previewBlock?.type === "gameplay" && (
-                  <div className="preview-card">
-                    <h3>Gameplay: point_and_click</h3>
-                    <p>{previewBlock.objective || "Objectif vide"}</p>
-                    <div className="preview-pointclick-meta">
-                      <span
-                        className={`chip ${previewGameplayCompleted ? "chip-start" : "chip-warning"}`}
-                      >
-                        {previewGameplayCompleted ? "objectif atteint" : "objectif en cours"}
+              {/* ── HERO PROFILE ── */}
+              {previewBlock?.type === "hero_profile" && (
+                <div className="preview-vn-scene preview-vn-profile-scene">
+                  <div className="preview-vn-profile-card">
+                    <h3>⚔ Fiche Héros</h3>
+                    <p>Bloc visuel de référence héros.</p>
+                    <button className="preview-vn-next-btn" onClick={continuePreview}>▶ Continuer</button>
+                  </div>
+                </div>
+              )}
+
+              {/* ── NPC PROFILE ── */}
+              {previewBlock?.type === "npc_profile" && (() => {
+                const defaultImgSrc = assetPreviewSrcById[previewBlock.defaultImageAssetId ?? ""];
+                return (
+                  <div className="preview-vn-scene preview-vn-profile-scene">
+                    {defaultImgSrc && (
+                      <img className="preview-vn-character" src={defaultImgSrc} alt={previewBlock.npcName || "PNJ"} />
+                    )}
+                    <div className="preview-vn-profile-card">
+                      <h3>{previewBlock.npcName || "PNJ"}</h3>
+                      <p>{previewBlock.npcLore || "Lore PNJ vide."}</p>
+                      <button className="preview-vn-next-btn" onClick={continuePreview}>▶ Continuer</button>
+                    </div>
+                  </div>
+                );
+              })()}
+
+              {/* ── GAMEPLAY ── */}
+              {previewBlock?.type === "gameplay" && (() => {
+                const bgSrc = assetPreviewSrcById[previewBlock.backgroundAssetId ?? ""];
+                const voiceSrc = assetPreviewSrcById[previewBlock.voiceAssetId ?? ""];
+                return (
+                  <div className="preview-vn-scene">
+                    <div className="preview-vn-gameplay-hud">
+                      <span className={`chip ${previewGameplayCompleted ? "chip-start" : "chip-warning"}`}>
+                        {previewGameplayCompleted ? "✓ objectif atteint" : "objectif en cours"}
                       </span>
                       <small>{previewGameplayProgressLabel}</small>
                     </div>
 
-                    <div className="preview-pointclick-scene-wrap">
-                      <div
-                        className="preview-pointclick-scene"
-                        style={
-                          assetPreviewSrcById[previewBlock.backgroundAssetId ?? ""]
-                            ? {
-                                backgroundImage: `url(${assetPreviewSrcById[previewBlock.backgroundAssetId ?? ""]})`,
-                              }
-                            : undefined
-                        }
-                      >
-                        {!assetPreviewSrcById[previewBlock.backgroundAssetId ?? ""] && (
-                          <div className="pointclick-editor-empty-bg">Fond gameplay manquant</div>
-                        )}
+                    {voiceSrc && (
+                      <audio className="preview-vn-audio" src={voiceSrc} controls autoPlay />
+                    )}
 
-                        {[...previewBlock.overlays]
-                          .sort((a, b) => a.zIndex - b.zIndex)
-                          .map((overlay) => {
-                            const isVisible =
-                              previewState?.gameplayOverlayVisibility[overlay.id] ??
-                              overlay.visibleByDefault;
-                            if (!isVisible) return null;
+                    <div className="preview-vn-gameplay-scene"
+                      style={bgSrc ? { backgroundImage: `url(${bgSrc})` } : undefined}
+                    >
+                      {!bgSrc && (
+                        <div className="pointclick-editor-empty-bg">Fond gameplay manquant</div>
+                      )}
 
-                            return (
-                              <div
-                                key={overlay.id}
-                                className="preview-pointclick-overlay"
-                                style={{
-                                  left: `${overlay.x}%`,
-                                  top: `${overlay.y}%`,
-                                  width: `${overlay.width}%`,
-                                  height: `${overlay.height}%`,
-                                  zIndex: overlay.zIndex,
-                                  backgroundImage: assetPreviewSrcById[overlay.assetId ?? ""]
-                                    ? `url(${assetPreviewSrcById[overlay.assetId ?? ""]})`
-                                    : undefined,
-                                }}
-                              >
-                                {!assetPreviewSrcById[overlay.assetId ?? ""] && (
-                                  <span>{overlay.name || "Overlay"}</span>
-                                )}
-                              </div>
-                            );
-                          })}
-
-                        {previewBlock.hotspots.map((hotspot) => {
-                          const found = previewFoundHotspotSet.has(hotspot.id);
+                      {[...previewBlock.overlays]
+                        .sort((a, b) => a.zIndex - b.zIndex)
+                        .map((overlay) => {
+                          const isVisible =
+                            previewState?.gameplayOverlayVisibility[overlay.id] ??
+                            overlay.visibleByDefault;
+                          if (!isVisible) return null;
                           return (
-                            <button
-                              key={hotspot.id}
-                              type="button"
-                              className={`preview-pointclick-hotspot ${
-                                found ? "preview-pointclick-hotspot-found" : ""
-                              } ${
-                                previewDisabledHotspotSet.has(hotspot.id)
-                                  ? "preview-pointclick-hotspot-disabled"
-                                  : ""
-                              }`}
+                            <div
+                              key={overlay.id}
+                              className="preview-pointclick-overlay"
                               style={{
-                                left: `${hotspot.x}%`,
-                                top: `${hotspot.y}%`,
-                                width: `${hotspot.width}%`,
-                                height: `${hotspot.height}%`,
+                                left: `${overlay.x}%`,
+                                top: `${overlay.y}%`,
+                                width: `${overlay.width}%`,
+                                height: `${overlay.height}%`,
+                                zIndex: overlay.zIndex,
+                                backgroundImage: assetPreviewSrcById[overlay.assetId ?? ""]
+                                  ? `url(${assetPreviewSrcById[overlay.assetId ?? ""]})`
+                                  : undefined,
                               }}
-                              onClick={() => pickPreviewHotspot(hotspot.id)}
-                              disabled={previewDisabledHotspotSet.has(hotspot.id)}
                             >
-                              <span>{hotspot.name || "Zone"}</span>
-                            </button>
+                              {!assetPreviewSrcById[overlay.assetId ?? ""] && (
+                                <span>{overlay.name || "Overlay"}</span>
+                              )}
+                            </div>
                           );
                         })}
-                      </div>
+
+                      {previewBlock.hotspots.map((hotspot) => {
+                        const found = previewFoundHotspotSet.has(hotspot.id);
+                        return (
+                          <button
+                            key={hotspot.id}
+                            type="button"
+                            className={`preview-pointclick-hotspot ${
+                              found ? "preview-pointclick-hotspot-found" : ""
+                            } ${
+                              previewDisabledHotspotSet.has(hotspot.id)
+                                ? "preview-pointclick-hotspot-disabled"
+                                : ""
+                            }`}
+                            style={{
+                              left: `${hotspot.x}%`,
+                              top: `${hotspot.y}%`,
+                              width: `${hotspot.width}%`,
+                              height: `${hotspot.height}%`,
+                            }}
+                            onClick={() => pickPreviewHotspot(hotspot.id)}
+                            disabled={previewDisabledHotspotSet.has(hotspot.id)}
+                          >
+                            <span>{hotspot.name || "Zone"}</span>
+                          </button>
+                        );
+                      })}
                     </div>
 
                     {previewState?.gameplayMessage && (
-                      <p className="preview-gameplay-message">{previewState.gameplayMessage}</p>
+                      <p className="preview-vn-gameplay-msg">{previewState.gameplayMessage}</p>
                     )}
-                    {previewBlock.completionEffects.length > 0 && (
-                      <ul className="preview-effects">
-                        {previewBlock.completionEffects.map((effect, index) => {
-                          const variableName =
-                            variableNameById.get(effect.variableId) ?? effect.variableId;
-                          return (
-                            <li key={`${effect.variableId}-${index}`}>
-                              {variableName} {describeEffect(effect.delta)}
-                            </li>
-                          );
-                        })}
-                      </ul>
-                    )}
-                    <button
-                      className="button-primary"
-                      onClick={continuePreview}
-                      disabled={!previewGameplayCompleted}
-                    >
-                      {previewGameplayCompleted ? "Continuer" : "Objectif non atteint"}
-                    </button>
-                  </div>
-                )}
-              </section>
 
-              <section className="preview-vars">
-                <h3>Variables runtime</h3>
+                    <div className="preview-vn-gameplay-bottom">
+                      <p className="preview-vn-text" style={{ textAlign: "center" }}>
+                        {previewBlock.objective || "Objectif…"}
+                      </p>
+                      <button
+                        className="preview-vn-next-btn"
+                        onClick={continuePreview}
+                        disabled={!previewGameplayCompleted}
+                      >
+                        {previewGameplayCompleted ? "▶ Continuer" : "Objectif non atteint"}
+                      </button>
+                    </div>
+                  </div>
+                );
+              })()}
+              </div>
+
+              {/* ── Home indicator ── */}
+              <div className="preview-device-home" />
+            </div>
+          </div>
+
+          {/* Right wing — debug sidebar */}
+          <div className="preview-wing preview-wing-right">
+            <aside className="preview-wing-panel">
+              <details open>
+                <summary>Variables</summary>
                 {previewState && (
-                  <ul>
+                  <ul className="preview-wing-var-list">
                     {project.variables.map((variable) => (
                       <li key={variable.id}>
                         <span>{variable.name}</span>
@@ -2581,9 +3169,11 @@ export function AuthorStudioApp() {
                     ))}
                   </ul>
                 )}
-                <h3>Inventaire runtime</h3>
+              </details>
+              <details>
+                <summary>Inventaire</summary>
                 {previewState && previewInventoryItems.length > 0 && (
-                  <ul>
+                  <ul className="preview-wing-var-list">
                     {previewInventoryItems.map((item) => (
                       <li key={item.id}>
                         <span>{item.name}</span>
@@ -2593,11 +3183,11 @@ export function AuthorStudioApp() {
                   </ul>
                 )}
                 {previewState && previewInventoryItems.length === 0 && (
-                  <p className="empty-placeholder">Aucun objet recupere.</p>
+                  <p className="empty-placeholder">Aucun objet.</p>
                 )}
-                {previewState?.ended && <p className="ok-line">Parcours termine.</p>}
-              </section>
-            </div>
+              </details>
+              {previewState?.ended && <p className="ok-line">Parcours terminé.</p>}
+            </aside>
           </div>
         </div>
       )}

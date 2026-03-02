@@ -1,17 +1,21 @@
-import { ChangeEvent, MouseEvent, PointerEvent as ReactPointerEvent, ReactNode, useEffect } from "react";
+import { ChangeEvent, MouseEvent, PointerEvent as ReactPointerEvent, ReactNode, useCallback, useEffect, useRef } from "react";
 
 import { normalizeDelta } from "@/components/author-studio-core";
 import { GameplayPlacementTarget } from "@/components/author-studio-types";
 import { HelpHint } from "@/components/HelpHint";
 import {
   BLOCK_LABELS,
+  ChoiceBlock,
   CinematicBlock,
+  DEFAULT_SCENE_LAYOUT,
   DialogueBlock,
   GameplayBlock,
   GameplayHotspotClickActionType,
   HeroProfileBlock,
   NpcProfileBlock,
   ProjectMeta,
+  SceneLayout,
+  SceneLayerLayout,
   StoryBlock,
   TitleBlock,
   ValidationIssue,
@@ -20,6 +24,7 @@ import {
 type ChoiceField = "text" | "targetBlockId";
 type EffectField = "variableId" | "delta";
 type RectField = "x" | "y" | "width" | "height";
+type ResponseField = "text" | "targetLineId" | "targetBlockId";
 
 interface AuthorStudioBlockEditorPanelProps {
   selectedBlock: StoryBlock | null;
@@ -36,13 +41,28 @@ interface AuthorStudioBlockEditorPanelProps {
   onAssetInput: (fieldName: string) => (event: ChangeEvent<HTMLInputElement>) => void;
   renderAssetAttachment: (fieldName: string, assetId: string | null) => ReactNode;
   renderAssetAttachmentWithRemove: (assetId: string | null, onRemove: () => void) => ReactNode;
-  onAddDialogueChoice: () => void;
-  onRemoveDialogueChoice: () => void;
+  onAddDialogueLine: () => void;
+  onRemoveDialogueLine: (lineId: string) => void;
+  onUpdateDialogueLineField: (lineId: string, field: string, value: string | null) => void;
+  onDialogueLineVoiceInput: (lineId: string) => (event: ChangeEvent<HTMLInputElement>) => void;
+  renderLineVoiceAttachment: (lineId: string, assetId: string | null) => ReactNode;
+  onAddDialogueLineResponse: (lineId: string) => void;
+  onRemoveDialogueLineResponse: (lineId: string, responseId: string) => void;
+  onUpdateDialogueResponseField: (lineId: string, responseId: string, field: ResponseField, value: string) => void;
   onUpdateChoiceField: (choiceId: string, field: ChoiceField, value: string) => void;
   onUnlinkDialogueNpcProfile: (dialogueBlockId: string) => void;
   onAddBlockEntryEffect: () => void;
   onUpdateBlockEntryEffect: (effectIndex: number, key: EffectField, value: string) => void;
   onRemoveBlockEntryEffect: (effectIndex: number) => void;
+  onAddResponseEffect: (lineId: string, responseId: string) => void;
+  onUpdateResponseEffect: (
+    lineId: string,
+    responseId: string,
+    effectIndex: number,
+    key: EffectField,
+    value: string,
+  ) => void;
+  onRemoveResponseEffect: (lineId: string, responseId: string, effectIndex: number) => void;
   onAddChoiceEffect: (choiceId: string) => void;
   onUpdateChoiceEffect: (
     choiceId: string,
@@ -51,6 +71,11 @@ interface AuthorStudioBlockEditorPanelProps {
     value: string,
   ) => void;
   onRemoveChoiceEffect: (choiceId: string, effectIndex: number) => void;
+  onAddChoiceOption: () => void;
+  onRemoveChoiceOption: () => void;
+  onUpdateChoiceOptionDescription: (optionId: string, value: string) => void;
+  onSetChoiceOptionImage: (optionId: string, file: File) => void;
+  onClearChoiceOptionImage: (optionId: string) => void;
   onAddGameplayOverlay: () => void;
   onRemoveGameplayOverlay: (overlayId: string) => void;
   onUpdateGameplayOverlayRect: (overlayId: string, key: RectField, value: number) => void;
@@ -381,26 +406,198 @@ function CinematicEditorSection({
   );
 }
 
+/* ═══════════════════════════════════════════════
+   Scene Composer — gameplay-style drag & resize
+   ═══════════════════════════════════════════════ */
+
+interface SceneComposerProps {
+  layout: SceneLayout;
+  bgSrc: string | undefined;
+  charSrc: string | undefined;
+  canEdit: boolean;
+  onChange: (layout: SceneLayout) => void;
+}
+
+type LayerKey = "background" | "character";
+
+function SceneComposer({ layout, bgSrc, charSrc, canEdit, onChange }: SceneComposerProps) {
+  const sceneRef = useRef<HTMLDivElement>(null);
+  const dragRef = useRef<{
+    layer: LayerKey;
+    mode: "move" | "resize";
+    startX: number;
+    startY: number;
+    origRect: SceneLayerLayout;
+  } | null>(null);
+
+  const hasBg = Boolean(bgSrc);
+  const hasChar = Boolean(charSrc);
+
+  const updateLayer = useCallback(
+    (layer: LayerKey, patch: Partial<SceneLayerLayout>) => {
+      onChange({ ...layout, [layer]: { ...layout[layer], ...patch } });
+    },
+    [layout, onChange],
+  );
+
+  const startDrag = useCallback(
+    (e: React.PointerEvent, layer: LayerKey, mode: "move" | "resize") => {
+      if (!canEdit) return;
+      e.preventDefault();
+      e.stopPropagation();
+      dragRef.current = {
+        layer,
+        mode,
+        startX: e.clientX,
+        startY: e.clientY,
+        origRect: { ...layout[layer] },
+      };
+      (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
+    },
+    [canEdit, layout],
+  );
+
+  const handlePointerMove = useCallback(
+    (e: React.PointerEvent) => {
+      const d = dragRef.current;
+      if (!d || !sceneRef.current) return;
+      const rect = sceneRef.current.getBoundingClientRect();
+      const dx = ((e.clientX - d.startX) / rect.width) * 100;
+      const dy = ((e.clientY - d.startY) / rect.height) * 100;
+
+      if (d.mode === "move") {
+        if (d.layer === "character") {
+          // Character may overflow scene bounds
+          updateLayer(d.layer, {
+            x: Math.round(d.origRect.x + dx),
+            y: Math.round(d.origRect.y + dy),
+          });
+        } else {
+          updateLayer(d.layer, {
+            x: Math.round(Math.min(100 - d.origRect.width, Math.max(0, d.origRect.x + dx))),
+            y: Math.round(Math.min(100 - d.origRect.height, Math.max(0, d.origRect.y + dy))),
+          });
+        }
+      } else {
+        if (d.layer === "character") {
+          // Character may be scaled beyond 100%
+          updateLayer(d.layer, {
+            width: Math.round(Math.max(5, d.origRect.width + dx)),
+            height: Math.round(Math.max(5, d.origRect.height + dy)),
+          });
+        } else {
+          updateLayer(d.layer, {
+            width: Math.round(Math.min(100 - d.origRect.x, Math.max(5, d.origRect.width + dx))),
+            height: Math.round(Math.min(100 - d.origRect.y, Math.max(5, d.origRect.height + dy))),
+          });
+        }
+      }
+    },
+    [updateLayer],
+  );
+
+  const handlePointerUp = useCallback(() => {
+    dragRef.current = null;
+  }, []);
+
+  const renderLayerBox = (layer: LayerKey, src: string | undefined, label: string) => {
+    if (!src) return null;
+    const r = layout[layer];
+    const isChar = layer === "character";
+    return (
+      <div
+        className={`scene-composer-box${isChar ? " scene-composer-box-char" : ""}`}
+        style={{
+          left: `${r.x}%`,
+          top: `${r.y}%`,
+          width: `${r.width}%`,
+          height: `${r.height}%`,
+        }}
+        onPointerDown={(e) => startDrag(e, layer, "move")}
+        onPointerMove={handlePointerMove}
+        onPointerUp={handlePointerUp}
+        onPointerCancel={handlePointerUp}
+      >
+        <img
+          src={src}
+          alt={label}
+          className="scene-composer-box-img"
+          draggable={false}
+          style={{ objectFit: isChar ? "contain" : "cover" }}
+        />
+        <span className="scene-composer-box-label">{label}</span>
+        {/* Resize handle (bottom-right corner) */}
+        <div
+          className="scene-composer-resize-handle"
+          onPointerDown={(e) => { e.stopPropagation(); startDrag(e, layer, "resize"); }}
+          onPointerMove={handlePointerMove}
+          onPointerUp={handlePointerUp}
+          onPointerCancel={handlePointerUp}
+        />
+      </div>
+    );
+  };
+
+  return (
+    <div className="scene-composer">
+      <div className="scene-composer-label">
+        <div className="title-with-help">
+          <strong>Composition de scene</strong>
+          <HelpHint title="Composition">
+            Glisse les images pour les positionner. Tire le coin en bas a droite pour
+            redimensionner. Les coordonnees sont sauvegardees dans le JSON.
+          </HelpHint>
+        </div>
+        <button
+          className="button-secondary"
+          onClick={() => onChange({ ...DEFAULT_SCENE_LAYOUT })}
+          disabled={!canEdit}
+          title="Reinitialiser la composition"
+        >↺ Reset</button>
+      </div>
+
+      <div
+        ref={sceneRef}
+        className="scene-composer-scene"
+      >
+        {!hasBg && !hasChar && (
+          <div className="scene-composer-empty">Ajoute un fond ou un personnage</div>
+        )}
+        {renderLayerBox("background", bgSrc, "Fond")}
+        {renderLayerBox("character", charSrc, "Perso")}
+      </div>
+    </div>
+  );
+}
+
 interface DialogueEditorSectionProps {
   block: DialogueBlock;
   canEdit: boolean;
   blocks: StoryBlock[];
   project: ProjectMeta;
+  assetPreviewSrcById: Record<string, string>;
   onSetSelectedDynamicField: (key: string, value: unknown) => void;
+  onUpdateSelectedBlock: (updater: (block: StoryBlock) => StoryBlock) => void;
   onAssetInput: (fieldName: string) => (event: ChangeEvent<HTMLInputElement>) => void;
   renderAssetAttachment: (fieldName: string, assetId: string | null) => ReactNode;
-  onAddDialogueChoice: () => void;
-  onRemoveDialogueChoice: () => void;
-  onUpdateChoiceField: (choiceId: string, field: ChoiceField, value: string) => void;
   onUnlinkDialogueNpcProfile: (dialogueBlockId: string) => void;
-  onAddChoiceEffect: (choiceId: string) => void;
-  onUpdateChoiceEffect: (
-    choiceId: string,
+  onAddDialogueLine: () => void;
+  onRemoveDialogueLine: (lineId: string) => void;
+  onUpdateDialogueLineField: (lineId: string, field: string, value: string | null) => void;
+  onDialogueLineVoiceInput: (lineId: string) => (event: ChangeEvent<HTMLInputElement>) => void;
+  renderLineVoiceAttachment: (lineId: string, assetId: string | null) => ReactNode;
+  onAddDialogueLineResponse: (lineId: string) => void;
+  onRemoveDialogueLineResponse: (lineId: string, responseId: string) => void;
+  onUpdateDialogueResponseField: (lineId: string, responseId: string, field: ResponseField, value: string) => void;
+  onAddResponseEffect: (lineId: string, responseId: string) => void;
+  onUpdateResponseEffect: (
+    lineId: string,
+    responseId: string,
     effectIndex: number,
     key: EffectField,
     value: string,
   ) => void;
-  onRemoveChoiceEffect: (choiceId: string, effectIndex: number) => void;
+  onRemoveResponseEffect: (lineId: string, responseId: string, effectIndex: number) => void;
 }
 
 function DialogueEditorSection({
@@ -408,16 +605,23 @@ function DialogueEditorSection({
   canEdit,
   blocks,
   project,
+  assetPreviewSrcById,
   onSetSelectedDynamicField,
+  onUpdateSelectedBlock,
   onAssetInput,
   renderAssetAttachment,
-  onAddDialogueChoice,
-  onRemoveDialogueChoice,
-  onUpdateChoiceField,
   onUnlinkDialogueNpcProfile,
-  onAddChoiceEffect,
-  onUpdateChoiceEffect,
-  onRemoveChoiceEffect,
+  onAddDialogueLine,
+  onRemoveDialogueLine,
+  onUpdateDialogueLineField,
+  onDialogueLineVoiceInput,
+  renderLineVoiceAttachment,
+  onAddDialogueLineResponse,
+  onRemoveDialogueLineResponse,
+  onUpdateDialogueResponseField,
+  onAddResponseEffect,
+  onUpdateResponseEffect,
+  onRemoveResponseEffect,
 }: DialogueEditorSectionProps) {
   const linkedNpcBlock =
     block.npcProfileBlockId
@@ -426,26 +630,25 @@ function DialogueEditorSection({
             candidate.id === block.npcProfileBlockId && candidate.type === "npc_profile",
         ) ?? null
       : null;
-  const effectiveSpeaker =
-    linkedNpcBlock?.npcName.trim() ? linkedNpcBlock.npcName : block.speaker;
+
+  const externalBlocks = blocks.filter(
+    (candidate) =>
+      candidate.id !== block.id &&
+      candidate.type !== "hero_profile" &&
+      candidate.type !== "npc_profile",
+  );
 
   return (
     <div className="subsection">
       <div className="title-with-help">
         <h3>Bloc dialogue</h3>
         <HelpHint title="Bloc dialogue">
-          Definis une replique et jusqu&apos;a 4 choix. Chaque choix peut appliquer des effets et
-          pointer vers un autre bloc.
+          Contient plusieurs lignes de dialogue. Chaque ligne a ses propres reponses qui peuvent
+          mener vers une autre ligne interne ou vers un bloc externe.
         </HelpHint>
       </div>
-      <label>
-        Personnage
-        <input
-          value={effectiveSpeaker}
-          onChange={(event) => onSetSelectedDynamicField("speaker", event.target.value)}
-          disabled={!canEdit || Boolean(linkedNpcBlock)}
-        />
-      </label>
+
+      {/* --- Block-level NPC link --- */}
       {linkedNpcBlock ? (
         <div className="asset-line">
           <small>PNJ lie: {linkedNpcBlock.npcName || linkedNpcBlock.name}</small>
@@ -462,15 +665,8 @@ function DialogueEditorSection({
           Astuce: relie un bloc PNJ vers ce dialogue pour piloter automatiquement nom + image.
         </small>
       )}
-      <label>
-        Replique
-        <textarea
-          rows={3}
-          value={block.line}
-          onChange={(event) => onSetSelectedDynamicField("line", event.target.value)}
-          disabled={!canEdit}
-        />
-      </label>
+
+      {/* --- Block-level images --- */}
       <label>
         Image fond
         <input
@@ -519,8 +715,349 @@ function DialogueEditorSection({
           {renderAssetAttachment("characterAssetId", block.characterAssetId)}
         </>
       )}
+
+      {/* --- Scene Composer --- */}
+      {(() => {
+        const bgSrc = assetPreviewSrcById[block.backgroundAssetId ?? ""];
+        const npcImgSrc = assetPreviewSrcById[block.npcImageAssetId ?? ""];
+        const npcDefaultSrc = linkedNpcBlock?.defaultImageAssetId
+          ? assetPreviewSrcById[linkedNpcBlock.defaultImageAssetId]
+          : undefined;
+        const charSrc = npcImgSrc || npcDefaultSrc || assetPreviewSrcById[block.characterAssetId ?? ""];
+        // Show composer when at least one image asset is assigned (even if URL not yet loaded)
+        const hasAnyAsset = block.backgroundAssetId || block.characterAssetId || block.npcImageAssetId || linkedNpcBlock?.defaultImageAssetId;
+        if (!hasAnyAsset) return null;
+        return (
+          <SceneComposer
+            layout={block.sceneLayout}
+            bgSrc={bgSrc}
+            charSrc={charSrc}
+            canEdit={canEdit}
+            onChange={(newLayout) => {
+              onUpdateSelectedBlock((b) =>
+                b.type === "dialogue" ? { ...b, sceneLayout: newLayout } : b,
+              );
+            }}
+          />
+        );
+      })()}
+
+      {/* --- Start line selector --- */}
       <label>
-        Voix
+        Ligne de depart
+        <select
+          value={block.startLineId}
+          onChange={(event) => onSetSelectedDynamicField("startLineId", event.target.value)}
+          disabled={!canEdit}
+        >
+          {block.lines.map((line, index) => (
+            <option key={line.id} value={line.id}>
+              Ligne {index + 1} — {line.speaker || "…"}
+            </option>
+          ))}
+        </select>
+      </label>
+
+      {/* --- Lines --- */}
+      <div className="section-title-row">
+        <div className="title-with-help">
+          <h3>Lignes de dialogue ({block.lines.length})</h3>
+          <HelpHint title="Lignes de dialogue">
+            Chaque ligne represente une replique. Les reponses d&apos;une ligne peuvent pointer vers
+            une autre ligne interne (navigation dans le bloc) ou vers un bloc externe (sortie).
+          </HelpHint>
+        </div>
+        <button
+          className="button-secondary"
+          onClick={onAddDialogueLine}
+          disabled={!canEdit}
+        >
+          + ligne
+        </button>
+      </div>
+
+      {block.lines.map((line, lineIndex) => (
+        <div key={line.id} className="choice-card">
+          <div className="section-title-row">
+            <strong>Ligne {lineIndex + 1}</strong>
+            <button
+              className="button-danger"
+              onClick={() => onRemoveDialogueLine(line.id)}
+              disabled={!canEdit || block.lines.length <= 1}
+              title="Supprimer cette ligne"
+            >
+              x
+            </button>
+          </div>
+
+          <label>
+            Personnage
+            <input
+              value={
+                linkedNpcBlock?.npcName.trim()
+                  ? linkedNpcBlock.npcName
+                  : line.speaker
+              }
+              onChange={(event) =>
+                onUpdateDialogueLineField(line.id, "speaker", event.target.value)
+              }
+              disabled={!canEdit || Boolean(linkedNpcBlock)}
+            />
+          </label>
+          <label>
+            Replique
+            <textarea
+              rows={3}
+              value={line.text}
+              onChange={(event) =>
+                onUpdateDialogueLineField(line.id, "text", event.target.value)
+              }
+              disabled={!canEdit}
+            />
+          </label>
+          <label>
+            Voix
+            <input
+              type="file"
+              accept="audio/*"
+              onChange={onDialogueLineVoiceInput(line.id)}
+              disabled={!canEdit}
+            />
+          </label>
+          {renderLineVoiceAttachment(line.id, line.voiceAssetId)}
+
+          {/* --- Responses for this line --- */}
+          <div className="section-title-row">
+            <div className="title-with-help">
+              <span>Reponses (max 4)</span>
+              <HelpHint title="Reponses">
+                Boutons affiches au joueur. Chaque reponse peut mener vers une ligne interne ou un
+                bloc externe, et appliquer des effets sur les variables.
+              </HelpHint>
+            </div>
+            <div className="row-inline">
+              <button
+                className="button-secondary"
+                onClick={() => onAddDialogueLineResponse(line.id)}
+                disabled={!canEdit || line.responses.length >= 4}
+              >
+                + reponse
+              </button>
+            </div>
+          </div>
+
+          {line.responses.map((resp) => (
+            <div key={resp.id} className="choice-card" style={{ marginLeft: 12 }}>
+              <div className="section-title-row">
+                <strong>Reponse {resp.label}</strong>
+                <button
+                  className="button-danger"
+                  onClick={() => onRemoveDialogueLineResponse(line.id, resp.id)}
+                  disabled={!canEdit || line.responses.length <= 1}
+                  title="Supprimer cette reponse"
+                >
+                  x
+                </button>
+              </div>
+              <label>
+                Texte
+                <input
+                  value={resp.text}
+                  onChange={(event) =>
+                    onUpdateDialogueResponseField(line.id, resp.id, "text", event.target.value)
+                  }
+                  disabled={!canEdit}
+                />
+              </label>
+
+              {/* --- Target: internal line OR external block (mutually exclusive) --- */}
+              <label>
+                Cible interne (ligne)
+                <select
+                  value={resp.targetLineId ?? ""}
+                  onChange={(event) =>
+                    onUpdateDialogueResponseField(line.id, resp.id, "targetLineId", event.target.value)
+                  }
+                  disabled={!canEdit || Boolean(resp.targetBlockId)}
+                >
+                  <option value="">Aucune (utiliser cible externe)</option>
+                  {block.lines
+                    .filter((candidate) => candidate.id !== line.id)
+                    .map((candidate) => {
+                      const globalIndex = block.lines.indexOf(candidate);
+                      return (
+                        <option key={candidate.id} value={candidate.id}>
+                          Ligne {globalIndex + 1} — {candidate.speaker || "…"}
+                        </option>
+                      );
+                    })}
+                </select>
+              </label>
+              <label>
+                Cible externe (bloc)
+                <select
+                  value={resp.targetBlockId ?? ""}
+                  onChange={(event) =>
+                    onUpdateDialogueResponseField(line.id, resp.id, "targetBlockId", event.target.value)
+                  }
+                  disabled={!canEdit || Boolean(resp.targetLineId)}
+                >
+                  <option value="">Fin histoire</option>
+                  {externalBlocks.map((candidate) => (
+                    <option key={candidate.id} value={candidate.id}>
+                      {candidate.name} ({BLOCK_LABELS[candidate.type]})
+                    </option>
+                  ))}
+                </select>
+              </label>
+
+              {/* --- Effects --- */}
+              <div className="effect-list">
+                <div className="section-title-row">
+                  <div className="title-with-help">
+                    <span>Effets variables</span>
+                    <HelpHint title="Effets de reponse">
+                      Modifie les variables globales quand cette reponse est choisie.
+                    </HelpHint>
+                  </div>
+                  <button
+                    className="button-secondary"
+                    onClick={() => onAddResponseEffect(line.id, resp.id)}
+                    disabled={!canEdit || project.variables.length === 0}
+                  >
+                    + effet
+                  </button>
+                </div>
+                {resp.effects.map((effect, effectIndex) => (
+                  <div key={`${resp.id}-effect-${effectIndex}`} className="effect-row">
+                    <select
+                      value={effect.variableId}
+                      onChange={(event) =>
+                        onUpdateResponseEffect(
+                          line.id,
+                          resp.id,
+                          effectIndex,
+                          "variableId",
+                          event.target.value,
+                        )
+                      }
+                      disabled={!canEdit}
+                    >
+                      {project.variables.map((variable) => (
+                        <option key={variable.id} value={variable.id}>
+                          {variable.name}
+                        </option>
+                      ))}
+                    </select>
+                    <input
+                      type="number"
+                      value={effect.delta}
+                      onChange={(event) =>
+                        onUpdateResponseEffect(
+                          line.id,
+                          resp.id,
+                          effectIndex,
+                          "delta",
+                          event.target.value,
+                        )
+                      }
+                      disabled={!canEdit}
+                    />
+                    <button
+                      className="button-danger"
+                      onClick={() => onRemoveResponseEffect(line.id, resp.id, effectIndex)}
+                      disabled={!canEdit}
+                    >
+                      x
+                    </button>
+                  </div>
+                ))}
+              </div>
+            </div>
+          ))}
+        </div>
+      ))}
+    </div>
+  );
+}
+
+interface ChoiceEditorSectionProps {
+  block: ChoiceBlock;
+  canEdit: boolean;
+  blocks: StoryBlock[];
+  project: ProjectMeta;
+  onSetSelectedDynamicField: (key: string, value: unknown) => void;
+  onAssetInput: (fieldName: string) => (event: ChangeEvent<HTMLInputElement>) => void;
+  renderAssetAttachment: (fieldName: string, assetId: string | null) => ReactNode;
+  renderAssetAttachmentWithRemove: (assetId: string | null, onRemove: () => void) => ReactNode;
+  onAddChoiceOption: () => void;
+  onRemoveChoiceOption: () => void;
+  onUpdateChoiceField: (choiceId: string, field: ChoiceField, value: string) => void;
+  onUpdateChoiceOptionDescription: (optionId: string, value: string) => void;
+  onSetChoiceOptionImage: (optionId: string, file: File) => void;
+  onClearChoiceOptionImage: (optionId: string) => void;
+  onAddChoiceEffect: (choiceId: string) => void;
+  onUpdateChoiceEffect: (
+    choiceId: string,
+    effectIndex: number,
+    key: EffectField,
+    value: string,
+  ) => void;
+  onRemoveChoiceEffect: (choiceId: string, effectIndex: number) => void;
+  assetPreviewSrcById: Record<string, string>;
+}
+
+function ChoiceEditorSection({
+  block,
+  canEdit,
+  blocks,
+  project,
+  onSetSelectedDynamicField,
+  onAssetInput,
+  renderAssetAttachment,
+  renderAssetAttachmentWithRemove,
+  onAddChoiceOption,
+  onRemoveChoiceOption,
+  onUpdateChoiceField,
+  onUpdateChoiceOptionDescription,
+  onSetChoiceOptionImage,
+  onClearChoiceOptionImage,
+  onAddChoiceEffect,
+  onUpdateChoiceEffect,
+  onRemoveChoiceEffect,
+  assetPreviewSrcById,
+}: ChoiceEditorSectionProps) {
+  return (
+    <div className="subsection">
+      <div className="title-with-help">
+        <h3>Bloc choix</h3>
+        <HelpHint title="Bloc choix">
+          Bloc de decision pure: le joueur choisit un chemin parmi plusieurs options. Chaque
+          option peut modifier des variables et brancher vers un bloc different.
+        </HelpHint>
+      </div>
+      <label>
+        Situation / Prompt
+        <textarea
+          rows={3}
+          value={block.prompt}
+          onChange={(event) => onSetSelectedDynamicField("prompt", event.target.value)}
+          disabled={!canEdit}
+          placeholder="Que fais-tu ?"
+        />
+      </label>
+      <label>
+        Image fond
+        <input
+          type="file"
+          accept="image/*"
+          onChange={onAssetInput("backgroundAssetId")}
+          disabled={!canEdit}
+        />
+      </label>
+      {renderAssetAttachment("backgroundAssetId", block.backgroundAssetId)}
+      <label>
+        Voix / narration audio
         <input
           type="file"
           accept="audio/*"
@@ -532,47 +1069,84 @@ function DialogueEditorSection({
 
       <div className="section-title-row">
         <div className="title-with-help">
-          <h3>Choix (max 4)</h3>
-          <HelpHint title="Reponses joueur">
-            Les boutons A/B/C/D affiches au joueur. Chaque choix ouvre sa propre branche de
-            dialogue.
+          <h3>Options (max 4)</h3>
+          <HelpHint title="Options du choix">
+            Les propositions affichees au joueur. Chaque option peut avoir un texte, une description
+            detaillee, une image et des effets sur les variables.
           </HelpHint>
         </div>
         <div className="row-inline">
           <button
             className="button-secondary"
-            onClick={onAddDialogueChoice}
+            onClick={onAddChoiceOption}
             disabled={!canEdit || block.choices.length >= 4}
           >
-            + choix
+            + option
           </button>
           <button
             className="button-secondary"
-            onClick={onRemoveDialogueChoice}
+            onClick={onRemoveChoiceOption}
             disabled={!canEdit || block.choices.length <= 1}
           >
-            - dernier
+            - derniere
           </button>
         </div>
       </div>
 
-      {block.choices.map((choice) => (
-        <div key={choice.id} className="choice-card">
-          <strong>Choix {choice.label}</strong>
+      {block.choices.map((option) => (
+        <div key={option.id} className="choice-card">
+          <strong>Option {option.label}</strong>
           <label>
             Texte
             <input
-              value={choice.text}
-              onChange={(event) => onUpdateChoiceField(choice.id, "text", event.target.value)}
+              value={option.text}
+              onChange={(event) => onUpdateChoiceField(option.id, "text", event.target.value)}
               disabled={!canEdit}
+              placeholder="Aller a gauche"
             />
           </label>
           <label>
+            Description
+            <textarea
+              rows={2}
+              value={option.description}
+              onChange={(event) =>
+                onUpdateChoiceOptionDescription(option.id, event.target.value)
+              }
+              disabled={!canEdit}
+              placeholder="Un chemin sombre serpente entre les arbres..."
+            />
+          </label>
+          <label>
+            Image option
+            <input
+              type="file"
+              accept="image/*"
+              onChange={(event) => {
+                const file = event.target.files?.[0];
+                if (file) onSetChoiceOptionImage(option.id, file);
+                event.target.value = "";
+              }}
+              disabled={!canEdit}
+            />
+          </label>
+          {option.imageAssetId &&
+            renderAssetAttachmentWithRemove(option.imageAssetId, () =>
+              onClearChoiceOptionImage(option.id),
+            )}
+          {option.imageAssetId && assetPreviewSrcById[option.imageAssetId] && (
+            <img
+              src={assetPreviewSrcById[option.imageAssetId]}
+              alt={`Option ${option.label}`}
+              className="asset-preview-thumb"
+            />
+          )}
+          <label>
             Cible bloc
             <select
-              value={choice.targetBlockId ?? ""}
+              value={option.targetBlockId ?? ""}
               onChange={(event) =>
-                onUpdateChoiceField(choice.id, "targetBlockId", event.target.value)
+                onUpdateChoiceField(option.id, "targetBlockId", event.target.value)
               }
               disabled={!canEdit}
             >
@@ -596,25 +1170,24 @@ function DialogueEditorSection({
             <div className="section-title-row">
               <div className="title-with-help">
                 <span>Effets variables</span>
-                <HelpHint title="Effets de choix">
-                  Modifie les variables globales quand ce choix est clique (ex: energie +1, amitie
-                  -2).
+                <HelpHint title="Effets d option">
+                  Modifie les variables globales quand cette option est choisie.
                 </HelpHint>
               </div>
               <button
                 className="button-secondary"
-                onClick={() => onAddChoiceEffect(choice.id)}
+                onClick={() => onAddChoiceEffect(option.id)}
                 disabled={!canEdit || project.variables.length === 0}
               >
                 + effet
               </button>
             </div>
-            {choice.effects.map((effect, index) => (
-              <div key={`${choice.id}-effect-${index}`} className="effect-row">
+            {option.effects.map((effect, index) => (
+              <div key={`${option.id}-effect-${index}`} className="effect-row">
                 <select
                   value={effect.variableId}
                   onChange={(event) =>
-                    onUpdateChoiceEffect(choice.id, index, "variableId", event.target.value)
+                    onUpdateChoiceEffect(option.id, index, "variableId", event.target.value)
                   }
                   disabled={!canEdit}
                 >
@@ -628,13 +1201,13 @@ function DialogueEditorSection({
                   type="number"
                   value={effect.delta}
                   onChange={(event) =>
-                    onUpdateChoiceEffect(choice.id, index, "delta", event.target.value)
+                    onUpdateChoiceEffect(option.id, index, "delta", event.target.value)
                   }
                   disabled={!canEdit}
                 />
                 <button
                   className="button-danger"
-                  onClick={() => onRemoveChoiceEffect(choice.id, index)}
+                  onClick={() => onRemoveChoiceEffect(option.id, index)}
                   disabled={!canEdit}
                 >
                   x
@@ -1773,16 +2346,30 @@ export function AuthorStudioBlockEditorPanel({
   onAssetInput,
   renderAssetAttachment,
   renderAssetAttachmentWithRemove,
-  onAddDialogueChoice,
-  onRemoveDialogueChoice,
+  onAddDialogueLine,
+  onRemoveDialogueLine,
+  onUpdateDialogueLineField,
+  onDialogueLineVoiceInput,
+  renderLineVoiceAttachment,
+  onAddDialogueLineResponse,
+  onRemoveDialogueLineResponse,
+  onUpdateDialogueResponseField,
   onUpdateChoiceField,
   onUnlinkDialogueNpcProfile,
   onAddBlockEntryEffect,
   onUpdateBlockEntryEffect,
   onRemoveBlockEntryEffect,
+  onAddResponseEffect,
+  onUpdateResponseEffect,
+  onRemoveResponseEffect,
   onAddChoiceEffect,
   onUpdateChoiceEffect,
   onRemoveChoiceEffect,
+  onAddChoiceOption,
+  onRemoveChoiceOption,
+  onUpdateChoiceOptionDescription,
+  onSetChoiceOptionImage,
+  onClearChoiceOptionImage,
   onAddGameplayOverlay,
   onRemoveGameplayOverlay,
   onUpdateGameplayOverlayRect,
@@ -1957,16 +2544,46 @@ export function AuthorStudioBlockEditorPanel({
                 canEdit={canEdit}
                 blocks={blocks}
                 project={project}
+                assetPreviewSrcById={assetPreviewSrcById}
+                onSetSelectedDynamicField={onSetSelectedDynamicField}
+                onUpdateSelectedBlock={onUpdateSelectedBlock}
+                onAssetInput={onAssetInput}
+                renderAssetAttachment={renderAssetAttachment}
+                onUnlinkDialogueNpcProfile={onUnlinkDialogueNpcProfile}
+                onAddDialogueLine={onAddDialogueLine}
+                onRemoveDialogueLine={onRemoveDialogueLine}
+                onUpdateDialogueLineField={onUpdateDialogueLineField}
+                onDialogueLineVoiceInput={onDialogueLineVoiceInput}
+                renderLineVoiceAttachment={renderLineVoiceAttachment}
+                onAddDialogueLineResponse={onAddDialogueLineResponse}
+                onRemoveDialogueLineResponse={onRemoveDialogueLineResponse}
+                onUpdateDialogueResponseField={onUpdateDialogueResponseField}
+                onAddResponseEffect={onAddResponseEffect}
+                onUpdateResponseEffect={onUpdateResponseEffect}
+                onRemoveResponseEffect={onRemoveResponseEffect}
+              />
+            )}
+
+            {selectedBlock.type === "choice" && (
+              <ChoiceEditorSection
+                block={selectedBlock}
+                canEdit={canEdit}
+                blocks={blocks}
+                project={project}
                 onSetSelectedDynamicField={onSetSelectedDynamicField}
                 onAssetInput={onAssetInput}
                 renderAssetAttachment={renderAssetAttachment}
-                onAddDialogueChoice={onAddDialogueChoice}
-                onRemoveDialogueChoice={onRemoveDialogueChoice}
+                renderAssetAttachmentWithRemove={renderAssetAttachmentWithRemove}
+                onAddChoiceOption={onAddChoiceOption}
+                onRemoveChoiceOption={onRemoveChoiceOption}
                 onUpdateChoiceField={onUpdateChoiceField}
-                onUnlinkDialogueNpcProfile={onUnlinkDialogueNpcProfile}
+                onUpdateChoiceOptionDescription={onUpdateChoiceOptionDescription}
+                onSetChoiceOptionImage={onSetChoiceOptionImage}
+                onClearChoiceOptionImage={onClearChoiceOptionImage}
                 onAddChoiceEffect={onAddChoiceEffect}
                 onUpdateChoiceEffect={onUpdateChoiceEffect}
                 onRemoveChoiceEffect={onRemoveChoiceEffect}
+                assetPreviewSrcById={assetPreviewSrcById}
               />
             )}
 

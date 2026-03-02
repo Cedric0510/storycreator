@@ -3,7 +3,7 @@
 import { Handle, Node, NodeProps, Position } from "@xyflow/react";
 
 import { HelpHint } from "@/components/HelpHint";
-import { BLOCK_LABELS, DialogueBlock, StoryBlock, blockTypeColor } from "@/lib/story";
+import { BLOCK_LABELS, ChoiceBlock, DialogueBlock, StoryBlock, blockTypeColor } from "@/lib/story";
 
 export interface StoryNodeData {
   [key: string]: unknown;
@@ -18,15 +18,51 @@ type StoryEditorNode = Node<StoryNodeData>;
 function DialogueOutputs({ block }: { block: DialogueBlock }) {
   return (
     <div className="story-node-dialogue-outputs">
-      {block.choices.map((choice) => (
-        <div key={choice.id} className="story-node-choice-row">
-          <span className="story-node-choice-label">{choice.label}</span>
+      {block.lines.map((line, lineIndex) => (
+        <div key={line.id} className="story-node-dialogue-line-group">
+          <div className="story-node-dialogue-line-header">
+            <Handle
+              type="target"
+              id={`line-${line.id}`}
+              position={Position.Left}
+              className="story-node-handle"
+            />
+            <span className="story-node-dialogue-line-title">
+              {line.speaker || "…"}: {(line.text || "…").slice(0, 30)}{line.text.length > 30 ? "…" : ""}
+            </span>
+          </div>
+          {line.responses.map((resp) => (
+            <div key={resp.id} className="story-node-choice-row">
+              <span className="story-node-choice-label">{resp.label}</span>
+              <span className="story-node-choice-text">
+                {resp.text.trim() || "Reponse vide"}
+              </span>
+              <Handle
+                type="source"
+                id={`resp-${resp.id}`}
+                position={Position.Right}
+                className="story-node-handle"
+              />
+            </div>
+          ))}
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function ChoiceOutputs({ block }: { block: ChoiceBlock }) {
+  return (
+    <div className="story-node-dialogue-outputs">
+      {block.choices.map((option) => (
+        <div key={option.id} className="story-node-choice-row">
+          <span className="story-node-choice-label">{option.label}</span>
           <span className="story-node-choice-text">
-            {choice.text.trim() || "Choix vide"}
+            {option.text.trim() || "Option vide"}
           </span>
           <Handle
             type="source"
-            id={`choice-${choice.label}`}
+            id={`choice-${option.label}`}
             position={Position.Right}
             className="story-node-handle"
           />
@@ -39,7 +75,11 @@ function DialogueOutputs({ block }: { block: DialogueBlock }) {
 function blockSummary(block: StoryBlock) {
   if (block.type === "title") return block.storyTitle || "Titre vide";
   if (block.type === "cinematic") return block.heading || "Cinematique";
-  if (block.type === "dialogue") return `${block.speaker}: ${block.line || "..."}`;
+  if (block.type === "dialogue") {
+    const first = block.lines[0];
+    return first ? `${first.speaker}: ${first.text || "..."}` : "Dialogue vide";
+  }
+  if (block.type === "choice") return block.prompt.trim() || "Choix vide";
   if (block.type === "hero_profile") return "Fiche du hero (visuel)";
   if (block.type === "npc_profile") return `${block.npcName || "PNJ"} (${block.imageAssetIds.length} image(s))`;
   const hotspotCount = block.hotspots?.length ?? 0;
@@ -55,7 +95,10 @@ function blockHelp(block: StoryBlock) {
     return "Scene narrative lineaire: texte, image/video/voix puis passage au bloc suivant.";
   }
   if (block.type === "dialogue") {
-    return "Conversation a choix: chaque reponse peut modifier des variables et ouvrir une branche.";
+    return "Dialogue multi-lignes: chaque ligne a des reponses qui menent a d'autres lignes internes ou des blocs externes.";
+  }
+  if (block.type === "choice") {
+    return "Bloc de decision: le joueur choisit un chemin parmi plusieurs options (sans dialogue).";
   }
   if (block.type === "hero_profile") {
     return "Bloc visuel de reference du hero, relie aux donnees definies dans la fiche hero du projet.";
@@ -85,13 +128,14 @@ export function StoryNode({ data, selected }: NodeProps<StoryEditorNode>) {
   const summary = blockSummary(data.block);
   const canReceiveConnections =
     data.block.type !== "hero_profile" && data.block.type !== "npc_profile";
+  const hasPerLineHandles = data.block.type === "dialogue";
 
   return (
     <div
       className={`story-node ${selected ? "story-node-selected" : ""}`}
       style={{ borderColor: color }}
     >
-      {canReceiveConnections && (
+      {canReceiveConnections && !hasPerLineHandles && (
         <Handle
           type="target"
           position={Position.Left}
@@ -120,6 +164,8 @@ export function StoryNode({ data, selected }: NodeProps<StoryEditorNode>) {
       <p className="story-node-summary">{summary}</p>
       {data.block.type === "dialogue" ? (
         <DialogueOutputs block={data.block} />
+      ) : data.block.type === "choice" ? (
+        <ChoiceOutputs block={data.block} />
       ) : data.block.type === "npc_profile" ? (
         <NpcProfileOutput />
       ) : data.block.type === "hero_profile" ? (

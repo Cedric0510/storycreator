@@ -4,6 +4,7 @@ export type BlockType =
   | "title"
   | "cinematic"
   | "dialogue"
+  | "choice"
   | "gameplay"
   | "hero_profile"
   | "npc_profile";
@@ -179,24 +180,51 @@ export interface CinematicBlock extends BaseBlock {
   nextBlockId: string | null;
 }
 
-export interface DialogueChoice {
+export interface DialogueResponse {
   id: string;
   label: ChoiceLabel;
   text: string;
+  targetLineId: string | null;
   targetBlockId: string | null;
   effects: VariableEffect[];
 }
 
+export interface DialogueLine {
+  id: string;
+  speaker: string;
+  text: string;
+  voiceAssetId: string | null;
+  responses: DialogueResponse[];
+}
+
+/** Position + size of a single layer in the scene composer (% based, 0-100). */
+export interface SceneLayerLayout {
+  x: number;       // left offset in % of scene width
+  y: number;       // top offset in % of scene height
+  width: number;   // width in % of scene width
+  height: number;  // height in % of scene height
+}
+
+/** Persisted scene composition for a dialogue block. */
+export interface SceneLayout {
+  background: SceneLayerLayout;
+  character: SceneLayerLayout;
+}
+
+export const DEFAULT_SCENE_LAYOUT: SceneLayout = {
+  background: { x: 0, y: 0, width: 100, height: 100 },
+  character:  { x: 25, y: 10, width: 50, height: 80 },
+};
+
 export interface DialogueBlock extends BaseBlock {
   type: "dialogue";
-  speaker: string;
-  line: string;
   backgroundAssetId: string | null;
   characterAssetId: string | null;
   npcProfileBlockId: string | null;
   npcImageAssetId: string | null;
-  voiceAssetId: string | null;
-  choices: DialogueChoice[];
+  sceneLayout: SceneLayout;
+  lines: DialogueLine[];
+  startLineId: string;
 }
 
 export interface GameplayBlock extends BaseBlock {
@@ -226,10 +254,29 @@ export interface NpcProfileBlock extends BaseBlock {
   nextBlockId: string | null;
 }
 
+export interface ChoiceOption {
+  id: string;
+  label: ChoiceLabel;
+  text: string;
+  description: string;
+  imageAssetId: string | null;
+  targetBlockId: string | null;
+  effects: VariableEffect[];
+}
+
+export interface ChoiceBlock extends BaseBlock {
+  type: "choice";
+  prompt: string;
+  backgroundAssetId: string | null;
+  voiceAssetId: string | null;
+  choices: ChoiceOption[];
+}
+
 export type StoryBlock =
   | TitleBlock
   | CinematicBlock
   | DialogueBlock
+  | ChoiceBlock
   | GameplayBlock
   | HeroProfileBlock
   | NpcProfileBlock;
@@ -279,6 +326,7 @@ export const BLOCK_LABELS: Record<BlockType, string> = {
   title: "Ecran titre",
   cinematic: "Cinematique",
   dialogue: "Dialogue",
+  choice: "Choix",
   gameplay: "Gameplay",
   hero_profile: "Fiche Hero",
   npc_profile: "Fiche PNJ",
@@ -350,11 +398,35 @@ export function normalizeHeroProfile(hero: unknown): HeroProfile {
   };
 }
 
-function createDefaultChoice(label: ChoiceLabel): DialogueChoice {
+export function createDefaultResponse(label: ChoiceLabel): DialogueResponse {
   return {
-    id: createId("choice"),
+    id: createId("resp"),
     label,
     text: "",
+    targetLineId: null,
+    targetBlockId: null,
+    effects: [],
+  };
+}
+
+export function createDefaultLine(speaker?: string): DialogueLine {
+  const id = createId("dline");
+  return {
+    id,
+    speaker: speaker ?? "Narrateur",
+    text: "",
+    voiceAssetId: null,
+    responses: [createDefaultResponse("A"), createDefaultResponse("B")],
+  };
+}
+
+function createDefaultChoiceOption(label: ChoiceLabel): ChoiceOption {
+  return {
+    id: createId("option"),
+    label,
+    text: "",
+    description: "",
+    imageAssetId: null,
     targetBlockId: null,
     effects: [],
   };
@@ -486,6 +558,24 @@ function normalizeVariableEffects(effects: unknown): VariableEffect[] {
   }));
 }
 
+function normalizeLayerLayout(raw: unknown, defaults: SceneLayerLayout): SceneLayerLayout {
+  const obj = raw && typeof raw === "object" ? raw as Record<string, unknown> : {};
+  return {
+    x: typeof obj.x === "number" && Number.isFinite(obj.x) ? obj.x : defaults.x,
+    y: typeof obj.y === "number" && Number.isFinite(obj.y) ? obj.y : defaults.y,
+    width: typeof obj.width === "number" && Number.isFinite(obj.width) ? obj.width : defaults.width,
+    height: typeof obj.height === "number" && Number.isFinite(obj.height) ? obj.height : defaults.height,
+  };
+}
+
+function normalizeSceneLayout(raw: unknown): SceneLayout {
+  const obj = raw && typeof raw === "object" ? raw as Record<string, unknown> : {};
+  return {
+    background: normalizeLayerLayout(obj.background, DEFAULT_SCENE_LAYOUT.background),
+    character: normalizeLayerLayout(obj.character, DEFAULT_SCENE_LAYOUT.character),
+  };
+}
+
 export function createBlock(type: BlockType, position: XYPosition): StoryBlock {
   const id = createId(type);
 
@@ -530,6 +620,7 @@ export function createBlock(type: BlockType, position: XYPosition): StoryBlock {
   }
 
   if (type === "dialogue") {
+    const firstLine = createDefaultLine();
     return {
       id,
       type,
@@ -537,14 +628,28 @@ export function createBlock(type: BlockType, position: XYPosition): StoryBlock {
       notes: "",
       position,
       entryEffects: [],
-      speaker: "Narrateur",
-      line: "",
       backgroundAssetId: null,
       characterAssetId: null,
       npcProfileBlockId: null,
       npcImageAssetId: null,
+      sceneLayout: { ...DEFAULT_SCENE_LAYOUT },
+      lines: [firstLine],
+      startLineId: firstLine.id,
+    };
+  }
+
+  if (type === "choice") {
+    return {
+      id,
+      type,
+      name: "Choix",
+      notes: "",
+      position,
+      entryEffects: [],
+      prompt: "Que fais-tu ?",
+      backgroundAssetId: null,
       voiceAssetId: null,
-      choices: [createDefaultChoice("A"), createDefaultChoice("B")],
+      choices: [createDefaultChoiceOption("A"), createDefaultChoiceOption("B")],
     };
   }
 
@@ -667,23 +772,94 @@ export function normalizeStoryBlock(block: StoryBlock): StoryBlock {
   }
 
   if (block.type === "dialogue") {
+    const raw = block as unknown as Record<string, unknown>;
+
+    // --- Migration from v1 (single speaker/line/choices) to v2 (lines[]) ---
+    if (!Array.isArray(raw.lines) && Array.isArray(raw.choices)) {
+      const oldSpeaker = typeof raw.speaker === "string" ? raw.speaker : "Narrateur";
+      const oldText = typeof raw.line === "string" ? raw.line : "";
+      const oldVoice = typeof raw.voiceAssetId === "string" && raw.voiceAssetId ? raw.voiceAssetId as string : null;
+      const oldChoices = raw.choices as Array<Record<string, unknown>>;
+      const lineId = createId("dline");
+
+      const migratedResponses: DialogueResponse[] = oldChoices.map((choice) => ({
+        id: typeof choice.id === "string" ? choice.id : createId("resp"),
+        label: (typeof choice.label === "string" ? choice.label : "A") as ChoiceLabel,
+        text: typeof choice.text === "string" ? choice.text : "",
+        targetLineId: null,
+        targetBlockId: typeof choice.targetBlockId === "string" ? choice.targetBlockId : null,
+        effects: normalizeVariableEffects(choice.effects),
+      }));
+
+      return {
+        ...block,
+        entryEffects: normalizeVariableEffects(raw.entryEffects),
+        npcProfileBlockId:
+          typeof raw.npcProfileBlockId === "string" && raw.npcProfileBlockId
+            ? raw.npcProfileBlockId as string
+            : null,
+        npcImageAssetId:
+          typeof raw.npcImageAssetId === "string" && raw.npcImageAssetId
+            ? raw.npcImageAssetId as string
+            : null,
+        sceneLayout: normalizeSceneLayout(raw.sceneLayout),
+        lines: [{
+          id: lineId,
+          speaker: oldSpeaker,
+          text: oldText,
+          voiceAssetId: oldVoice,
+          responses: migratedResponses,
+        }],
+        startLineId: lineId,
+      } as DialogueBlock;
+    }
+
+    // --- Normal v2 normalization ---
+    return {
+      ...block,
+      entryEffects: normalizeVariableEffects(raw.entryEffects),
+      npcProfileBlockId:
+        typeof raw.npcProfileBlockId === "string" && raw.npcProfileBlockId
+          ? raw.npcProfileBlockId as string
+          : null,
+      npcImageAssetId:
+        typeof raw.npcImageAssetId === "string" && raw.npcImageAssetId
+          ? raw.npcImageAssetId as string
+          : null,
+      sceneLayout: normalizeSceneLayout(raw.sceneLayout),
+      lines: Array.isArray(block.lines)
+        ? block.lines.map((line) => ({
+            ...line,
+            speaker: line.speaker ?? "Narrateur",
+            text: line.text ?? "",
+            voiceAssetId: line.voiceAssetId ?? null,
+            responses: Array.isArray(line.responses)
+              ? line.responses.map((resp) => ({
+                  ...resp,
+                  targetLineId: resp.targetLineId ?? null,
+                  targetBlockId: resp.targetBlockId ?? null,
+                  effects: normalizeVariableEffects(resp.effects),
+                }))
+              : [],
+          }))
+        : [],
+      startLineId: block.startLineId ?? (Array.isArray(block.lines) && block.lines.length > 0 ? block.lines[0].id : ""),
+    };
+  }
+
+  if (block.type === "choice") {
     return {
       ...block,
       entryEffects: normalizeVariableEffects((block as { entryEffects?: unknown }).entryEffects),
-      npcProfileBlockId:
-        typeof (block as { npcProfileBlockId?: unknown }).npcProfileBlockId === "string" &&
-        (block as { npcProfileBlockId?: string }).npcProfileBlockId
-          ? (block as { npcProfileBlockId: string }).npcProfileBlockId
-          : null,
-      npcImageAssetId:
-        typeof (block as { npcImageAssetId?: unknown }).npcImageAssetId === "string" &&
-        (block as { npcImageAssetId?: string }).npcImageAssetId
-          ? (block as { npcImageAssetId: string }).npcImageAssetId
-          : null,
+      prompt: block.prompt ?? "",
+      backgroundAssetId: block.backgroundAssetId ?? null,
+      voiceAssetId: block.voiceAssetId ?? null,
       choices: Array.isArray(block.choices)
-        ? block.choices.map((choice) => ({
-            ...choice,
-            effects: normalizeVariableEffects(choice.effects),
+        ? block.choices.map((option) => ({
+            ...option,
+            description: option.description ?? "",
+            imageAssetId: option.imageAssetId ?? null,
+            effects: normalizeVariableEffects(option.effects),
           }))
         : [],
     };
@@ -729,6 +905,13 @@ export function getBlockOutgoingTargets(block: StoryBlock) {
   }
 
   if (block.type === "dialogue") {
+    return block.lines
+      .flatMap((line) => line.responses)
+      .map((resp) => resp.targetBlockId)
+      .filter((targetId): targetId is string => Boolean(targetId));
+  }
+
+  if (block.type === "choice") {
     return block.choices
       .map((choice) => choice.targetBlockId)
       .filter((targetId): targetId is string => Boolean(targetId));
@@ -766,6 +949,7 @@ export function blockTypeColor(type: BlockType) {
   if (type === "title") return "#f97316";
   if (type === "cinematic") return "#0891b2";
   if (type === "dialogue") return "#16a34a";
+  if (type === "choice") return "#a855f7";
   if (type === "hero_profile") return "#f59e0b";
   if (type === "npc_profile") return "#0ea5e9";
   return "#7c3aed";
@@ -838,31 +1022,60 @@ export function validateStoryBlocks(
 
   for (const block of blocks) {
     if (block.type === "dialogue") {
-      if (block.choices.length === 0) {
+      if (block.lines.length === 0) {
         issues.push({
           level: "error",
-          message: "Ce dialogue ne contient aucun choix.",
+          message: "Ce dialogue ne contient aucune ligne.",
           blockId: block.id,
         });
       }
 
-      for (const choice of block.choices) {
-        if (!choice.text.trim()) {
+      const lineIds = new Set(block.lines.map((line) => line.id));
+
+      for (const line of block.lines) {
+        if (!line.text.trim()) {
           issues.push({
             level: "warning",
-            message: `Le choix ${choice.label} est vide.`,
+            message: `La ligne "${line.speaker || "?"}" a un texte vide.`,
             blockId: block.id,
           });
         }
 
-        if (choice.targetBlockId && !blockById.has(choice.targetBlockId)) {
+        if (line.responses.length === 0) {
           issues.push({
-            level: "error",
-            message: `Le choix ${choice.label} pointe vers un bloc supprime.`,
+            level: "warning",
+            message: `La ligne "${line.speaker || "?"}" n a aucune reponse.`,
             blockId: block.id,
           });
         }
+
+        for (const resp of line.responses) {
+          if (!resp.text.trim()) {
+            issues.push({
+              level: "warning",
+              message: `Reponse ${resp.label} de "${line.speaker || "?"}" est vide.`,
+              blockId: block.id,
+            });
+          }
+
+          if (resp.targetBlockId && !blockById.has(resp.targetBlockId)) {
+            issues.push({
+              level: "error",
+              message: `Reponse ${resp.label} de "${line.speaker || "?"}" pointe vers un bloc supprime.`,
+              blockId: block.id,
+            });
+          }
+
+          if (resp.targetLineId && !lineIds.has(resp.targetLineId)) {
+            issues.push({
+              level: "error",
+              message: `Reponse ${resp.label} de "${line.speaker || "?"}" pointe vers une ligne supprimee.`,
+              blockId: block.id,
+            });
+          }
+        }
       }
+
       if (block.npcProfileBlockId) {
         const npcBlock = blockById.get(block.npcProfileBlockId);
         if (!npcBlock || npcBlock.type !== "npc_profile") {
@@ -878,6 +1091,40 @@ export function validateStoryBlocks(
           issues.push({
             level: "warning",
             message: "L image PNJ selectionnee n existe plus dans la fiche PNJ.",
+            blockId: block.id,
+          });
+        }
+      }
+    } else if (block.type === "choice") {
+      if (block.choices.length === 0) {
+        issues.push({
+          level: "error",
+          message: "Ce bloc de choix ne contient aucune option.",
+          blockId: block.id,
+        });
+      }
+
+      if (!block.prompt.trim()) {
+        issues.push({
+          level: "warning",
+          message: "Le texte de situation (prompt) est vide.",
+          blockId: block.id,
+        });
+      }
+
+      for (const option of block.choices) {
+        if (!option.text.trim()) {
+          issues.push({
+            level: "warning",
+            message: `L option ${option.label} est vide.`,
+            blockId: block.id,
+          });
+        }
+
+        if (option.targetBlockId && !blockById.has(option.targetBlockId)) {
+          issues.push({
+            level: "error",
+            message: `L option ${option.label} pointe vers un bloc supprime.`,
             blockId: block.id,
           });
         }
@@ -968,6 +1215,7 @@ export function validateStoryBlocks(
 
     if (
       block.type !== "dialogue" &&
+      block.type !== "choice" &&
       block.type !== "hero_profile" &&
       block.type !== "npc_profile" &&
       block.nextBlockId &&

@@ -4,7 +4,10 @@ import { StoryNodeData } from "@/components/StoryNode";
 import {
   AssetRef,
   ChoiceLabel,
+  ChoiceBlock,
   DialogueBlock,
+  DialogueLine,
+  DialogueResponse,
   GameplayBlock,
   GameplayHotspotClickAction,
   GameplayHotspotClickActionType,
@@ -43,25 +46,40 @@ export function choiceLabelFromHandle(handle: string | null | undefined) {
   return match ? (match[1] as ChoiceLabel) : null;
 }
 
-export function buildEdge(source: string, target: string, sourceHandle: string): EditorEdge {
-  const label = sourceHandle === "npc-link" ? "PNJ" : choiceLabelFromHandle(sourceHandle);
+export function responseIdFromHandle(handle: string | null | undefined): string | null {
+  if (!handle) return null;
+  const match = /^resp-(.+)$/.exec(handle);
+  return match ? match[1] : null;
+}
+
+export function lineIdFromHandle(handle: string | null | undefined): string | null {
+  if (!handle) return null;
+  const match = /^line-(.+)$/.exec(handle);
+  return match ? match[1] : null;
+}
+
+export function buildEdge(source: string, target: string, sourceHandle: string, label?: string, targetHandle?: string): EditorEdge {
+  const derivedLabel = label ?? (sourceHandle === "npc-link" ? "PNJ" : choiceLabelFromHandle(sourceHandle));
   const isNpcLink = sourceHandle === "npc-link";
+  const isSelfEdge = source === target;
 
   return {
     id: createId("edge"),
     source,
     target,
     sourceHandle,
+    ...(isSelfEdge ? { zIndex: 1001 } : {}),
     markerEnd: {
       type: MarkerType.ArrowClosed,
-      color: "#0f172a",
+      color: isSelfEdge ? "#6366f1" : "#0f172a",
     },
     style: {
-      stroke: isNpcLink ? "#0ea5e9" : "#0f172a",
-      strokeWidth: 1.8,
+      stroke: isSelfEdge ? "#6366f1" : isNpcLink ? "#0ea5e9" : "#0f172a",
+      strokeWidth: isSelfEdge ? 2.2 : 1.8,
       strokeDasharray: isNpcLink ? "6 4" : undefined,
     },
-    label,
+    ...(targetHandle ? { targetHandle } : {}),
+    label: derivedLabel,
     labelStyle: {
       fontSize: 11,
       fontWeight: 700,
@@ -89,6 +107,41 @@ export function blockToNode(block: StoryBlock): EditorNode {
       hasWarning: false,
     },
   };
+}
+
+export function rebuildEdgesFromNodes(nodes: EditorNode[]): EditorEdge[] {
+  const edges: EditorEdge[] = [];
+  for (const node of nodes) {
+    const block = node.data.block;
+
+    if (block.type === "dialogue") {
+      for (const line of block.lines) {
+        for (const resp of line.responses) {
+          if (resp.targetBlockId) {
+            const tgtHandle = resp.targetLineId ? `line-${resp.targetLineId}` : undefined;
+            edges.push(buildEdge(block.id, resp.targetBlockId, `resp-${resp.id}`, resp.label, tgtHandle));
+          } else if (resp.targetLineId) {
+            // Internal self-edge within same block
+            edges.push(buildEdge(block.id, block.id, `resp-${resp.id}`, resp.label, `line-${resp.targetLineId}`));
+          }
+        }
+      }
+      if (block.npcProfileBlockId) {
+        edges.push(buildEdge(block.npcProfileBlockId, block.id, "npc-link"));
+      }
+    } else if (block.type === "choice") {
+      for (const option of block.choices) {
+        if (option.targetBlockId) {
+          edges.push(buildEdge(block.id, option.targetBlockId, `choice-${option.label}`));
+        }
+      }
+    } else if (block.type !== "hero_profile" && block.type !== "npc_profile") {
+      if (block.nextBlockId) {
+        edges.push(buildEdge(block.id, block.nextBlockId, "next"));
+      }
+    }
+  }
+  return edges;
 }
 
 export function toSlug(input: string) {
@@ -144,7 +197,18 @@ export function collectAssetIds(block: StoryBlock) {
     );
   }
   if (block.type === "dialogue") {
-    return [block.backgroundAssetId, block.characterAssetId, block.npcImageAssetId, block.voiceAssetId].filter(
+    const lineVoiceIds = block.lines
+      .map((line) => line.voiceAssetId)
+      .filter((value): value is string => Boolean(value));
+    return [block.backgroundAssetId, block.characterAssetId, block.npcImageAssetId, ...lineVoiceIds].filter(
+      (value): value is string => Boolean(value),
+    );
+  }
+  if (block.type === "choice") {
+    const optionImageIds = block.choices
+      .map((option) => option.imageAssetId)
+      .filter((value): value is string => Boolean(value));
+    return [block.backgroundAssetId, block.voiceAssetId, ...optionImageIds].filter(
       (value): value is string => Boolean(value),
     );
   }
@@ -286,12 +350,12 @@ export function buildInitialStudio(): InitialStudio {
   }
 
   dialogueBlock.name = "Premier choix";
-  dialogueBlock.speaker = "Ami";
-  dialogueBlock.line = "As-tu bien dormi ?";
-  dialogueBlock.choices = dialogueBlock.choices.map((choice) => {
-    if (choice.label === "A") return { ...choice, text: "Oui" };
-    if (choice.label === "B") return { ...choice, text: "Non" };
-    return choice;
+  dialogueBlock.lines[0].speaker = "Ami";
+  dialogueBlock.lines[0].text = "As-tu bien dormi ?";
+  dialogueBlock.lines[0].responses = dialogueBlock.lines[0].responses.map((resp) => {
+    if (resp.label === "A") return { ...resp, text: "Oui" };
+    if (resp.label === "B") return { ...resp, text: "Non" };
+    return resp;
   });
 
   const nodes = [blockToNode(titleBlock), blockToNode(introBlock), blockToNode(dialogueBlock)];
@@ -356,10 +420,24 @@ export function removeNodeReferences(block: StoryBlock, removedBlockId: string):
       npcProfileBlockId:
         block.npcProfileBlockId === removedBlockId ? null : block.npcProfileBlockId,
       npcImageAssetId: block.npcProfileBlockId === removedBlockId ? null : block.npcImageAssetId,
-      choices: block.choices.map((choice) =>
-        choice.targetBlockId === removedBlockId
-          ? { ...choice, targetBlockId: null }
-          : choice,
+      lines: block.lines.map((line) => ({
+        ...line,
+        responses: line.responses.map((resp) =>
+          resp.targetBlockId === removedBlockId
+            ? { ...resp, targetBlockId: null }
+            : resp,
+        ),
+      })),
+    };
+  }
+
+  if (block.type === "choice") {
+    return {
+      ...block,
+      choices: block.choices.map((option) =>
+        option.targetBlockId === removedBlockId
+          ? { ...option, targetBlockId: null }
+          : option,
       ),
     };
   }
@@ -396,9 +474,23 @@ export function removeVariableReferences(block: StoryBlock, removedVariableId: s
     return {
       ...block,
       entryEffects: nextEntryEffects,
-      choices: block.choices.map((choice) => ({
-        ...choice,
-        effects: choice.effects.filter((effect) => effect.variableId !== removedVariableId),
+      lines: block.lines.map((line) => ({
+        ...line,
+        responses: line.responses.map((resp) => ({
+          ...resp,
+          effects: resp.effects.filter((effect) => effect.variableId !== removedVariableId),
+        })),
+      })),
+    };
+  }
+
+  if (block.type === "choice") {
+    return {
+      ...block,
+      entryEffects: nextEntryEffects,
+      choices: block.choices.map((option) => ({
+        ...option,
+        effects: option.effects.filter((effect) => effect.variableId !== removedVariableId),
       })),
     };
   }
@@ -524,20 +616,48 @@ export function serializeBlock(
       position: block.position,
       notes: block.notes,
       entryEffects: serializeEffects(block.entryEffects ?? [], variableNameById),
-      speaker: block.speaker,
-      line: block.line,
       backgroundPath: assetPath(block.backgroundAssetId, assetRefs),
       characterPath: assetPath(block.characterAssetId, assetRefs),
       npcProfileBlockId: block.npcProfileBlockId,
       npcImageAssetId: block.npcImageAssetId,
       npcImagePath: assetPath(block.npcImageAssetId, assetRefs),
+      startLineId: block.startLineId,
+      lines: block.lines.map((line) => ({
+        id: line.id,
+        speaker: line.speaker,
+        text: line.text,
+        voicePath: assetPath(line.voiceAssetId, assetRefs),
+        responses: line.responses.map((resp) => ({
+          id: resp.id,
+          label: resp.label,
+          text: resp.text,
+          targetLineId: resp.targetLineId,
+          targetBlockId: resp.targetBlockId,
+          effects: serializeEffects(resp.effects, variableNameById),
+        })),
+      })),
+    };
+  }
+
+  if (block.type === "choice") {
+    return {
+      id: block.id,
+      type: block.type,
+      name: block.name,
+      position: block.position,
+      notes: block.notes,
+      entryEffects: serializeEffects(block.entryEffects ?? [], variableNameById),
+      prompt: block.prompt,
+      backgroundPath: assetPath(block.backgroundAssetId, assetRefs),
       voicePath: assetPath(block.voiceAssetId, assetRefs),
-      choices: block.choices.map((choice) => ({
-        id: choice.id,
-        label: choice.label,
-        text: choice.text,
-        targetBlockId: choice.targetBlockId,
-        effects: serializeEffects(choice.effects, variableNameById),
+      choices: block.choices.map((option) => ({
+        id: option.id,
+        label: option.label,
+        text: option.text,
+        description: option.description,
+        imagePath: assetPath(option.imageAssetId, assetRefs),
+        targetBlockId: option.targetBlockId,
+        effects: serializeEffects(option.effects, variableNameById),
       })),
     };
   }
