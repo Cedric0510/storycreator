@@ -75,20 +75,24 @@ export function useCloudProjectSession({
     async (projectId: string) => {
       if (!supabase) return;
 
-      const { data, error } = await supabase.rpc("project_member_profiles", {
-        project_uuid: projectId,
-      });
+      try {
+        const { data, error } = await supabase.rpc("project_member_profiles", {
+          project_uuid: projectId,
+        });
 
-      if (error) {
-        setStatusMessage(`Erreur chargement profils: ${error.message}`);
-        return;
-      }
+        if (error) {
+          setStatusMessage(`Erreur chargement profils: ${error.message}`);
+          return;
+        }
 
-      const index: Record<string, CloudProfileRow> = {};
-      for (const profile of (data ?? []) as CloudProfileRow[]) {
-        index[profile.user_id] = profile;
+        const index: Record<string, CloudProfileRow> = {};
+        for (const profile of (data ?? []) as CloudProfileRow[]) {
+          index[profile.user_id] = profile;
+        }
+        setCloudProfiles(index);
+      } catch (err: unknown) {
+        // Swallow — profile fetch failure is non-critical.
       }
-      setCloudProfiles(index);
     },
     [setCloudProfiles, setStatusMessage, supabase],
   );
@@ -97,65 +101,70 @@ export function useCloudProjectSession({
     async (projectId: string, ownerId: string | null) => {
       if (!supabase) return;
 
-      const [
-        { data: projectData, error: projectError },
-        { data: accessData, error: accessError },
-        { data: logsData, error: logsError },
-      ] = await Promise.all([
-        supabase
-          .from("author_projects")
-          .select("owner_id,editing_lock_user_id,updated_at")
-          .eq("id", projectId)
-          .single(),
-        supabase
-          .from("author_project_access")
-          .select("user_id,access_level,granted_by,created_at")
-          .eq("project_id", projectId)
-          .order("created_at", { ascending: true }),
-        supabase
-          .from("author_project_logs")
-          .select("id,actor_id,action,details,created_at")
-          .eq("project_id", projectId)
-          .order("created_at", { ascending: false })
-          .limit(20),
-      ]);
+      try {
+        const [
+          { data: projectData, error: projectError },
+          { data: accessData, error: accessError },
+          { data: logsData, error: logsError },
+        ] = await Promise.all([
+          supabase
+            .from("author_projects")
+            .select("owner_id,editing_lock_user_id,updated_at")
+            .eq("id", projectId)
+            .single(),
+          supabase
+            .from("author_project_access")
+            .select("user_id,access_level,granted_by,created_at")
+            .eq("project_id", projectId)
+            .order("created_at", { ascending: true }),
+          supabase
+            .from("author_project_logs")
+            .select("id,actor_id,action,details,created_at")
+            .eq("project_id", projectId)
+            .order("created_at", { ascending: false })
+            .limit(20),
+        ]);
 
-      if (projectError) {
-        setStatusMessage(`Erreur chargement etat projet cloud: ${projectError.message}`);
-      }
-
-      if (accessError) {
-        setStatusMessage(`Erreur chargement droits: ${accessError.message}`);
-      }
-
-      if (logsError) {
-        setStatusMessage(`Erreur chargement logs cloud: ${logsError.message}`);
-      }
-
-      const rows = (accessData ?? []) as CloudAccessRow[];
-      setCloudAccessRows(rows);
-      setCloudLogs((logsData ?? []) as CloudLogRow[]);
-
-      const projectRow = (projectData ?? null) as CloudProjectStateRow | null;
-      const resolvedOwnerId = projectRow?.owner_id ?? ownerId ?? null;
-      setCloudOwnerId(resolvedOwnerId);
-      setCloudEditingLockUserId(projectRow?.editing_lock_user_id ?? null);
-      if (projectRow?.updated_at) {
-        setCloudLatestUpdatedAt(projectRow.updated_at);
-      }
-
-      if (authUser) {
-        if (platformRole === "admin" || (resolvedOwnerId && authUser.id === resolvedOwnerId)) {
-          setCloudAccessLevel("owner");
-        } else {
-          const ownRow = rows.find((row) => row.user_id === authUser.id);
-          setCloudAccessLevel(ownRow?.access_level ?? null);
+        if (projectError) {
+          setStatusMessage(`Erreur chargement etat projet cloud: ${projectError.message}`);
         }
-      } else {
-        setCloudAccessLevel(null);
-      }
 
-      await fetchCloudProfiles(projectId);
+        if (accessError) {
+          setStatusMessage(`Erreur chargement droits: ${accessError.message}`);
+        }
+
+        if (logsError) {
+          setStatusMessage(`Erreur chargement logs cloud: ${logsError.message}`);
+        }
+
+        const rows = (accessData ?? []) as CloudAccessRow[];
+        setCloudAccessRows(rows);
+        setCloudLogs((logsData ?? []) as CloudLogRow[]);
+
+        const projectRow = (projectData ?? null) as CloudProjectStateRow | null;
+        const resolvedOwnerId = projectRow?.owner_id ?? ownerId ?? null;
+        setCloudOwnerId(resolvedOwnerId);
+        setCloudEditingLockUserId(projectRow?.editing_lock_user_id ?? null);
+        if (projectRow?.updated_at) {
+          setCloudLatestUpdatedAt(projectRow.updated_at);
+        }
+
+        if (authUser) {
+          if (platformRole === "admin" || (resolvedOwnerId && authUser.id === resolvedOwnerId)) {
+            setCloudAccessLevel("owner");
+          } else {
+            const ownRow = rows.find((row) => row.user_id === authUser.id);
+            setCloudAccessLevel(ownRow?.access_level ?? null);
+          }
+        } else {
+          setCloudAccessLevel(null);
+        }
+
+        await fetchCloudProfiles(projectId);
+      } catch (err: unknown) {
+        const msg = err instanceof Error ? err.message : String(err);
+        setStatusMessage(`Erreur rafraichissement cloud: ${msg}`);
+      }
     },
     [
       authUser,
@@ -176,15 +185,19 @@ export function useCloudProjectSession({
     async (projectId: string, action: string, details: string) => {
       if (!supabase || !authUser) return;
 
-      const { error } = await supabase.from("author_project_logs").insert({
-        project_id: projectId,
-        actor_id: authUser.id,
-        action,
-        details,
-      });
+      try {
+        const { error } = await supabase.from("author_project_logs").insert({
+          project_id: projectId,
+          actor_id: authUser.id,
+          action,
+          details,
+        });
 
-      if (error) {
-        setStatusMessage(`Erreur log cloud: ${error.message}`);
+        if (error) {
+          setStatusMessage(`Erreur log cloud: ${error.message}`);
+        }
+      } catch (err: unknown) {
+        // Swallow — log failure should not block the main operation.
       }
     },
     [authUser, setStatusMessage, supabase],
@@ -196,33 +209,41 @@ export function useCloudProjectSession({
       if (!cloudCanWrite) return false;
 
       const { forceTakeover = false, silent = false } = options ?? {};
-      const { data, error } = await supabase.rpc("acquire_project_lock", {
-        project_uuid: cloudProjectId,
-        force_takeover: forceTakeover,
-      });
+      try {
+        const { data, error } = await supabase.rpc("acquire_project_lock", {
+          project_uuid: cloudProjectId,
+          force_takeover: forceTakeover,
+        });
 
-      if (error) {
-        if (!silent) {
-          setStatusMessage(`Erreur verrou cloud: ${error.message}`);
+        if (error) {
+          if (!silent) {
+            setStatusMessage(`Erreur verrou cloud: ${error.message}`);
+          }
+          return false;
         }
-        return false;
-      }
 
-      const locked = Boolean(data);
-      if (!locked) {
-        if (!silent) {
-          setStatusMessage("Verrou cloud indisponible: un autre auteur edite ce projet.");
+        const locked = Boolean(data);
+        if (!locked) {
+          if (!silent) {
+            setStatusMessage("Verrou cloud indisponible: un autre auteur edite ce projet.");
+          }
+          await refreshCloudSideData(cloudProjectId, cloudOwnerId);
+          return false;
         }
+
+        setCloudEditingLockUserId(authUser.id);
         await refreshCloudSideData(cloudProjectId, cloudOwnerId);
+        if (!silent) {
+          await appendCloudLog(cloudProjectId, "lock_acquire_cloud", "Verrou cloud pris");
+        }
+        return true;
+      } catch (err: unknown) {
+        if (!silent) {
+          const msg = err instanceof Error ? err.message : String(err);
+          setStatusMessage(`Erreur verrou cloud: ${msg}`);
+        }
         return false;
       }
-
-      setCloudEditingLockUserId(authUser.id);
-      await refreshCloudSideData(cloudProjectId, cloudOwnerId);
-      if (!silent) {
-        await appendCloudLog(cloudProjectId, "lock_acquire_cloud", "Verrou cloud pris");
-      }
-      return true;
     },
     [
       appendCloudLog,
@@ -242,33 +263,41 @@ export function useCloudProjectSession({
       if (!supabase || !authUser || !cloudProjectId) return false;
 
       const { forceRelease = false, silent = false } = options ?? {};
-      const { data, error } = await supabase.rpc("release_project_lock", {
-        project_uuid: cloudProjectId,
-        force_release: forceRelease,
-      });
+      try {
+        const { data, error } = await supabase.rpc("release_project_lock", {
+          project_uuid: cloudProjectId,
+          force_release: forceRelease,
+        });
 
-      if (error) {
-        if (!silent) {
-          setStatusMessage(`Erreur liberation verrou cloud: ${error.message}`);
+        if (error) {
+          if (!silent) {
+            setStatusMessage(`Erreur liberation verrou cloud: ${error.message}`);
+          }
+          return false;
         }
-        return false;
-      }
 
-      const released = Boolean(data);
-      if (!released) {
-        if (!silent) {
-          setStatusMessage("Liberation verrou cloud refusee.");
+        const released = Boolean(data);
+        if (!released) {
+          if (!silent) {
+            setStatusMessage("Liberation verrou cloud refusee.");
+          }
+          await refreshCloudSideData(cloudProjectId, cloudOwnerId);
+          return false;
         }
+
+        setCloudEditingLockUserId(null);
         await refreshCloudSideData(cloudProjectId, cloudOwnerId);
+        if (!silent) {
+          await appendCloudLog(cloudProjectId, "lock_release_cloud", "Verrou cloud libere");
+        }
+        return true;
+      } catch (err: unknown) {
+        if (!silent) {
+          const msg = err instanceof Error ? err.message : String(err);
+          setStatusMessage(`Erreur liberation verrou: ${msg}`);
+        }
         return false;
       }
-
-      setCloudEditingLockUserId(null);
-      await refreshCloudSideData(cloudProjectId, cloudOwnerId);
-      if (!silent) {
-        await appendCloudLog(cloudProjectId, "lock_release_cloud", "Verrou cloud libere");
-      }
-      return true;
     },
     [
       appendCloudLog,
@@ -288,59 +317,64 @@ export function useCloudProjectSession({
       return;
     }
 
-    const { data, error } = await supabase
-      .from("author_projects")
-      .select("id,title,updated_at,owner_id")
-      .order("updated_at", { ascending: false })
-      .limit(50);
+    try {
+      const { data, error } = await supabase
+        .from("author_projects")
+        .select("id,title,updated_at,owner_id")
+        .order("updated_at", { ascending: false })
+        .limit(50);
 
-    if (error) {
-      setStatusMessage(`Erreur chargement projets cloud: ${error.message}`);
-      return;
-    }
+      if (error) {
+        setStatusMessage(`Erreur chargement projets cloud: ${error.message}`);
+        return;
+      }
 
-    const projects = (data ?? []) as Array<{
-      id: string;
-      title: string;
-      updated_at: string;
-      owner_id: string;
-    }>;
-    const projectIds = projects.map((row) => row.id);
-    const accessByProject = new Map<string, CloudAccessLevel>();
+      const projects = (data ?? []) as Array<{
+        id: string;
+        title: string;
+        updated_at: string;
+        owner_id: string;
+      }>;
+      const projectIds = projects.map((row) => row.id);
+      const accessByProject = new Map<string, CloudAccessLevel>();
 
-    if (projectIds.length > 0) {
-      const { data: accessRows, error: accessError } = await supabase
-        .from("author_project_access")
-        .select("project_id,access_level")
-        .eq("user_id", authUser.id)
-        .in("project_id", projectIds);
+      if (projectIds.length > 0) {
+        const { data: accessRows, error: accessError } = await supabase
+          .from("author_project_access")
+          .select("project_id,access_level")
+          .eq("user_id", authUser.id)
+          .in("project_id", projectIds);
 
-      if (accessError) {
-        setStatusMessage(`Erreur chargement acces projets cloud: ${accessError.message}`);
-      } else {
-        for (const row of (accessRows ?? []) as Array<{
-          project_id: string;
-          access_level: CloudAccessLevel;
-        }>) {
-          accessByProject.set(row.project_id, row.access_level);
+        if (accessError) {
+          setStatusMessage(`Erreur chargement acces projets cloud: ${accessError.message}`);
+        } else {
+          for (const row of (accessRows ?? []) as Array<{
+            project_id: string;
+            access_level: CloudAccessLevel;
+          }>) {
+            accessByProject.set(row.project_id, row.access_level);
+          }
         }
       }
-    }
 
-    const resolvedProjects: CloudProjectRow[] = projects.map((row) => ({
-      id: row.id,
-      title: row.title,
-      updated_at: row.updated_at,
-      owner_id: row.owner_id,
-      access_level:
-        platformRole === "admin"
-          ? "owner"
-          : row.owner_id === authUser.id
+      const resolvedProjects: CloudProjectRow[] = projects.map((row) => ({
+        id: row.id,
+        title: row.title,
+        updated_at: row.updated_at,
+        owner_id: row.owner_id,
+        access_level:
+          platformRole === "admin"
             ? "owner"
-            : accessByProject.get(row.id) ?? "read",
-    }));
+            : row.owner_id === authUser.id
+              ? "owner"
+              : accessByProject.get(row.id) ?? "read",
+      }));
 
-    setCloudProjects(resolvedProjects);
+      setCloudProjects(resolvedProjects);
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      setStatusMessage(`Erreur projets cloud: ${msg}`);
+    }
   }, [authUser, platformRole, setCloudProjects, setStatusMessage, supabase]);
 
   const refreshPlatformProfiles = useCallback(async () => {
@@ -349,22 +383,27 @@ export function useCloudProjectSession({
       return;
     }
 
-    const { data, error } = await supabase.rpc("platform_list_profiles");
-    if (error) {
-      setStatusMessage(`Erreur chargement profils plateforme: ${error.message}`);
-      return;
-    }
+    try {
+      const { data, error } = await supabase.rpc("platform_list_profiles");
+      if (error) {
+        setStatusMessage(`Erreur chargement profils plateforme: ${error.message}`);
+        return;
+      }
 
-    const rows: PlatformProfileRow[] = ((data ?? []) as PlatformProfileRow[]).map((row) => ({
-      ...row,
-      platform_role:
-        row.platform_role === "admin"
-          ? "admin"
-          : row.platform_role === "author"
-            ? "author"
-            : "reader",
-    }));
-    setPlatformProfiles(rows);
+      const rows: PlatformProfileRow[] = ((data ?? []) as PlatformProfileRow[]).map((row) => ({
+        ...row,
+        platform_role:
+          row.platform_role === "admin"
+            ? "admin"
+            : row.platform_role === "author"
+              ? "author"
+              : "reader",
+      }));
+      setPlatformProfiles(rows);
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      setStatusMessage(`Erreur profils plateforme: ${msg}`);
+    }
   }, [authUser, platformRole, setPlatformProfiles, setStatusMessage, supabase]);
 
   useEffect(() => {
@@ -403,8 +442,12 @@ export function useCloudProjectSession({
     setCloudLatestUpdatedAt(currentProject.updated_at);
   }, [cloudProjectId, cloudProjects, setCloudLatestUpdatedAt]);
 
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- we intentionally
+  // depend on authUser?.id (stable string) instead of the authUser object
+  // reference which changes on every TOKEN_REFRESHED event.
+  const authUserId = authUser?.id ?? null;
   useEffect(() => {
-    if (!cloudProjectId || !authUser) return;
+    if (!cloudProjectId || !authUserId) return;
     const timer = window.setTimeout(() => {
       void refreshCloudSideData(cloudProjectId, cloudOwnerId);
     }, 0);
@@ -412,7 +455,7 @@ export function useCloudProjectSession({
     return () => {
       window.clearTimeout(timer);
     };
-  }, [authUser, cloudOwnerId, cloudProjectId, refreshCloudSideData]);
+  }, [authUserId, cloudOwnerId, cloudProjectId, refreshCloudSideData]);
 
   const signInWithPassword = useCallback(async () => {
     if (!supabase) {
@@ -428,18 +471,24 @@ export function useCloudProjectSession({
     }
 
     setCloudBusy(true);
-    const { error } = await supabase.auth.signInWithPassword({
-      email,
-      password,
-    });
-    setCloudBusy(false);
+    try {
+      const { error } = await supabase.auth.signInWithPassword({
+        email,
+        password,
+      });
 
-    if (error) {
-      setStatusMessage(`Erreur connexion Supabase: ${error.message}`);
-      return;
+      if (error) {
+        setStatusMessage(`Erreur connexion Supabase: ${error.message}`);
+        return;
+      }
+
+      setStatusMessage(`Connecte en tant que ${email}.`);
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      setStatusMessage(`Erreur connexion: ${msg}`);
+    } finally {
+      setCloudBusy(false);
     }
-
-    setStatusMessage(`Connecte en tant que ${email}.`);
   }, [authEmailInput, authPasswordInput, setCloudBusy, setStatusMessage, supabase]);
 
   const signUpWithPassword = useCallback(async () => {
@@ -462,35 +511,41 @@ export function useCloudProjectSession({
     }
 
     setCloudBusy(true);
-    const { data, error } = await supabase.auth.signUp({
-      email,
-      password,
-    });
-    setCloudBusy(false);
+    try {
+      const { data, error } = await supabase.auth.signUp({
+        email,
+        password,
+      });
 
-    if (error) {
-      setStatusMessage(`Erreur inscription Supabase: ${error.message}`);
-      return;
-    }
+      if (error) {
+        setStatusMessage(`Erreur inscription Supabase: ${error.message}`);
+        return;
+      }
 
-    const identitiesCount = data.user?.identities?.length ?? 0;
-    if (data.user && identitiesCount === 0) {
+      const identitiesCount = data.user?.identities?.length ?? 0;
+      if (data.user && identitiesCount === 0) {
+        setStatusMessage(
+          "Ce compte existe deja ou a deja ete cree. Utilise le bouton Se connecter.",
+        );
+        return;
+      }
+
+      if (data.session) {
+        setStatusMessage(
+          "Compte cree et connecte. Ton role par defaut est lecteur; un admin doit t'activer en auteur pour editer.",
+        );
+        return;
+      }
+
       setStatusMessage(
-        "Ce compte existe deja ou a deja ete cree. Utilise le bouton Se connecter.",
+        "Compte cree. Verifie ton email de confirmation puis utilise Se connecter. Ton role par defaut est lecteur.",
       );
-      return;
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      setStatusMessage(`Erreur inscription: ${msg}`);
+    } finally {
+      setCloudBusy(false);
     }
-
-    if (data.session) {
-      setStatusMessage(
-        "Compte cree et connecte. Ton role par defaut est lecteur; un admin doit t'activer en auteur pour editer.",
-      );
-      return;
-    }
-
-    setStatusMessage(
-      "Compte cree. Verifie ton email de confirmation puis utilise Se connecter. Ton role par defaut est lecteur.",
-    );
   }, [
     allowSelfSignup,
     authEmailInput,
@@ -505,30 +560,37 @@ export function useCloudProjectSession({
       if (!supabase || !authUser || platformRole !== "admin") return false;
 
       setCloudBusy(true);
-      const { data, error } = await supabase.rpc("platform_set_profile_role", {
-        target_user: targetUserId,
-        next_role: nextRole,
-      });
-      setCloudBusy(false);
+      try {
+        const { data, error } = await supabase.rpc("platform_set_profile_role", {
+          target_user: targetUserId,
+          next_role: nextRole,
+        });
 
-      if (error) {
-        setStatusMessage(`Erreur mise a jour role plateforme: ${error.message}`);
+        if (error) {
+          setStatusMessage(`Erreur mise a jour role plateforme: ${error.message}`);
+          return false;
+        }
+
+        if (!data) {
+          setStatusMessage("Mise a jour role refusee.");
+          return false;
+        }
+
+        if (targetUserId === authUser.id) {
+          setPlatformRole(nextRole);
+        }
+
+        await refreshPlatformProfiles();
+        await refreshCloudProjects();
+        setStatusMessage(`Role plateforme mis a jour: ${nextRole}.`);
+        return true;
+      } catch (err: unknown) {
+        const msg = err instanceof Error ? err.message : String(err);
+        setStatusMessage(`Erreur role plateforme: ${msg}`);
         return false;
+      } finally {
+        setCloudBusy(false);
       }
-
-      if (!data) {
-        setStatusMessage("Mise a jour role refusee.");
-        return false;
-      }
-
-      if (targetUserId === authUser.id) {
-        setPlatformRole(nextRole);
-      }
-
-      await refreshPlatformProfiles();
-      await refreshCloudProjects();
-      setStatusMessage(`Role plateforme mis a jour: ${nextRole}.`);
-      return true;
     },
     [
       authUser,
@@ -544,10 +606,14 @@ export function useCloudProjectSession({
 
   const signOutSupabase = useCallback(async () => {
     if (!supabase) return;
-    if (cloudProjectId && authUser && cloudEditingLockUserId === authUser.id) {
-      await releaseCloudLock({ silent: true });
+    try {
+      if (cloudProjectId && authUser && cloudEditingLockUserId === authUser.id) {
+        await releaseCloudLock({ silent: true });
+      }
+      await supabase.auth.signOut();
+    } catch {
+      // Best-effort — continue with local state cleanup regardless.
     }
-    await supabase.auth.signOut();
     setCloudAccessLevel(null);
     setCloudProjectId(null);
     setCloudOwnerId(null);

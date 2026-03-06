@@ -1,6 +1,7 @@
 import { Dispatch, SetStateAction, useState } from "react";
 
 import { normalizeDelta, toSlug } from "@/components/author-studio-core";
+import { CollapsibleSection } from "@/components/CollapsibleSection";
 import { HelpHint } from "@/components/HelpHint";
 import { BlockType, ProjectMeta, createId } from "@/lib/story";
 
@@ -111,13 +112,15 @@ export function AuthorStudioProjectPanel({
 
   return (
     <aside className="panel panel-left">
-      <section className="panel-section">
-        <div className="title-with-help">
-          <h2>Projet</h2>
+      <CollapsibleSection
+        storageKey="project-info"
+        title="Projet"
+        headerExtra={
           <HelpHint title="Identite projet">
             Espace dedie au nommage, au slug et au synopsis de l&apos;histoire en cours.
           </HelpHint>
-        </div>
+        }
+      >
         <label>
           Titre
           <input
@@ -171,16 +174,18 @@ export function AuthorStudioProjectPanel({
             rows={3}
           />
         </label>
-      </section>
+      </CollapsibleSection>
 
-      <section className="panel-section">
-        <div className="title-with-help">
-          <h2>Bibliotheque de blocs</h2>
+      <CollapsibleSection
+        storageKey="project-blocks"
+        title="Bibliotheque de blocs"
+        headerExtra={
           <HelpHint title="Creation de blocs">
             Ajoute les blocs narratifs et gameplay dans le graphe. Tu peux ensuite les relier entre
             eux.
           </HelpHint>
-        </div>
+        }
+      >
         <div className="block-buttons">
           <button className="button-soft" onClick={() => onAddBlock("title")} disabled={!canEdit}>
             + Ecran titre
@@ -204,16 +209,18 @@ export function AuthorStudioProjectPanel({
             + Fiche PNJ
           </button>
         </div>
-      </section>
+      </CollapsibleSection>
 
-      <section className="panel-section">
-        <div className="title-with-help">
-          <h2>Variables globales</h2>
+      <CollapsibleSection
+        storageKey="project-variables"
+        title="Variables globales"
+        headerExtra={
           <HelpHint title="Stats et points">
             Definis ici les variables globales (energie, relation, etc.) utilisees par les effets
             des blocs.
           </HelpHint>
-        </div>
+        }
+      >
         <div className="row-inline">
           <input
             placeholder="Nom variable"
@@ -275,16 +282,18 @@ export function AuthorStudioProjectPanel({
             </li>
           ))}
         </ul>
-      </section>
+      </CollapsibleSection>
 
-      <section className="panel-section">
-        <div className="title-with-help">
-          <h2>Objets histoire</h2>
+      <CollapsibleSection
+        storageKey="project-items"
+        title="Objets histoire"
+        headerExtra={
           <HelpHint title="Inventaire">
             Cree les objets reutilisables du projet (nom + image). Ils peuvent etre donnes au
             joueur dans les blocs.
           </HelpHint>
-        </div>
+        }
+      >
         <div className="row-inline">
           <input
             placeholder="Nom objet"
@@ -359,16 +368,18 @@ export function AuthorStudioProjectPanel({
             );
           })}
         </ul>
-      </section>
+      </CollapsibleSection>
 
-      <section className="panel-section">
-        <div className="title-with-help">
-          <h2>Fiche heros</h2>
+      <CollapsibleSection
+        storageKey="project-hero"
+        title="Fiche heros"
+        headerExtra={
           <HelpHint title="Profil hero">
             Configure le personnage principal: nom, lore, stats de base, PNJ rencontres et
             inventaire initial.
           </HelpHint>
-        </div>
+        }
+      >
         <label>
           Nom du heros
           <input
@@ -724,15 +735,18 @@ export function AuthorStudioProjectPanel({
             );
           })}
         </div>
-      </section>
+      </CollapsibleSection>
 
-      <section className="panel-section">
-        <div className="title-with-help">
-          <h2>Journal</h2>
+      <CollapsibleSection
+        storageKey="project-logs"
+        title="Journal"
+        defaultCollapsed
+        headerExtra={
           <HelpHint title="Historique local">
             Liste les dernieres actions enregistrees sur le projet ouvert.
           </HelpHint>
-        </div>
+        }
+      >
         <ul className="log-list">
           {project.logs.slice(0, 12).map((entry) => {
             const author =
@@ -748,7 +762,7 @@ export function AuthorStudioProjectPanel({
             );
           })}
         </ul>
-      </section>
+      </CollapsibleSection>
     </aside>
   );
 }

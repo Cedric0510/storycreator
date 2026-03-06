@@ -11,40 +11,68 @@ import {
 } from "./story";
 
 describe("story gameplay schema", () => {
-  it("creates gameplay block with point and click defaults", () => {
+  it("creates gameplay block with V3 defaults", () => {
     const block = createBlock("gameplay", { x: 100, y: 120 }) as GameplayBlock;
 
-    expect(block.mode).toBe("point_and_click");
-    expect(block.overlays.length).toBeGreaterThan(0);
-    expect(block.hotspots.length).toBeGreaterThan(0);
-    expect(block.completionRule.type).toBe("all_required");
+    expect(block.objects).toEqual([]);
+    expect(block.completionEffects).toEqual([]);
+    expect(block.nextBlockId).toBeNull();
   });
 
   it("normalizes malformed gameplay payloads", () => {
     const base = createBlock("gameplay", { x: 0, y: 0 }) as GameplayBlock;
     const malformed = {
       ...base,
-      overlays: undefined,
-      hotspots: undefined,
-      completionRule: null,
+      objects: undefined,
       completionEffects: null,
     } as unknown as GameplayBlock;
 
     const normalized = normalizeGameplayBlock(malformed);
 
-    expect(normalized.mode).toBe("point_and_click");
-    expect(normalized.overlays).toEqual([]);
-    expect(normalized.hotspots).toEqual([]);
-    expect(normalized.completionRule.type).toBe("all_required");
-    expect(normalized.completionRule.requiredCount).toBe(1);
+    expect(normalized.objects).toEqual([]);
     expect(normalized.completionEffects).toEqual([]);
   });
 
-  it("reports gameplay validation issues", () => {
+  it("reports gameplay validation issues for empty objects", () => {
     const title = createBlock("title", { x: 0, y: 0 });
     const gameplay = createBlock("gameplay", { x: 50, y: 50 }) as GameplayBlock;
 
-    gameplay.hotspots = [];
+    gameplay.objects = [];
+    gameplay.objective = "";
+
+    const issues = validateStoryBlocks([title, gameplay], title.id);
+
+    expect(
+      issues.some(
+        (issue) =>
+          issue.level === "warning" &&
+          issue.blockId === gameplay.id &&
+          issue.message.includes("objectif"),
+      ),
+    ).toBe(true);
+  });
+
+  it("detects lock referencing missing key object", () => {
+    const title = createBlock("title", { x: 0, y: 0 });
+    const gameplay = createBlock("gameplay", { x: 50, y: 50 }) as GameplayBlock;
+
+    gameplay.objects = [
+      {
+        id: "lock1",
+        name: "Serrure",
+        assetId: null,
+        soundAssetId: null,
+        x: 10, y: 10, width: 20, height: 20, zIndex: 1,
+        visibleByDefault: true,
+        objectType: "lock",
+        grantItemId: null,
+        linkedKeyId: "key_missing",
+        unlockEffect: "go_to_next",
+        lockedMessage: "",
+        successMessage: "",
+        effects: [],
+      },
+    ];
 
     const issues = validateStoryBlocks([title, gameplay], title.id);
 
@@ -53,74 +81,100 @@ describe("story gameplay schema", () => {
         (issue) =>
           issue.level === "error" &&
           issue.blockId === gameplay.id &&
-          issue.message.includes("zone cliquable"),
+          issue.message.includes("cle introuvable"),
       ),
     ).toBe(true);
   });
 
-  it("detects hotspot links to missing overlays", () => {
+  it("warns when lock has no linked key", () => {
     const title = createBlock("title", { x: 0, y: 0 });
     const gameplay = createBlock("gameplay", { x: 50, y: 50 }) as GameplayBlock;
 
-    gameplay.hotspots = gameplay.hotspots.map((hotspot) => ({
-      ...hotspot,
-      toggleOverlayId: "overlay_missing",
-    }));
+    gameplay.objects = [
+      {
+        id: "lock1",
+        name: "Serrure",
+        assetId: null,
+        soundAssetId: null,
+        x: 10, y: 10, width: 20, height: 20, zIndex: 1,
+        visibleByDefault: true,
+        objectType: "lock",
+        grantItemId: null,
+        linkedKeyId: null,
+        unlockEffect: "go_to_next",
+        lockedMessage: "",
+        successMessage: "",
+        effects: [],
+      },
+    ];
 
     const issues = validateStoryBlocks([title, gameplay], title.id);
 
     expect(
       issues.some(
         (issue) =>
-          issue.level === "error" &&
+          issue.level === "warning" &&
           issue.blockId === gameplay.id &&
-          issue.message.includes("overlay introuvable"),
+          issue.message.includes("aucune cle associee"),
       ),
     ).toBe(true);
   });
 
-  it("detects hotspot click actions targeting missing blocks", () => {
+  it("warns when key has no associated lock", () => {
     const title = createBlock("title", { x: 0, y: 0 });
     const gameplay = createBlock("gameplay", { x: 50, y: 50 }) as GameplayBlock;
 
-    gameplay.hotspots = gameplay.hotspots.map((hotspot) => ({
-      ...hotspot,
-      onClickActions: [
-        {
-          id: "action_1",
-          type: "go_to_block",
-          targetBlockId: "block_missing",
-        },
-      ],
-    }));
+    gameplay.objects = [
+      {
+        id: "key1",
+        name: "Cle",
+        assetId: null,
+        soundAssetId: null,
+        x: 10, y: 10, width: 20, height: 20, zIndex: 1,
+        visibleByDefault: true,
+        objectType: "key",
+        grantItemId: null,
+        linkedKeyId: null,
+        unlockEffect: "go_to_next",
+        lockedMessage: "",
+        successMessage: "",
+        effects: [],
+      },
+    ];
 
     const issues = validateStoryBlocks([title, gameplay], title.id);
 
     expect(
       issues.some(
         (issue) =>
-          issue.level === "error" &&
+          issue.level === "warning" &&
           issue.blockId === gameplay.id &&
-          issue.message.includes("action vers un bloc supprime"),
+          issue.message.includes("aucune serrure"),
       ),
     ).toBe(true);
   });
 
-  it("detects hotspot item rewards targeting missing items", () => {
+  it("detects collectible granting missing items", () => {
     const title = createBlock("title", { x: 0, y: 0 });
     const gameplay = createBlock("gameplay", { x: 50, y: 50 }) as GameplayBlock;
 
-    gameplay.hotspots = gameplay.hotspots.map((hotspot) => ({
-      ...hotspot,
-      onClickActions: [
-        {
-          id: "action_item_1",
-          type: "add_item",
-          itemId: "item_missing",
-          quantity: 1,
-        },
-      ],
-    }));
+    gameplay.objects = [
+      {
+        id: "obj1",
+        name: "Objet 1",
+        assetId: null,
+        soundAssetId: null,
+        x: 10, y: 10, width: 20, height: 20, zIndex: 1,
+        visibleByDefault: true,
+        objectType: "collectible",
+        grantItemId: "item_missing",
+        linkedKeyId: null,
+        unlockEffect: "go_to_next",
+        lockedMessage: "",
+        successMessage: "",
+        effects: [],
+      },
+    ];
 
     const issues = validateStoryBlocks([title, gameplay], title.id, []);
 
@@ -129,7 +183,7 @@ describe("story gameplay schema", () => {
         (issue) =>
           issue.level === "error" &&
           issue.blockId === gameplay.id &&
-          issue.message.includes("objet introuvable"),
+          issue.message.includes("item introuvable"),
       ),
     ).toBe(true);
   });
@@ -219,6 +273,9 @@ describe("story dialogue block (multi-line)", () => {
     expect(block.lines[0].responses[0].targetLineId).toBeNull();
     expect(block.lines[0].responses[0].targetBlockId).toBeNull();
     expect(block.lines[0].responses[0].effects).toEqual([]);
+    expect(block.lines[0].responses[0].affinityEffects).toEqual([]);
+    expect(block.lines[0].conditions).toEqual([]);
+    expect(block.lines[0].fallbackLineId).toBeNull();
     // sceneLayout defaults
     expect(block.sceneLayout).toEqual({
       background: { x: 0, y: 0, width: 100, height: 100 },
@@ -258,6 +315,9 @@ describe("story dialogue block (multi-line)", () => {
     expect(dBlock.lines[0].responses[0].label).toBe("A");
     expect(dBlock.lines[0].responses[0].text).toBe("Oui");
     expect(dBlock.lines[0].responses[0].targetBlockId).toBe("block_2");
+    expect(dBlock.lines[0].responses[0].affinityEffects).toEqual([]);
+    expect(dBlock.lines[0].conditions).toEqual([]);
+    expect(dBlock.lines[0].fallbackLineId).toBeNull();
     expect(dBlock.startLineId).toBe(dBlock.lines[0].id);
     // sceneLayout is auto-filled even on v1 migration
     expect(dBlock.sceneLayout).toEqual({

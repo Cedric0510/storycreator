@@ -47,6 +47,7 @@ interface UseCloudProjectActionsParams {
   shareAccessLevel: "read" | "write";
   cloudLockHeldByOther: boolean;
   hasUnsavedChanges: boolean;
+  isPlatformAdmin: boolean;
   setStatusMessage: (message: string) => void;
   setCloudBusy: (busy: boolean) => void;
   setAssetRefs: (refs: Record<string, AssetRef>) => void;
@@ -88,6 +89,7 @@ export function useCloudProjectActions({
   shareAccessLevel,
   cloudLockHeldByOther,
   hasUnsavedChanges,
+  isPlatformAdmin,
   setStatusMessage,
   setCloudBusy,
   setAssetRefs,
@@ -117,50 +119,52 @@ export function useCloudProjectActions({
       return false;
     }
 
-    const {
-      data: { session },
-      error: sessionError,
-    } = await supabase.auth.getSession();
-    if (sessionError) {
-      setStatusMessage(`Erreur session Supabase: ${sessionError.message}`);
-      return false;
-    }
-
-    const sessionUserId = session?.user?.id;
-    if (!sessionUserId) {
-      setStatusMessage("Session invalide. Reconnecte-toi puis reessaie.");
-      return false;
-    }
-
-    const referencedAssetIds = collectProjectReferencedAssetIds(project, blocks);
-    for (const assetId of referencedAssetIds) {
-      const ref = assetRefs[assetId];
-      if (!ref) {
-        setStatusMessage(`Asset reference introuvable (${assetId}).`);
+    setCloudBusy(true);
+    setStatusMessage("Sauvegarde cloud en cours...");
+    try {
+      const {
+        data: { session },
+        error: sessionError,
+      } = await supabase.auth.refreshSession();
+      if (sessionError) {
+        console.warn("[saveCloudProject] session refresh failed:", sessionError.message);
+        setStatusMessage(`Session expiree: ${sessionError.message}. Reconnecte-toi.`);
         return false;
       }
-    }
 
-    if (cloudProjectId && cloudRevisionDrift) {
-      setStatusMessage(
-        "Une version cloud plus recente existe. Recharge le projet avant de sauvegarder.",
-      );
-      return false;
-    }
+      const sessionUserId = session?.user?.id;
+      if (!sessionUserId) {
+        setStatusMessage("Session invalide (token absent). Reconnecte-toi puis reessaie.");
+        return false;
+      }
 
-    if (cloudProjectId) {
-      const hasLock = cloudEditingLockUserId === sessionUserId;
-      if (!hasLock) {
-        const locked = await acquireCloudLock({ silent: true });
-        if (!locked) {
-          setStatusMessage("Impossible de sauvegarder: verrou cloud actif par un autre auteur.");
+      const referencedAssetIds = collectProjectReferencedAssetIds(project, blocks);
+      for (const assetId of referencedAssetIds) {
+        const ref = assetRefs[assetId];
+        if (!ref) {
+          setStatusMessage(`Asset reference introuvable (${assetId}).`);
           return false;
         }
       }
-    }
 
-    setCloudBusy(true);
-    try {
+      if (cloudProjectId && cloudRevisionDrift) {
+        setStatusMessage(
+          "Une version cloud plus recente existe. Recharge le projet avant de sauvegarder.",
+        );
+        return false;
+      }
+
+      if (cloudProjectId) {
+        const hasLock = cloudEditingLockUserId === sessionUserId;
+        if (!hasLock) {
+          const locked = await acquireCloudLock({ silent: true });
+          if (!locked) {
+            setStatusMessage("Impossible de sauvegarder: verrou cloud actif par un autre auteur.");
+            return false;
+          }
+        }
+      }
+
       const targetProjectId = cloudProjectId ?? generateUuid();
       const isCreate = !cloudProjectId;
       const resolvedAssetRefs: Record<string, AssetRef> = { ...assetRefs };
@@ -335,6 +339,11 @@ export function useCloudProjectActions({
         buildStudioChangeFingerprint(payload.project, payload.nodes, payload.edges, payload.assetRefs),
       );
       return true;
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      console.error("[saveCloudProject] unhandled save error:", msg);
+      setStatusMessage(`Erreur sauvegarde: ${msg}`);
+      return false;
     } finally {
       setCloudBusy(false);
     }
@@ -382,35 +391,39 @@ export function useCloudProjectActions({
     }
 
     setCloudBusy(true);
-    const { data, error } = await supabase
-      .from("author_projects")
-      .select("id,owner_id,payload,updated_at,editing_lock_user_id")
-      .eq("id", targetId)
-      .single();
+    try {
+      const { data, error } = await supabase
+        .from("author_projects")
+        .select("id,owner_id,payload,updated_at,editing_lock_user_id")
+        .eq("id", targetId)
+        .single();
 
-    if (error || !data) {
+      if (error || !data) {
+        setStatusMessage(`Erreur chargement cloud: ${error?.message ?? "unknown"}`);
+        return;
+      }
+
+      const payload = data.payload as unknown;
+      if (!isCloudPayload(payload)) {
+        setStatusMessage("Payload cloud invalide (schema inattendu).");
+        return;
+      }
+
+      hydrateStudioFromPayload(payload);
+      setCloudProjectId(data.id);
+      setCloudOwnerId(data.owner_id);
+      setCloudEditingLockUserId(data.editing_lock_user_id);
+      setCloudProjectUpdatedAt(data.updated_at);
+      setCloudLatestUpdatedAt(data.updated_at);
+      await refreshCloudSideData(data.id, data.owner_id);
+      await refreshCloudProjects();
+      setStatusMessage("Projet charge depuis Supabase.");
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      setStatusMessage(`Erreur chargement cloud: ${msg}`);
+    } finally {
       setCloudBusy(false);
-      setStatusMessage(`Erreur chargement cloud: ${error?.message ?? "unknown"}`);
-      return;
     }
-
-    const payload = data.payload as unknown;
-    if (!isCloudPayload(payload)) {
-      setCloudBusy(false);
-      setStatusMessage("Payload cloud invalide (schema inattendu).");
-      return;
-    }
-
-    hydrateStudioFromPayload(payload);
-    setCloudProjectId(data.id);
-    setCloudOwnerId(data.owner_id);
-    setCloudEditingLockUserId(data.editing_lock_user_id);
-    setCloudProjectUpdatedAt(data.updated_at);
-    setCloudLatestUpdatedAt(data.updated_at);
-    await refreshCloudSideData(data.id, data.owner_id);
-    await refreshCloudProjects();
-    setCloudBusy(false);
-    setStatusMessage("Projet charge depuis Supabase.");
   }, [
     supabase,
     authUser,
@@ -579,6 +592,9 @@ export function useCloudProjectActions({
       });
       downloadBlob(blob, `${bundleProject.info.slug || "story"}-bundle.zip`);
       setStatusMessage(`Bundle telecharge: ${referencedAssetIds.size} asset(s).`);
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      setStatusMessage(`Erreur telechargement bundle: ${msg}`);
     } finally {
       setCloudBusy(false);
     }
@@ -593,60 +609,62 @@ export function useCloudProjectActions({
     }
 
     setCloudBusy(true);
-    const { data: profileRows, error: profileError } = await supabase.rpc(
-      "project_resolve_user_by_email",
-      {
-        project_uuid: cloudProjectId,
-        target_email: email,
-      },
-    );
-
-    if (profileError) {
-      setCloudBusy(false);
-      setStatusMessage(`Erreur recherche collaborateur: ${profileError.message}`);
-      return;
-    }
-
-    const profileRow = ((profileRows ?? []) as CloudProfileRow[])[0] ?? null;
-    if (!profileRow?.user_id) {
-      setCloudBusy(false);
-      setStatusMessage(
-        "Aucun compte trouve pour cet email. Le collaborateur doit d'abord creer son compte.",
+    try {
+      const { data: profileRows, error: profileError } = await supabase.rpc(
+        "project_resolve_user_by_email",
+        {
+          project_uuid: cloudProjectId,
+          target_email: email,
+        },
       );
-      return;
-    }
 
-    if (profileRow.user_id === cloudOwnerId) {
+      if (profileError) {
+        setStatusMessage(`Erreur recherche collaborateur: ${profileError.message}`);
+        return;
+      }
+
+      const profileRow = ((profileRows ?? []) as CloudProfileRow[])[0] ?? null;
+      if (!profileRow?.user_id) {
+        setStatusMessage(
+          "Aucun compte trouve pour cet email. Le collaborateur doit d'abord creer son compte.",
+        );
+        return;
+      }
+
+      if (profileRow.user_id === cloudOwnerId) {
+        setStatusMessage("Cet utilisateur est deja owner du projet.");
+        return;
+      }
+
+      const { error } = await supabase.from("author_project_access").upsert(
+        {
+          project_id: cloudProjectId,
+          user_id: profileRow.user_id,
+          access_level: shareAccessLevel,
+          granted_by: authUser.id,
+        },
+        { onConflict: "project_id,user_id" },
+      );
+
+      if (error) {
+        setStatusMessage(`Erreur partage droits: ${error.message}`);
+        return;
+      }
+
+      await appendCloudLog(
+        cloudProjectId,
+        "grant_access",
+        `${profileRow.user_id} => ${shareAccessLevel}`,
+      );
+      await refreshCloudSideData(cloudProjectId, cloudOwnerId);
+      setShareEmailInput("");
+      setStatusMessage("Droit utilisateur mis a jour.");
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      setStatusMessage(`Erreur partage: ${msg}`);
+    } finally {
       setCloudBusy(false);
-      setStatusMessage("Cet utilisateur est deja owner du projet.");
-      return;
     }
-
-    const { error } = await supabase.from("author_project_access").upsert(
-      {
-        project_id: cloudProjectId,
-        user_id: profileRow.user_id,
-        access_level: shareAccessLevel,
-        granted_by: authUser.id,
-      },
-      { onConflict: "project_id,user_id" },
-    );
-
-    if (error) {
-      setCloudBusy(false);
-      setStatusMessage(`Erreur partage droits: ${error.message}`);
-      return;
-    }
-
-    await appendCloudLog(
-      cloudProjectId,
-      "grant_access",
-      `${profileRow.user_id} => ${shareAccessLevel}`,
-    );
-    await refreshCloudSideData(cloudProjectId, cloudOwnerId);
-    setShareEmailInput("");
-    setCloudBusy(false);
-    setStatusMessage("Droit utilisateur mis a jour.");
   }, [
     supabase,
     authUser,
@@ -670,21 +688,26 @@ export function useCloudProjectActions({
     }
 
     setCloudBusy(true);
-    const { error } = await supabase
-      .from("author_project_access")
-      .delete()
-      .eq("project_id", cloudProjectId)
-      .eq("user_id", userId);
+    try {
+      const { error } = await supabase
+        .from("author_project_access")
+        .delete()
+        .eq("project_id", cloudProjectId)
+        .eq("user_id", userId);
 
-    if (error) {
+      if (error) {
+        setStatusMessage(`Erreur suppression droit: ${error.message}`);
+        return;
+      }
+
+      await appendCloudLog(cloudProjectId, "revoke_access", userId);
+      await refreshCloudSideData(cloudProjectId, cloudOwnerId);
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      setStatusMessage(`Erreur revocation: ${msg}`);
+    } finally {
       setCloudBusy(false);
-      setStatusMessage(`Erreur suppression droit: ${error.message}`);
-      return;
     }
-
-    await appendCloudLog(cloudProjectId, "revoke_access", userId);
-    await refreshCloudSideData(cloudProjectId, cloudOwnerId);
-    setCloudBusy(false);
   }, [
     supabase,
     cloudProjectId,
@@ -781,6 +804,9 @@ export function useCloudProjectActions({
 
       await appendCloudLog(cloudProjectId, "asset_cleanup_cloud", `${stalePaths.length} fichier(s)`);
       setStatusMessage(`Nettoyage cloud termine: ${stalePaths.length} fichier(s) supprime(s).`);
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      setStatusMessage(`Erreur nettoyage assets: ${msg}`);
     } finally {
       setCloudBusy(false);
     }
@@ -800,6 +826,119 @@ export function useCloudProjectActions({
     appendCloudLog,
   ]);
 
+  const deleteCloudProject = useCallback(
+    async (projectId: string) => {
+      if (!supabase || !authUser) {
+        setStatusMessage("Connecte-toi d'abord a Supabase.");
+        return;
+      }
+      if (!isPlatformAdmin) {
+        setStatusMessage("Seul un admin peut supprimer un projet.");
+        return;
+      }
+
+      setCloudBusy(true);
+      try {
+        // 0. Refresh session to avoid expired-token failures
+        const { error: sessionError } = await supabase.auth.refreshSession();
+        if (sessionError) {
+          setStatusMessage(`Session expiree: ${sessionError.message}. Reconnecte-toi.`);
+          return;
+        }
+
+        // 1. Delete storage files for this project
+        const bucket = SUPABASE_ASSET_BUCKET;
+        const folderPath = `${SUPABASE_ASSET_PREFIX}/${projectId}`;
+        let offset = 0;
+        const limit = 100;
+        const allPaths: string[] = [];
+
+        while (true) {
+          const { data, error } = await supabase.storage
+            .from(bucket)
+            .list(folderPath, { limit, offset, sortBy: { column: "name", order: "asc" } });
+
+          if (error) {
+            setStatusMessage(`Erreur listage assets: ${error.message}`);
+            return;
+          }
+          if (!data || data.length === 0) break;
+
+          for (const item of data) {
+            if (!item.name || item.name.endsWith("/")) continue;
+            allPaths.push(`${folderPath}/${item.name}`);
+          }
+          if (data.length < limit) break;
+          offset += data.length;
+        }
+
+        if (allPaths.length > 0) {
+          for (let cursor = 0; cursor < allPaths.length; cursor += 100) {
+            const chunk = allPaths.slice(cursor, cursor + 100);
+            const { error } = await supabase.storage.from(bucket).remove(chunk);
+            if (error) {
+              setStatusMessage(`Erreur suppression assets: ${error.message}`);
+              return;
+            }
+          }
+        }
+
+        // 2. Delete access rows
+        const { error: accessError } = await supabase
+          .from("author_project_access")
+          .delete()
+          .eq("project_id", projectId);
+        if (accessError) {
+          setStatusMessage(formatDbError("Erreur suppression acces", accessError));
+          return;
+        }
+
+        // 3. Delete project row
+        const { error: projectError } = await supabase
+          .from("author_projects")
+          .delete()
+          .eq("id", projectId);
+        if (projectError) {
+          setStatusMessage(formatDbError("Erreur suppression projet", projectError));
+          return;
+        }
+
+        // 4. If the deleted project was the active one, reset cloud state
+        if (cloudProjectId === projectId) {
+          setCloudProjectId(null);
+          setCloudOwnerId(null);
+          setCloudEditingLockUserId(null);
+          setCloudProjectUpdatedAt(null);
+          setCloudLatestUpdatedAt(null);
+          setCloudAccessLevel(null);
+        }
+
+        await refreshCloudProjects();
+        setStatusMessage(`Projet ${projectId} supprime (donnees, assets et acces).`);
+      } catch (err: unknown) {
+        const msg = err instanceof Error ? err.message : String(err);
+        setStatusMessage(`Erreur suppression projet: ${msg}`);
+      } finally {
+        setCloudBusy(false);
+      }
+    },
+    [
+      supabase,
+      authUser,
+      isPlatformAdmin,
+      cloudProjectId,
+      setStatusMessage,
+      setCloudBusy,
+      setCloudProjectId,
+      setCloudOwnerId,
+      setCloudEditingLockUserId,
+      setCloudProjectUpdatedAt,
+      setCloudLatestUpdatedAt,
+      setCloudAccessLevel,
+      refreshCloudProjects,
+    ],
+  );
+
   return {
     saveCloudProject,
     loadCloudProject,
@@ -807,5 +946,6 @@ export function useCloudProjectActions({
     grantCloudAccess,
     revokeCloudAccess,
     cleanupCloudOrphanAssets,
+    deleteCloudProject,
   };
 }

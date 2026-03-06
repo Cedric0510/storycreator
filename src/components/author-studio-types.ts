@@ -45,6 +45,5 @@ export interface CloudLogRow {
 }
 
 export interface GameplayPlacementTarget {
-  kind: "overlay" | "hotspot";
-  id: string;
+  objectId: string;
 }

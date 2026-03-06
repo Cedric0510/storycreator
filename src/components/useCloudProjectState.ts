@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { User } from "@supabase/supabase-js";
 
 import {
@@ -44,44 +44,82 @@ export function useCloudProjectState(setStatusMessage: (message: string) => void
   const [shareEmailInput, setShareEmailInput] = useState("");
   const [shareAccessLevel, setShareAccessLevel] = useState<"read" | "write">("write");
 
+  // Ref used to keep the last known good role so that a transient network
+  // failure (timeout, offline, ...) does NOT demote the user to "reader" and
+  // disable the save button permanently.
+  const platformRoleRef = useRef<PlatformRole>("reader");
+
   useEffect(() => {
     if (!supabase) return;
 
     let cancelled = false;
-    const refreshOwnPlatformRole = async (user: User | null) => {
+
+    /**
+     * Fetch the platform role from the DB.
+     *
+     * `isInitial` = true means this is the first call right after page load.
+     * On first load we MUST fall back to "reader" if the query fails because
+     * there is no previous good value to keep.
+     * On subsequent calls (TOKEN_REFRESHED, visibility change) we keep the
+     * last known good value instead of demoting to "reader".
+     */
+    const refreshOwnPlatformRole = async (user: User | null, isInitial = false) => {
       if (!supabase || !user) {
         setPlatformRole("reader");
+        platformRoleRef.current = "reader";
         return;
       }
 
-      const { data, error } = await supabase
-        .from("author_profiles")
-        .select("platform_role")
-        .eq("user_id", user.id)
-        .maybeSingle();
+      try {
+        const { data, error } = await supabase
+          .from("author_profiles")
+          .select("platform_role")
+          .eq("user_id", user.id)
+          .maybeSingle();
 
-      if (error) {
-        setStatusMessage(`Erreur role plateforme: ${error.message}`);
-        setPlatformRole("reader");
-        return;
+        if (error) {
+          // DB returned an error — might be transient.
+          // Keep latest known role unless this is the very first load.
+          if (isInitial) {
+            setPlatformRole("reader");
+            platformRoleRef.current = "reader";
+          }
+          // else: keep existing platformRole untouched
+          return;
+        }
+
+        if (!data) {
+          // Profile truly doesn't exist in the DB — this is NOT transient.
+          setStatusMessage(
+            "Profil utilisateur introuvable. Contacte un administrateur pour finaliser ton acces.",
+          );
+          setPlatformRole("reader");
+          platformRoleRef.current = "reader";
+          return;
+        }
+
+        const role: PlatformRole =
+          data.platform_role === "admin"
+            ? "admin"
+            : data.platform_role === "author"
+              ? "author"
+              : "reader";
+        setPlatformRole(role);
+        platformRoleRef.current = role;
+      } catch {
+        // Network / timeout / AbortError — keep the last known good role.
+        if (isInitial) {
+          setPlatformRole("reader");
+          platformRoleRef.current = "reader";
+        }
+        // else: keep existing platformRole untouched — do NOT demote.
       }
-
-      if (!data) {
-        setStatusMessage(
-          "Profil utilisateur introuvable. Contacte un administrateur pour finaliser ton acces.",
-        );
-        setPlatformRole("reader");
-        return;
-      }
-
-      const role =
-        data?.platform_role === "admin"
-          ? "admin"
-          : data?.platform_role === "author"
-            ? "author"
-            : "reader";
-      setPlatformRole(role);
     };
+
+    // Track the current user ID so we only update state when the user
+    // actually changes (avoid cascading re-renders on TOKEN_REFRESHED that
+    // creates a new User object reference every time).
+    let currentUserId: string | null = null;
 
     supabase.auth
       .getSession()
@@ -90,11 +128,14 @@ export function useCloudProjectState(setStatusMessage: (message: string) => void
         if (error) {
           setStatusMessage(`Erreur session Supabase: ${error.message}`);
         }
-        setAuthUser(data.session?.user ?? null);
-        if (data.session?.user) {
-          await refreshOwnPlatformRole(data.session.user);
+        const user = data.session?.user ?? null;
+        currentUserId = user?.id ?? null;
+        setAuthUser(user);
+        if (user) {
+          await refreshOwnPlatformRole(user, /* isInitial */ true);
         } else {
           setPlatformRole("reader");
+          platformRoleRef.current = "reader";
           setPlatformProfiles([]);
         }
       })
@@ -104,19 +145,50 @@ export function useCloudProjectState(setStatusMessage: (message: string) => void
 
     const {
       data: { subscription },
-    } = supabase.auth.onAuthStateChange(async (_event, session) => {
-      setAuthUser(session?.user ?? null);
-      if (session?.user) {
-        await refreshOwnPlatformRole(session.user);
-      } else {
+    } = supabase.auth.onAuthStateChange(async (event, session) => {
+      const user = session?.user ?? null;
+      const userId = user?.id ?? null;
+
+      // Only update authUser state if the user actually changed (different
+      // user ID or signed-out).  TOKEN_REFRESHED just gives us a new JWT for
+      // the same user — no need to cascade React state updates.
+      if (userId !== currentUserId) {
+        currentUserId = userId;
+        setAuthUser(user);
+      }
+
+      if (!user) {
         setPlatformRole("reader");
+        platformRoleRef.current = "reader";
         setPlatformProfiles([]);
+        return;
+      }
+
+      // Only re-query the DB role on real auth events, NOT on token refresh.
+      // TOKEN_REFRESHED fires every ~30-55 min; the user's DB role hasn't
+      // changed just because the JWT got a fresh signature.
+      if (event === "SIGNED_IN" || event === "INITIAL_SESSION") {
+        await refreshOwnPlatformRole(user, event === "INITIAL_SESSION");
       }
     });
+
+    // Proactively refresh the session when the tab becomes visible again.
+    // This covers cases where the computer went to sleep or the tab was
+    // in the background long enough for the JWT to expire without being
+    // auto-refreshed by the internal timer.
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === "visible") {
+        supabase.auth.refreshSession().catch(() => {
+          /* swallow — onAuthStateChange will handle SIGNED_OUT if needed */
+        });
+      }
+    };
+    document.addEventListener("visibilitychange", handleVisibilityChange);
 
     return () => {
       cancelled = true;
       subscription.unsubscribe();
+      document.removeEventListener("visibilitychange", handleVisibilityChange);
     };
   }, [setStatusMessage, supabase]);
 

@@ -1,0 +1,594 @@
+"use client";
+
+import { PointerEvent as ReactPointerEvent, useCallback, useRef, useState } from "react";
+
+import { PreviewRuntimeState } from "@/components/usePreviewRuntime";
+import { GameplayBlock, StoryBlock } from "@/lib/story";
+
+/* ------------------------------------------------------------------ */
+/*  Props                                                              */
+/* ------------------------------------------------------------------ */
+
+export interface PreviewOverlayProps {
+  previewState: PreviewRuntimeState | null;
+  previewBlock: StoryBlock | null;
+  previewInteractedSet: Set<string>;
+  previewGameplayCompleted: boolean;
+  previewGameplayProgressLabel: string;
+  previewInventoryItems: { id: string; name: string }[];
+  projectVariables: { id: string; name: string }[];
+  assetPreviewSrcById: Record<string, string>;
+  blockById: Map<string, StoryBlock>;
+  onRestart: () => void;
+  onClose: () => void;
+  onContinue: () => void;
+  onPickChoice: (choiceId: string) => void;
+  onPickObject: (objectId: string) => void;
+  onDropKeyOnLock: (keyId: string, lockId: string) => void;
+}
+
+/* ------------------------------------------------------------------ */
+/*  GameplayPreviewScene — handles key drag-and-drop on locks          */
+/* ------------------------------------------------------------------ */
+
+interface GameplayPreviewSceneProps {
+  block: GameplayBlock;
+  previewState: PreviewRuntimeState | null;
+  previewInteractedSet: Set<string>;
+  assetPreviewSrcById: Record<string, string>;
+  bgSrc: string | undefined;
+  onPickObject: (objectId: string) => void;
+  onDropKeyOnLock: (keyId: string, lockId: string) => void;
+}
+
+function GameplayPreviewScene({
+  block,
+  previewState,
+  previewInteractedSet,
+  assetPreviewSrcById,
+  bgSrc,
+  onPickObject,
+  onDropKeyOnLock,
+}: GameplayPreviewSceneProps) {
+  const sceneRef = useRef<HTMLDivElement>(null);
+  const [dragKey, setDragKey] = useState<{
+    keyId: string;
+    pointerId: number;
+    startX: number;
+    startY: number;
+    dx: number;
+    dy: number;
+  } | null>(null);
+
+  const handlePointerDown = useCallback(
+    (e: ReactPointerEvent<HTMLButtonElement>, objectId: string) => {
+      const obj = block.objects.find((o) => o.id === objectId);
+      if (!obj || obj.objectType !== "key") return;
+      e.preventDefault();
+      e.stopPropagation();
+      const container = sceneRef.current;
+      if (!container) return;
+      container.setPointerCapture(e.pointerId);
+      setDragKey({
+        keyId: objectId,
+        pointerId: e.pointerId,
+        startX: e.clientX,
+        startY: e.clientY,
+        dx: 0,
+        dy: 0,
+      });
+    },
+    [block.objects],
+  );
+
+  const handlePointerMove = useCallback(
+    (e: ReactPointerEvent<HTMLDivElement>) => {
+      if (!dragKey || e.pointerId !== dragKey.pointerId) return;
+      setDragKey({
+        ...dragKey,
+        dx: e.clientX - dragKey.startX,
+        dy: e.clientY - dragKey.startY,
+      });
+    },
+    [dragKey],
+  );
+
+  const handlePointerUp = useCallback(
+    (e: ReactPointerEvent<HTMLDivElement>) => {
+      if (!dragKey || e.pointerId !== dragKey.pointerId) return;
+      const container = sceneRef.current;
+      if (container?.hasPointerCapture(e.pointerId)) {
+        container.releasePointerCapture(e.pointerId);
+      }
+
+      // Check if dropped on a lock
+      const rect = container?.getBoundingClientRect();
+      if (rect) {
+        const xPct = ((e.clientX - rect.left) / rect.width) * 100;
+        const yPct = ((e.clientY - rect.top) / rect.height) * 100;
+        const lock = block.objects.find(
+          (o) =>
+            o.objectType === "lock" &&
+            (previewState?.gameplayObjectVisibility[o.id] ?? o.visibleByDefault) &&
+            xPct >= o.x && xPct <= o.x + o.width &&
+            yPct >= o.y && yPct <= o.y + o.height,
+        );
+        if (lock) {
+          onDropKeyOnLock(dragKey.keyId, lock.id);
+        }
+      }
+
+      setDragKey(null);
+    },
+    [block.objects, dragKey, onDropKeyOnLock, previewState],
+  );
+
+  return (
+    <div
+      ref={sceneRef}
+      className="preview-vn-gameplay-scene"
+      style={bgSrc ? { backgroundImage: `url(${bgSrc})` } : undefined}
+      onPointerMove={handlePointerMove}
+      onPointerUp={handlePointerUp}
+      onPointerCancel={handlePointerUp}
+    >
+      {!bgSrc && (
+        <div className="pointclick-editor-empty-bg">Fond gameplay manquant</div>
+      )}
+
+      {[...block.objects]
+        .sort((a, b) => a.zIndex - b.zIndex)
+        .map((obj) => {
+          const isVisible =
+            previewState?.gameplayObjectVisibility[obj.id] ?? obj.visibleByDefault;
+          if (!isVisible) return null;
+          const interacted = previewInteractedSet.has(obj.id);
+          const imgSrc = assetPreviewSrcById[obj.assetId ?? ""];
+          const isDragging = dragKey?.keyId === obj.id;
+
+          return (
+            <button
+              key={obj.id}
+              type="button"
+              className={`preview-pointclick-object${
+                interacted ? " preview-pointclick-object-interacted" : ""
+              } preview-pointclick-type-${obj.objectType}${
+                isDragging ? " preview-pointclick-dragging" : ""
+              }`}
+              style={{
+                left: `${obj.x}%`,
+                top: `${obj.y}%`,
+                width: `${obj.width}%`,
+                height: `${obj.height}%`,
+                zIndex: isDragging ? 999 : obj.zIndex,
+                backgroundImage: imgSrc ? `url(${imgSrc})` : undefined,
+                backgroundSize: "contain",
+                backgroundRepeat: "no-repeat",
+                backgroundPosition: "center",
+                transform: isDragging ? `translate(${dragKey.dx}px, ${dragKey.dy}px)` : undefined,
+                cursor: obj.objectType === "key" ? "grab" : undefined,
+              }}
+              onPointerDown={(e) => handlePointerDown(e, obj.id)}
+              onClick={(e) => {
+                e.stopPropagation();
+                if (!isDragging) onPickObject(obj.id);
+              }}
+            >
+              {!imgSrc && <span>{obj.name || "Objet"}</span>}
+            </button>
+          );
+        })}
+    </div>
+  );
+}
+
+/* ------------------------------------------------------------------ */
+/*  Component                                                          */
+/* ------------------------------------------------------------------ */
+
+export function PreviewOverlay({
+  previewState,
+  previewBlock,
+  previewInteractedSet,
+  previewGameplayCompleted,
+  previewGameplayProgressLabel,
+  previewInventoryItems,
+  projectVariables,
+  assetPreviewSrcById,
+  blockById,
+  onRestart,
+  onClose,
+  onContinue,
+  onPickChoice,
+  onPickObject,
+  onDropKeyOnLock,
+}: PreviewOverlayProps) {
+  return (
+    <div className="preview-overlay">
+      {/* Left wing — reserved for future options */}
+      <div className="preview-wing preview-wing-left" />
+
+      {/* Smartphone device */}
+      <div className="preview-device">
+        <div className="preview-device-notch" />
+        <div className="preview-device-screen">
+          {/* ── Status bar ── */}
+          <header className="preview-status-bar">
+            <span className="preview-status-block">
+              {previewBlock ? previewBlock.name : "Fin"}
+            </span>
+            <div className="row-inline" style={{ gap: 4 }}>
+              <button className="preview-status-btn" onClick={onRestart} title="Restart">↺</button>
+              <button className="preview-status-btn" onClick={onClose} title="Fermer">✕</button>
+            </div>
+          </header>
+
+          {/* ── Content viewport ── */}
+          <div className="preview-device-viewport">
+
+          {/* ── END ── */}
+          {!previewBlock && (
+            <div className="preview-vn-end">
+              <h3>Fin de parcours</h3>
+              <p>Le parcours est terminé ou aucune cible n&apos;a été définie.</p>
+            </div>
+          )}
+
+          {/* ── TITLE ── */}
+          {previewBlock?.type === "title" && (() => {
+            const bgSrc = assetPreviewSrcById[previewBlock.backgroundAssetId ?? ""];
+            return (
+              <div className="preview-vn-scene" style={bgSrc ? { backgroundImage: `url(${bgSrc})` } : undefined}>
+                <div className="preview-vn-title-content">
+                  <h2 className="preview-vn-title-heading">{previewBlock.storyTitle || "Titre"}</h2>
+                  <p className="preview-vn-title-sub">{previewBlock.subtitle}</p>
+                  <button
+                    className="preview-vn-styled-btn"
+                    style={{
+                      backgroundColor: previewBlock.buttonStyle.backgroundColor,
+                      color: previewBlock.buttonStyle.textColor,
+                      borderColor: previewBlock.buttonStyle.borderColor,
+                      borderRadius: `${previewBlock.buttonStyle.radius}px`,
+                      fontSize: `${previewBlock.buttonStyle.fontSize}px`,
+                    }}
+                    onClick={onContinue}
+                  >
+                    Continuer
+                  </button>
+                </div>
+              </div>
+            );
+          })()}
+
+          {/* ── CINEMATIC ── */}
+          {previewBlock?.type === "cinematic" && (() => {
+            const bgSrc = assetPreviewSrcById[previewBlock.backgroundAssetId ?? ""];
+            const charSrc = assetPreviewSrcById[previewBlock.characterAssetId ?? ""];
+            const videoSrc = assetPreviewSrcById[previewBlock.videoAssetId ?? ""];
+            const voiceSrc = assetPreviewSrcById[previewBlock.voiceAssetId ?? ""];
+            const sl = previewBlock.sceneLayout;
+            return (
+              <div className="preview-vn-scene">
+                {/* Background — positioned via sceneLayout */}
+                {bgSrc && (
+                  <img
+                    className="preview-vn-bg-layer"
+                    src={bgSrc}
+                    alt=""
+                    style={{
+                      left: `${sl.background.x}%`,
+                      top: `${sl.background.y}%`,
+                      width: `${sl.background.width}%`,
+                      height: `${sl.background.height}%`,
+                    }}
+                  />
+                )}
+
+                {/* Character — positioned via sceneLayout */}
+                {charSrc && (
+                  <img
+                    className="preview-vn-char-layer"
+                    src={charSrc}
+                    alt="Personnage"
+                    style={{
+                      left: `${sl.character.x}%`,
+                      top: `${sl.character.y}%`,
+                      width: `${sl.character.width}%`,
+                      height: `${sl.character.height}%`,
+                    }}
+                  />
+                )}
+
+                {videoSrc && (
+                  <video
+                    className="preview-vn-video"
+                    src={videoSrc}
+                    controls
+                    autoPlay
+                    playsInline
+                  />
+                )}
+                {voiceSrc && (
+                  <audio className="preview-vn-audio" src={voiceSrc} controls autoPlay />
+                )}
+                <div className="preview-vn-textbox">
+                  <div className="preview-vn-textbox-inner">
+                    {previewBlock.heading && (
+                      <span className="preview-vn-speaker">{previewBlock.heading}</span>
+                    )}
+                    <p className="preview-vn-text">{previewBlock.body || "…"}</p>
+                  </div>
+                  <button className="preview-vn-next-btn" onClick={onContinue}>▶</button>
+                </div>
+              </div>
+            );
+          })()}
+
+          {/* ── DIALOGUE ── */}
+          {previewBlock?.type === "dialogue" && (() => {
+            const bgSrc = assetPreviewSrcById[previewBlock.backgroundAssetId ?? ""];
+            const charSrc = assetPreviewSrcById[previewBlock.characterAssetId ?? ""];
+            const npcImgSrc = assetPreviewSrcById[previewBlock.npcImageAssetId ?? ""];
+
+            const linkedNpc =
+              previewBlock.npcProfileBlockId
+                ? blockById.get(previewBlock.npcProfileBlockId)
+                : null;
+
+            const currentLine = previewBlock.lines.find(
+              (l) => l.id === previewState?.currentDialogueLineId,
+            ) ?? previewBlock.lines.find(
+              (l) => l.id === previewBlock.startLineId,
+            ) ?? previewBlock.lines[0];
+            if (!currentLine) return null;
+
+            const speakerName =
+              linkedNpc && linkedNpc.type === "npc_profile" && linkedNpc.npcName.trim()
+                ? linkedNpc.npcName
+                : currentLine.speaker;
+
+            const voiceSrc = assetPreviewSrcById[currentLine.voiceAssetId ?? ""];
+            const portraitSrc = npcImgSrc || charSrc;
+            const sl = previewBlock.sceneLayout;
+
+            return (
+              <div className="preview-vn-scene">
+                {/* Background — positioned via sceneLayout */}
+                {bgSrc && (
+                  <img
+                    className="preview-vn-bg-layer"
+                    src={bgSrc}
+                    alt=""
+                    style={{
+                      left: `${sl.background.x}%`,
+                      top: `${sl.background.y}%`,
+                      width: `${sl.background.width}%`,
+                      height: `${sl.background.height}%`,
+                    }}
+                  />
+                )}
+
+                {/* Character portrait — positioned via sceneLayout */}
+                {portraitSrc && (
+                  <img
+                    className="preview-vn-char-layer"
+                    src={portraitSrc}
+                    alt={speakerName || "Personnage"}
+                    style={{
+                      left: `${sl.character.x}%`,
+                      top: `${sl.character.y}%`,
+                      width: `${sl.character.width}%`,
+                      height: `${sl.character.height}%`,
+                    }}
+                  />
+                )}
+
+                {/* Voice audio */}
+                {voiceSrc && (
+                  <audio
+                    key={currentLine.id}
+                    className="preview-vn-audio"
+                    src={voiceSrc}
+                    controls
+                    autoPlay
+                  />
+                )}
+
+                {/* Textbox + responses */}
+                <div className="preview-vn-dialogue-area">
+                  <div className="preview-vn-textbox">
+                    <div className="preview-vn-textbox-inner">
+                      <span className="preview-vn-speaker">{speakerName || "Personnage"}</span>
+                      <p className="preview-vn-text">{currentLine.text || "…"}</p>
+                    </div>
+                  </div>
+                  <div className="preview-vn-responses">
+                    {currentLine.responses.map((resp) => (
+                      <button
+                        key={resp.id}
+                        className="preview-vn-response-btn"
+                        onClick={() => onPickChoice(resp.id)}
+                      >
+                        <strong>{resp.label}</strong>
+                        <span>{resp.text || "…"}</span>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              </div>
+            );
+          })()}
+
+          {/* ── CHOICE ── */}
+          {previewBlock?.type === "choice" && (() => {
+            const bgSrc = assetPreviewSrcById[previewBlock.backgroundAssetId ?? ""];
+            const voiceSrc = assetPreviewSrcById[previewBlock.voiceAssetId ?? ""];
+            return (
+              <div className="preview-vn-scene" style={bgSrc ? { backgroundImage: `url(${bgSrc})` } : undefined}>
+                {voiceSrc && (
+                  <audio className="preview-vn-audio" src={voiceSrc} controls autoPlay />
+                )}
+                <div className="preview-vn-choice-area">
+                  <h3 className="preview-vn-choice-prompt">{previewBlock.prompt || "Choisissez…"}</h3>
+                  <div className="preview-vn-choice-grid">
+                    {previewBlock.choices.map((option) => {
+                      const imgSrc = assetPreviewSrcById[option.imageAssetId ?? ""];
+                      return (
+                        <button
+                          key={option.id}
+                          className="preview-vn-choice-btn"
+                          onClick={() => onPickChoice(option.id)}
+                        >
+                          {imgSrc && (
+                            // eslint-disable-next-line @next/next/no-img-element
+                            <img className="preview-vn-choice-img" src={imgSrc} alt={option.label} />
+                          )}
+                          <strong>{option.label}</strong>
+                          <span>{option.text || "…"}</span>
+                          {option.description && <small>{option.description}</small>}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              </div>
+            );
+          })()}
+
+          {/* ── HERO PROFILE ── */}
+          {previewBlock?.type === "hero_profile" && (
+            <div className="preview-vn-scene preview-vn-profile-scene">
+              <div className="preview-vn-profile-card">
+                <h3>⚔ Fiche Héros</h3>
+                <p>Bloc visuel de référence héros.</p>
+                <button className="preview-vn-next-btn" onClick={onContinue}>▶ Continuer</button>
+              </div>
+            </div>
+          )}
+
+          {/* ── NPC PROFILE ── */}
+          {previewBlock?.type === "npc_profile" && (() => {
+            const defaultImgSrc = assetPreviewSrcById[previewBlock.defaultImageAssetId ?? ""];
+            return (
+              <div className="preview-vn-scene preview-vn-profile-scene">
+                {defaultImgSrc && (
+                  // eslint-disable-next-line @next/next/no-img-element
+                  <img className="preview-vn-character" src={defaultImgSrc} alt={previewBlock.npcName || "PNJ"} />
+                )}
+                <div className="preview-vn-profile-card">
+                  <h3>{previewBlock.npcName || "PNJ"}</h3>
+                  <p>{previewBlock.npcLore || "Lore PNJ vide."}</p>
+                  <button className="preview-vn-next-btn" onClick={onContinue}>▶ Continuer</button>
+                </div>
+              </div>
+            );
+          })()}
+
+          {/* ── GAMEPLAY ── */}
+          {previewBlock?.type === "gameplay" && (() => {
+            const bgSrc = assetPreviewSrcById[previewBlock.backgroundAssetId ?? ""];
+            const voiceSrc = assetPreviewSrcById[previewBlock.voiceAssetId ?? ""];
+            return (
+              <div className="preview-vn-scene">
+                <div className="preview-vn-gameplay-hud">
+                  <span className={`chip ${previewGameplayCompleted ? "chip-start" : "chip-warning"}`}>
+                    {previewGameplayCompleted ? "✓ objectif atteint" : "objectif en cours"}
+                  </span>
+                  <small>{previewGameplayProgressLabel}</small>
+                </div>
+
+                {voiceSrc && (
+                  <audio className="preview-vn-audio" src={voiceSrc} controls autoPlay />
+                )}
+
+                <GameplayPreviewScene
+                  block={previewBlock}
+                  previewState={previewState}
+                  previewInteractedSet={previewInteractedSet}
+                  assetPreviewSrcById={assetPreviewSrcById}
+                  bgSrc={bgSrc}
+                  onPickObject={onPickObject}
+                  onDropKeyOnLock={onDropKeyOnLock}
+                />
+
+                {previewState?.gameplayMessage && (
+                  <p className="preview-vn-gameplay-msg">{previewState.gameplayMessage}</p>
+                )}
+
+                <div className="preview-vn-gameplay-bottom">
+                  <p className="preview-vn-text" style={{ textAlign: "center" }}>
+                    {previewBlock.objective || "Objectif…"}
+                  </p>
+                  <button
+                    className="preview-vn-next-btn"
+                    onClick={onContinue}
+                    disabled={!previewGameplayCompleted}
+                  >
+                    {previewGameplayCompleted ? "▶ Continuer" : "Objectif non atteint"}
+                  </button>
+                </div>
+              </div>
+            );
+          })()}
+          </div>
+
+          {/* ── Home indicator ── */}
+          <div className="preview-device-home" />
+        </div>
+      </div>
+
+      {/* Right wing — debug sidebar */}
+      <div className="preview-wing preview-wing-right">
+        <aside className="preview-wing-panel">
+          <details open>
+            <summary>Variables</summary>
+            {previewState && (
+              <ul className="preview-wing-var-list">
+                {projectVariables.map((variable) => (
+                  <li key={variable.id}>
+                    <span>{variable.name}</span>
+                    <strong>{previewState.variables[variable.id] ?? 0}</strong>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </details>
+          <details>
+            <summary>Inventaire</summary>
+            {previewState && previewInventoryItems.length > 0 && (
+              <ul className="preview-wing-var-list">
+                {previewInventoryItems.map((item) => (
+                  <li key={item.id}>
+                    <span>{item.name}</span>
+                    <strong>{previewState.inventory[item.id] ?? 0}</strong>
+                  </li>
+                ))}
+              </ul>
+            )}
+            {previewState && previewInventoryItems.length === 0 && (
+              <p className="empty-placeholder">Aucun objet.</p>
+            )}
+          </details>
+          {previewState && Object.keys(previewState.npcAffinity).length > 0 && (
+            <details>
+              <summary>Affinite PNJ</summary>
+              <ul className="preview-wing-var-list">
+                {Object.entries(previewState.npcAffinity).map(([npcBlockId, value]) => {
+                  const npcBlock = blockById.get(npcBlockId);
+                  const name = npcBlock?.type === "npc_profile" ? npcBlock.npcName : npcBlockId;
+                  return (
+                    <li key={npcBlockId}>
+                      <span>{name}</span>
+                      <strong>{value}/100</strong>
+                    </li>
+                  );
+                })}
+              </ul>
+            </details>
+          )}
+          {previewState?.ended && <p className="ok-line">Parcours terminé.</p>}
+        </aside>
+      </div>
+    </div>
+  );
+}

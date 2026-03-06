@@ -95,9 +95,9 @@ function blockSummary(block: StoryBlock) {
   if (block.type === "choice") return block.prompt.trim() || "Choix vide";
   if (block.type === "hero_profile") return "Fiche du hero (visuel)";
   if (block.type === "npc_profile") return `${block.npcName || "PNJ"} (${block.imageAssetIds.length} image(s))`;
-  const hotspotCount = block.hotspots?.length ?? 0;
-  if (!block.objective.trim()) return `Point&Click (${hotspotCount} zone(s))`;
-  return `${block.objective} (${hotspotCount} zone(s))`;
+  const objectCount = block.objects?.length ?? 0;
+  if (!block.objective.trim()) return `Gameplay (${objectCount} objet(s))`;
+  return `${block.objective} (${objectCount} objet(s))`;
 }
 
 function blockHelp(block: StoryBlock) {

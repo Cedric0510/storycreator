@@ -1,4 +1,4 @@
-import { ChangeEvent, MouseEvent, PointerEvent as ReactPointerEvent, ReactNode, useCallback, useEffect, useRef } from "react";
+import { ChangeEvent, MouseEvent, PointerEvent as ReactPointerEvent, ReactNode, useCallback, useEffect, useRef, useState } from "react";
 
 import { normalizeDelta } from "@/components/author-studio-core";
 import { GameplayPlacementTarget } from "@/components/author-studio-types";
@@ -10,7 +10,9 @@ import {
   DEFAULT_SCENE_LAYOUT,
   DialogueBlock,
   GameplayBlock,
-  GameplayHotspotClickActionType,
+  GameplayObject,
+  GameplayObjectType,
+  GameplayUnlockEffect,
   HeroProfileBlock,
   NpcProfileBlock,
   ProjectMeta,
@@ -20,6 +22,16 @@ import {
   TitleBlock,
   ValidationIssue,
 } from "@/lib/story";
+
+/** Clipboard for dialogue scene visual layout (images + positioning). */
+interface DialogueSceneClipboard {
+  backgroundAssetId: string | null;
+  characterAssetId: string | null;
+  sceneLayout: SceneLayout;
+}
+
+/** Module-level clipboard — persists across block selections within the session. */
+let dialogueSceneClipboard: DialogueSceneClipboard | null = null;
 
 type ChoiceField = "text" | "targetBlockId";
 type EffectField = "variableId" | "delta";
@@ -76,45 +88,21 @@ interface AuthorStudioBlockEditorPanelProps {
   onUpdateChoiceOptionDescription: (optionId: string, value: string) => void;
   onSetChoiceOptionImage: (optionId: string, file: File) => void;
   onClearChoiceOptionImage: (optionId: string) => void;
-  onAddGameplayOverlay: () => void;
-  onRemoveGameplayOverlay: (overlayId: string) => void;
-  onUpdateGameplayOverlayRect: (overlayId: string, key: RectField, value: number) => void;
-  onClearGameplayOverlayAsset: (overlayId: string) => void;
-  onAddGameplayHotspot: () => void;
-  onRemoveGameplayHotspot: (hotspotId: string) => void;
-  onUpdateGameplayHotspotRect: (hotspotId: string, key: RectField, value: number) => void;
-  onClearGameplayHotspotSound: (hotspotId: string) => void;
-  onAddGameplayHotspotEffect: (hotspotId: string) => void;
-  onUpdateGameplayHotspotEffect: (
-    hotspotId: string,
-    effectIndex: number,
-    key: EffectField,
-    value: string,
-  ) => void;
-  onRemoveGameplayHotspotEffect: (hotspotId: string, effectIndex: number) => void;
-  onAddGameplayHotspotAction: (
-    hotspotId: string,
-    type: GameplayHotspotClickActionType,
-  ) => void;
-  onUpdateGameplayHotspotAction: (
-    hotspotId: string,
-    actionId: string,
-    field: "type" | "message" | "itemId" | "quantity" | "targetHotspotId" | "targetBlockId",
-    value: string,
-  ) => void;
-  onRemoveGameplayHotspotAction: (hotspotId: string, actionId: string) => void;
-  onAddGameplayEffect: () => void;
-  onUpdateGameplayEffect: (effectIndex: number, key: EffectField, value: string) => void;
-  onRemoveGameplayEffect: (effectIndex: number) => void;
+  onAddGameplayObject: () => void;
+  onRemoveGameplayObject: (objectId: string) => void;
+  onUpdateGameplayObjectField: <K extends keyof GameplayObject>(objectId: string, field: K, value: GameplayObject[K]) => void;
+  onUpdateGameplayObjectRect: (objectId: string, field: RectField, value: number) => void;
+  onClearGameplayObjectAsset: (objectId: string) => void;
+  onClearGameplayObjectSound: (objectId: string) => void;
+  onAddGameplayObjectEffect: (objectId: string) => void;
+  onUpdateGameplayObjectEffect: (objectId: string, effectIndex: number, field: "variableId" | "delta", value: string | number) => void;
+  onRemoveGameplayObjectEffect: (objectId: string, effectIndex: number) => void;
+  onAddGameplayCompletionEffect: () => void;
+  onUpdateGameplayCompletionEffect: (index: number, field: EffectField, value: string | number) => void;
+  onRemoveGameplayCompletionEffect: (index: number) => void;
   gameplayPlacementTarget: GameplayPlacementTarget | null;
   onSetGameplayPlacementTarget: (target: GameplayPlacementTarget | null) => void;
-  onStartGameplayElementDrag: (
-    event: ReactPointerEvent<HTMLDivElement>,
-    kind: "overlay" | "hotspot",
-    id: string,
-    x: number,
-    y: number,
-  ) => void;
+  onStartGameplayObjectDrag: (event: ReactPointerEvent<HTMLDivElement>, objectId: string) => void;
   onGameplaySceneClick: (event: MouseEvent<HTMLDivElement>) => void;
   onGameplayScenePointerMove: (event: ReactPointerEvent<HTMLDivElement>) => void;
   onGameplayScenePointerEnd: (event: ReactPointerEvent<HTMLDivElement>) => void;
@@ -308,28 +296,34 @@ interface CinematicEditorSectionProps {
   block: CinematicBlock;
   canEdit: boolean;
   blocks: StoryBlock[];
+  assetPreviewSrcById: Record<string, string>;
   onSetSelectedDynamicField: (key: string, value: unknown) => void;
+  onUpdateSelectedBlock: (updater: (block: StoryBlock) => StoryBlock) => void;
   onSetConnection: (sourceId: string, sourceHandle: string, targetId: string | null) => void;
   onAssetInput: (fieldName: string) => (event: ChangeEvent<HTMLInputElement>) => void;
   renderAssetAttachment: (fieldName: string, assetId: string | null) => ReactNode;
+  onStatusMessage: (message: string) => void;
 }
 
 function CinematicEditorSection({
   block,
   canEdit,
   blocks,
+  assetPreviewSrcById,
   onSetSelectedDynamicField,
+  onUpdateSelectedBlock,
   onSetConnection,
   onAssetInput,
   renderAssetAttachment,
+  onStatusMessage,
 }: CinematicEditorSectionProps) {
   return (
     <div className="subsection">
       <div className="title-with-help">
         <h3>Bloc cinematique</h3>
         <HelpHint title="Bloc cinematique">
-          Permet de raconter une scene avec texte, image, video et voix off, puis d&apos;avancer vers
-          un autre bloc.
+          Permet de raconter une scene avec texte, image/video/voix puis d&apos;avancer vers
+          un autre bloc. Tu peux aussi ajouter un personnage et positionner la scene.
         </HelpHint>
       </div>
       <label>
@@ -364,6 +358,15 @@ function CinematicEditorSection({
           disabled={!canEdit}
         />
       </label>
+
+      {/* --- Scene clipboard: copy / paste images + layout --- */}
+      <SceneCopyPaste
+        block={block}
+        canEdit={canEdit}
+        onUpdateSelectedBlock={onUpdateSelectedBlock}
+        onStatusMessage={onStatusMessage}
+      />
+
       <label>
         Image fond
         <input
@@ -374,6 +377,38 @@ function CinematicEditorSection({
         />
       </label>
       {renderAssetAttachment("backgroundAssetId", block.backgroundAssetId)}
+      <label>
+        Image personnage
+        <input
+          type="file"
+          accept="image/*"
+          onChange={onAssetInput("characterAssetId")}
+          disabled={!canEdit}
+        />
+      </label>
+      {renderAssetAttachment("characterAssetId", block.characterAssetId)}
+
+      {/* --- Scene Composer --- */}
+      {(() => {
+        const bgSrc = assetPreviewSrcById[block.backgroundAssetId ?? ""];
+        const charSrc = assetPreviewSrcById[block.characterAssetId ?? ""];
+        const hasAnyAsset = block.backgroundAssetId || block.characterAssetId;
+        if (!hasAnyAsset) return null;
+        return (
+          <SceneComposer
+            layout={block.sceneLayout}
+            bgSrc={bgSrc}
+            charSrc={charSrc}
+            canEdit={canEdit}
+            onChange={(newLayout) => {
+              onUpdateSelectedBlock((b) =>
+                b.type === "cinematic" ? { ...b, sceneLayout: newLayout } : b,
+              );
+            }}
+          />
+        );
+      })()}
+
       <label>
         Video
         <input
@@ -402,6 +437,80 @@ function CinematicEditorSection({
         canEdit={canEdit}
         onChange={(targetId) => onSetConnection(block.id, "next", targetId)}
       />
+    </div>
+  );
+}
+
+/* ═══════════════════════════════════════════════════════════
+   Scene Copy / Paste — images + layout clipboard (dialogue & cinematic)
+   ═══════════════════════════════════════════════════════════ */
+
+interface SceneCopyPasteProps {
+  block: DialogueBlock | CinematicBlock;
+  canEdit: boolean;
+  onUpdateSelectedBlock: (updater: (block: StoryBlock) => StoryBlock) => void;
+  onStatusMessage: (message: string) => void;
+}
+
+function SceneCopyPaste({
+  block,
+  canEdit,
+  onUpdateSelectedBlock,
+  onStatusMessage,
+}: SceneCopyPasteProps) {
+  const [hasClipboard, setHasClipboard] = useState(dialogueSceneClipboard !== null);
+
+  const copyScene = useCallback(() => {
+    dialogueSceneClipboard = {
+      backgroundAssetId: block.backgroundAssetId,
+      characterAssetId: block.characterAssetId,
+      sceneLayout: structuredClone(block.sceneLayout),
+    };
+    setHasClipboard(true);
+    onStatusMessage("Scene copiee (images + positionnement).");
+  }, [block.backgroundAssetId, block.characterAssetId, block.sceneLayout, onStatusMessage]);
+
+  const pasteScene = useCallback(() => {
+    if (!dialogueSceneClipboard) return;
+    const clip = dialogueSceneClipboard;
+    onUpdateSelectedBlock((b) => {
+      if (b.type === "dialogue") {
+        return {
+          ...b,
+          backgroundAssetId: clip.backgroundAssetId,
+          characterAssetId: b.npcProfileBlockId ? b.characterAssetId : clip.characterAssetId,
+          sceneLayout: structuredClone(clip.sceneLayout),
+        };
+      }
+      if (b.type === "cinematic") {
+        return {
+          ...b,
+          backgroundAssetId: clip.backgroundAssetId,
+          characterAssetId: clip.characterAssetId,
+          sceneLayout: structuredClone(clip.sceneLayout),
+        };
+      }
+      return b;
+    });
+    onStatusMessage("Scene collee (images + positionnement).");
+  }, [onUpdateSelectedBlock, onStatusMessage]);
+
+  return (
+    <div className="section-title-row" style={{ marginBottom: 4 }}>
+      <span style={{ fontSize: 13, color: "#aaa" }}>Scene visuelle</span>
+      <div style={{ display: "flex", gap: 6 }}>
+        <button className="button-secondary" onClick={copyScene} title="Copier images + positionnement">
+          Copier scene
+        </button>
+        <button
+          className="button-secondary"
+          onClick={pasteScene}
+          disabled={!canEdit || !hasClipboard}
+          title="Coller images + positionnement depuis un autre bloc"
+        >
+          Coller scene
+        </button>
+      </div>
     </div>
   );
 }
@@ -545,7 +654,8 @@ function SceneComposer({ layout, bgSrc, charSrc, canEdit, onChange }: SceneCompo
           <strong>Composition de scene</strong>
           <HelpHint title="Composition">
             Glisse les images pour les positionner. Tire le coin en bas a droite pour
-            redimensionner. Les coordonnees sont sauvegardees dans le JSON.
+            redimensionner. Les lignes de repere (tiers + centre) aident a garder des tailles
+            coherentes entre les blocs. Les coordonnees sont sauvegardees dans le JSON.
           </HelpHint>
         </div>
         <button
@@ -560,6 +670,21 @@ function SceneComposer({ layout, bgSrc, charSrc, canEdit, onChange }: SceneCompo
         ref={sceneRef}
         className="scene-composer-scene"
       >
+        {/* Visual reference guides — thirds + center */}
+        <div className="scene-composer-guide scene-composer-guide-h" style={{ top: "33.33%" }} />
+        <div className="scene-composer-guide scene-composer-guide-h" style={{ top: "50%" }}>
+          <span className="scene-composer-guide-label">50%</span>
+        </div>
+        <div className="scene-composer-guide scene-composer-guide-h" style={{ top: "66.66%" }} />
+        <div className="scene-composer-guide scene-composer-guide-v" style={{ left: "50%" }} />
+
+        {/* Character size indicator */}
+        {hasChar && (
+          <div className="scene-composer-size-badge" title="Hauteur du personnage en % de la scene">
+            Perso {layout.character.height}%
+          </div>
+        )}
+
         {!hasBg && !hasChar && (
           <div className="scene-composer-empty">Ajoute un fond ou un personnage</div>
         )}
@@ -598,6 +723,7 @@ interface DialogueEditorSectionProps {
     value: string,
   ) => void;
   onRemoveResponseEffect: (lineId: string, responseId: string, effectIndex: number) => void;
+  onStatusMessage: (message: string) => void;
 }
 
 function DialogueEditorSection({
@@ -622,6 +748,7 @@ function DialogueEditorSection({
   onAddResponseEffect,
   onUpdateResponseEffect,
   onRemoveResponseEffect,
+  onStatusMessage,
 }: DialogueEditorSectionProps) {
   const linkedNpcBlock =
     block.npcProfileBlockId
@@ -636,6 +763,10 @@ function DialogueEditorSection({
       candidate.id !== block.id &&
       candidate.type !== "hero_profile" &&
       candidate.type !== "npc_profile",
+  );
+
+  const npcBlocks = blocks.filter(
+    (candidate): candidate is NpcProfileBlock => candidate.type === "npc_profile",
   );
 
   return (
@@ -666,6 +797,14 @@ function DialogueEditorSection({
         </small>
       )}
 
+      {/* --- Scene clipboard: copy / paste images + layout --- */}
+      <SceneCopyPaste
+        block={block}
+        canEdit={canEdit}
+        onUpdateSelectedBlock={onUpdateSelectedBlock}
+        onStatusMessage={onStatusMessage}
+      />
+
       {/* --- Block-level images --- */}
       <label>
         Image fond
@@ -677,10 +816,20 @@ function DialogueEditorSection({
         />
       </label>
       {renderAssetAttachment("backgroundAssetId", block.backgroundAssetId)}
-      {linkedNpcBlock ? (
+      <label>
+        Image personnage
+        <input
+          type="file"
+          accept="image/*"
+          onChange={onAssetInput("characterAssetId")}
+          disabled={!canEdit}
+        />
+      </label>
+      {renderAssetAttachment("characterAssetId", block.characterAssetId)}
+      {linkedNpcBlock && linkedNpcBlock.imageAssetIds.length > 0 && (
         <>
           <label>
-            Image PNJ
+            Image PNJ (optionnel)
             <select
               value={block.npcImageAssetId ?? ""}
               onChange={(event) =>
@@ -688,31 +837,18 @@ function DialogueEditorSection({
               }
               disabled={!canEdit}
             >
-              <option value="">Image par defaut du PNJ</option>
+              <option value="">Aucune</option>
               {linkedNpcBlock.imageAssetIds.map((assetId, index) => (
                 <option key={assetId} value={assetId}>
-                  Image {index + 1}
+                  Image PNJ {index + 1}
                 </option>
               ))}
             </select>
           </label>
           {renderAssetAttachment(
             "npcImageAssetId",
-            block.npcImageAssetId ?? linkedNpcBlock.defaultImageAssetId,
+            block.npcImageAssetId,
           )}
-        </>
-      ) : (
-        <>
-          <label>
-            Image personnage
-            <input
-              type="file"
-              accept="image/*"
-              onChange={onAssetInput("characterAssetId")}
-              disabled={!canEdit}
-            />
-          </label>
-          {renderAssetAttachment("characterAssetId", block.characterAssetId)}
         </>
       )}
 
@@ -720,12 +856,9 @@ function DialogueEditorSection({
       {(() => {
         const bgSrc = assetPreviewSrcById[block.backgroundAssetId ?? ""];
         const npcImgSrc = assetPreviewSrcById[block.npcImageAssetId ?? ""];
-        const npcDefaultSrc = linkedNpcBlock?.defaultImageAssetId
-          ? assetPreviewSrcById[linkedNpcBlock.defaultImageAssetId]
-          : undefined;
-        const charSrc = npcImgSrc || npcDefaultSrc || assetPreviewSrcById[block.characterAssetId ?? ""];
+        const charSrc = npcImgSrc || assetPreviewSrcById[block.characterAssetId ?? ""];
         // Show composer when at least one image asset is assigned (even if URL not yet loaded)
-        const hasAnyAsset = block.backgroundAssetId || block.characterAssetId || block.npcImageAssetId || linkedNpcBlock?.defaultImageAssetId;
+        const hasAnyAsset = block.backgroundAssetId || block.characterAssetId || block.npcImageAssetId;
         if (!hasAnyAsset) return null;
         return (
           <SceneComposer
@@ -788,6 +921,180 @@ function DialogueEditorSection({
             >
               x
             </button>
+          </div>
+
+          {/* --- Conditions --- */}
+          <div className="effect-list">
+            <div className="section-title-row">
+              <div className="title-with-help">
+                <span>Conditions</span>
+                <HelpHint title="Conditions de ligne">
+                  Conditions qui doivent etre remplies pour afficher cette ligne. Si elles echouent,
+                  la ligne de repli est utilisee.
+                </HelpHint>
+              </div>
+              <button
+                className="button-secondary"
+                onClick={() =>
+                  onUpdateSelectedBlock((candidate) => {
+                    if (candidate.type !== "dialogue") return candidate;
+                    return {
+                      ...candidate,
+                      lines: candidate.lines.map((l) =>
+                        l.id !== line.id
+                          ? l
+                          : {
+                              ...l,
+                              conditions: [
+                                ...l.conditions,
+                                { type: "min_affinity" as const, npcProfileBlockId: npcBlocks[0]?.id ?? "", value: 0 },
+                              ],
+                            },
+                      ),
+                    };
+                  })
+                }
+                disabled={!canEdit || npcBlocks.length === 0}
+              >
+                + condition
+              </button>
+            </div>
+            {line.conditions.map((cond, condIdx) => (
+              <div key={`cond-${condIdx}`} className="effect-row" style={{ gridTemplateColumns: "1fr 1fr 60px 28px" }}>
+                <select
+                  value={cond.type}
+                  onChange={(event) =>
+                    onUpdateSelectedBlock((candidate) => {
+                      if (candidate.type !== "dialogue") return candidate;
+                      return {
+                        ...candidate,
+                        lines: candidate.lines.map((l) =>
+                          l.id !== line.id
+                            ? l
+                            : {
+                                ...l,
+                                conditions: l.conditions.map((c, ci) =>
+                                  ci !== condIdx ? c : { ...c, type: event.target.value as "min_affinity" | "max_affinity" },
+                                ),
+                              },
+                        ),
+                      };
+                    })
+                  }
+                  disabled={!canEdit}
+                >
+                  <option value="min_affinity">Affinite min</option>
+                  <option value="max_affinity">Affinite max</option>
+                </select>
+                <select
+                  value={cond.npcProfileBlockId}
+                  onChange={(event) =>
+                    onUpdateSelectedBlock((candidate) => {
+                      if (candidate.type !== "dialogue") return candidate;
+                      return {
+                        ...candidate,
+                        lines: candidate.lines.map((l) =>
+                          l.id !== line.id
+                            ? l
+                            : {
+                                ...l,
+                                conditions: l.conditions.map((c, ci) =>
+                                  ci !== condIdx ? c : { ...c, npcProfileBlockId: event.target.value },
+                                ),
+                              },
+                        ),
+                      };
+                    })
+                  }
+                  disabled={!canEdit}
+                >
+                  {npcBlocks.map((npc) => (
+                    <option key={npc.id} value={npc.id}>
+                      {npc.npcName || "PNJ sans nom"}
+                    </option>
+                  ))}
+                </select>
+                <input
+                  type="number"
+                  min={0}
+                  max={100}
+                  style={{ width: "60px" }}
+                  value={cond.value}
+                  onChange={(event) =>
+                    onUpdateSelectedBlock((candidate) => {
+                      if (candidate.type !== "dialogue") return candidate;
+                      return {
+                        ...candidate,
+                        lines: candidate.lines.map((l) =>
+                          l.id !== line.id
+                            ? l
+                            : {
+                                ...l,
+                                conditions: l.conditions.map((c, ci) =>
+                                  ci !== condIdx ? c : { ...c, value: Number(event.target.value) },
+                                ),
+                              },
+                        ),
+                      };
+                    })
+                  }
+                  disabled={!canEdit}
+                />
+                <button
+                  className="button-danger"
+                  onClick={() =>
+                    onUpdateSelectedBlock((candidate) => {
+                      if (candidate.type !== "dialogue") return candidate;
+                      return {
+                        ...candidate,
+                        lines: candidate.lines.map((l) =>
+                          l.id !== line.id
+                            ? l
+                            : { ...l, conditions: l.conditions.filter((_, ci) => ci !== condIdx) },
+                        ),
+                      };
+                    })
+                  }
+                  disabled={!canEdit}
+                >
+                  x
+                </button>
+              </div>
+            ))}
+            {line.conditions.length > 0 && (
+              <label>
+                Ligne de repli
+                <select
+                  value={line.fallbackLineId ?? ""}
+                  onChange={(event) =>
+                    onUpdateSelectedBlock((candidate) => {
+                      if (candidate.type !== "dialogue") return candidate;
+                      return {
+                        ...candidate,
+                        lines: candidate.lines.map((l) =>
+                          l.id !== line.id
+                            ? l
+                            : { ...l, fallbackLineId: event.target.value || null },
+                        ),
+                      };
+                    })
+                  }
+                  disabled={!canEdit}
+                >
+                  <option value="">Sauter (ne rien afficher)</option>
+                  {block.lines
+                    .filter((candidate) => candidate.id !== line.id)
+                    .map((candidate) => {
+                      const globalIndex = block.lines.indexOf(candidate);
+                      return (
+                        <option key={candidate.id} value={candidate.id}>
+                          Ligne {globalIndex + 1} — {candidate.speaker || "…"}
+                        </option>
+                      );
+                    })}
+                </select>
+              </label>
+            )}
           </div>
 
           <label>
@@ -966,6 +1273,148 @@ function DialogueEditorSection({
                     <button
                       className="button-danger"
                       onClick={() => onRemoveResponseEffect(line.id, resp.id, effectIndex)}
+                      disabled={!canEdit}
+                    >
+                      x
+                    </button>
+                  </div>
+                ))}
+              </div>
+
+              {/* --- Affinity effects --- */}
+              <div className="effect-list">
+                <div className="section-title-row">
+                  <div className="title-with-help">
+                    <span>Effets affinite</span>
+                    <HelpHint title="Effets affinite">
+                      Modifie la jauge d&apos;affinite d&apos;un PNJ quand cette reponse est choisie.
+                    </HelpHint>
+                  </div>
+                  <button
+                    className="button-secondary"
+                    onClick={() =>
+                      onUpdateSelectedBlock((candidate) => {
+                        if (candidate.type !== "dialogue") return candidate;
+                        return {
+                          ...candidate,
+                          lines: candidate.lines.map((l) =>
+                            l.id !== line.id
+                              ? l
+                              : {
+                                  ...l,
+                                  responses: l.responses.map((r) =>
+                                    r.id !== resp.id
+                                      ? r
+                                      : {
+                                          ...r,
+                                          affinityEffects: [
+                                            ...r.affinityEffects,
+                                            { npcProfileBlockId: npcBlocks[0]?.id ?? "", delta: 5 },
+                                          ],
+                                        },
+                                  ),
+                                },
+                          ),
+                        };
+                      })
+                    }
+                    disabled={!canEdit || npcBlocks.length === 0}
+                  >
+                    + affinite
+                  </button>
+                </div>
+                {resp.affinityEffects.map((ae, aeIdx) => (
+                  <div key={`ae-${aeIdx}`} className="effect-row">
+                    <select
+                      value={ae.npcProfileBlockId}
+                      onChange={(event) =>
+                        onUpdateSelectedBlock((candidate) => {
+                          if (candidate.type !== "dialogue") return candidate;
+                          return {
+                            ...candidate,
+                            lines: candidate.lines.map((l) =>
+                              l.id !== line.id
+                                ? l
+                                : {
+                                    ...l,
+                                    responses: l.responses.map((r) =>
+                                      r.id !== resp.id
+                                        ? r
+                                        : {
+                                            ...r,
+                                            affinityEffects: r.affinityEffects.map((a, ai) =>
+                                              ai !== aeIdx ? a : { ...a, npcProfileBlockId: event.target.value },
+                                            ),
+                                          },
+                                    ),
+                                  },
+                            ),
+                          };
+                        })
+                      }
+                      disabled={!canEdit}
+                    >
+                      {npcBlocks.map((npc) => (
+                        <option key={npc.id} value={npc.id}>
+                          {npc.npcName || "PNJ sans nom"}
+                        </option>
+                      ))}
+                    </select>
+                    <input
+                      type="number"
+                      value={ae.delta}
+                      onChange={(event) =>
+                        onUpdateSelectedBlock((candidate) => {
+                          if (candidate.type !== "dialogue") return candidate;
+                          return {
+                            ...candidate,
+                            lines: candidate.lines.map((l) =>
+                              l.id !== line.id
+                                ? l
+                                : {
+                                    ...l,
+                                    responses: l.responses.map((r) =>
+                                      r.id !== resp.id
+                                        ? r
+                                        : {
+                                            ...r,
+                                            affinityEffects: r.affinityEffects.map((a, ai) =>
+                                              ai !== aeIdx ? a : { ...a, delta: Number(event.target.value) },
+                                            ),
+                                          },
+                                    ),
+                                  },
+                            ),
+                          };
+                        })
+                      }
+                      disabled={!canEdit}
+                    />
+                    <button
+                      className="button-danger"
+                      onClick={() =>
+                        onUpdateSelectedBlock((candidate) => {
+                          if (candidate.type !== "dialogue") return candidate;
+                          return {
+                            ...candidate,
+                            lines: candidate.lines.map((l) =>
+                              l.id !== line.id
+                                ? l
+                                : {
+                                    ...l,
+                                    responses: l.responses.map((r) =>
+                                      r.id !== resp.id
+                                        ? r
+                                        : {
+                                            ...r,
+                                            affinityEffects: r.affinityEffects.filter((_, ai) => ai !== aeIdx),
+                                          },
+                                    ),
+                                  },
+                            ),
+                          };
+                        })
+                      }
                       disabled={!canEdit}
                     >
                       x
@@ -1232,45 +1681,21 @@ interface GameplayEditorSectionProps {
   onAssetInput: (fieldName: string) => (event: ChangeEvent<HTMLInputElement>) => void;
   renderAssetAttachment: (fieldName: string, assetId: string | null) => ReactNode;
   renderAssetAttachmentWithRemove: (assetId: string | null, onRemove: () => void) => ReactNode;
-  onAddGameplayOverlay: () => void;
-  onRemoveGameplayOverlay: (overlayId: string) => void;
-  onUpdateGameplayOverlayRect: (overlayId: string, key: RectField, value: number) => void;
-  onClearGameplayOverlayAsset: (overlayId: string) => void;
-  onAddGameplayHotspot: () => void;
-  onRemoveGameplayHotspot: (hotspotId: string) => void;
-  onUpdateGameplayHotspotRect: (hotspotId: string, key: RectField, value: number) => void;
-  onClearGameplayHotspotSound: (hotspotId: string) => void;
-  onAddGameplayHotspotEffect: (hotspotId: string) => void;
-  onUpdateGameplayHotspotEffect: (
-    hotspotId: string,
-    effectIndex: number,
-    key: EffectField,
-    value: string,
-  ) => void;
-  onRemoveGameplayHotspotEffect: (hotspotId: string, effectIndex: number) => void;
-  onAddGameplayHotspotAction: (
-    hotspotId: string,
-    type: GameplayHotspotClickActionType,
-  ) => void;
-  onUpdateGameplayHotspotAction: (
-    hotspotId: string,
-    actionId: string,
-    field: "type" | "message" | "itemId" | "quantity" | "targetHotspotId" | "targetBlockId",
-    value: string,
-  ) => void;
-  onRemoveGameplayHotspotAction: (hotspotId: string, actionId: string) => void;
-  onAddGameplayEffect: () => void;
-  onUpdateGameplayEffect: (effectIndex: number, key: EffectField, value: string) => void;
-  onRemoveGameplayEffect: (effectIndex: number) => void;
+  onAddGameplayObject: () => void;
+  onRemoveGameplayObject: (objectId: string) => void;
+  onUpdateGameplayObjectField: <K extends keyof GameplayObject>(objectId: string, field: K, value: GameplayObject[K]) => void;
+  onUpdateGameplayObjectRect: (objectId: string, field: RectField, value: number) => void;
+  onClearGameplayObjectAsset: (objectId: string) => void;
+  onClearGameplayObjectSound: (objectId: string) => void;
+  onAddGameplayObjectEffect: (objectId: string) => void;
+  onUpdateGameplayObjectEffect: (objectId: string, effectIndex: number, field: "variableId" | "delta", value: string | number) => void;
+  onRemoveGameplayObjectEffect: (objectId: string, effectIndex: number) => void;
+  onAddGameplayCompletionEffect: () => void;
+  onUpdateGameplayCompletionEffect: (index: number, field: EffectField, value: string | number) => void;
+  onRemoveGameplayCompletionEffect: (index: number) => void;
   gameplayPlacementTarget: GameplayPlacementTarget | null;
   onSetGameplayPlacementTarget: (target: GameplayPlacementTarget | null) => void;
-  onStartGameplayElementDrag: (
-    event: ReactPointerEvent<HTMLDivElement>,
-    kind: "overlay" | "hotspot",
-    id: string,
-    x: number,
-    y: number,
-  ) => void;
+  onStartGameplayObjectDrag: (event: ReactPointerEvent<HTMLDivElement>, objectId: string) => void;
   onGameplaySceneClick: (event: MouseEvent<HTMLDivElement>) => void;
   onGameplayScenePointerMove: (event: ReactPointerEvent<HTMLDivElement>) => void;
   onGameplayScenePointerEnd: (event: ReactPointerEvent<HTMLDivElement>) => void;
@@ -1291,26 +1716,21 @@ function GameplayEditorSection({
   onAssetInput,
   renderAssetAttachment,
   renderAssetAttachmentWithRemove,
-  onAddGameplayOverlay,
-  onRemoveGameplayOverlay,
-  onUpdateGameplayOverlayRect,
-  onClearGameplayOverlayAsset,
-  onAddGameplayHotspot,
-  onRemoveGameplayHotspot,
-  onUpdateGameplayHotspotRect,
-  onClearGameplayHotspotSound,
-  onAddGameplayHotspotEffect,
-  onUpdateGameplayHotspotEffect,
-  onRemoveGameplayHotspotEffect,
-  onAddGameplayHotspotAction,
-  onUpdateGameplayHotspotAction,
-  onRemoveGameplayHotspotAction,
-  onAddGameplayEffect,
-  onUpdateGameplayEffect,
-  onRemoveGameplayEffect,
+  onAddGameplayObject,
+  onRemoveGameplayObject,
+  onUpdateGameplayObjectField,
+  onUpdateGameplayObjectRect,
+  onClearGameplayObjectAsset,
+  onClearGameplayObjectSound,
+  onAddGameplayObjectEffect,
+  onUpdateGameplayObjectEffect,
+  onRemoveGameplayObjectEffect,
+  onAddGameplayCompletionEffect,
+  onUpdateGameplayCompletionEffect,
+  onRemoveGameplayCompletionEffect,
   gameplayPlacementTarget,
   onSetGameplayPlacementTarget,
-  onStartGameplayElementDrag,
+  onStartGameplayObjectDrag,
   onGameplaySceneClick,
   onGameplayScenePointerMove,
   onGameplayScenePointerEnd,
@@ -1319,18 +1739,40 @@ function GameplayEditorSection({
   onEnsureAssetPreviewSrc,
   onStatusMessage,
 }: GameplayEditorSectionProps) {
+  const typeLabels: Record<GameplayObjectType, string> = {
+    decoration: "Decoration (pas d'action)",
+    collectible: "Collectible (inventaire)",
+    key: "Cle (a deposer sur serrure)",
+    lock: "Serrure (attend une cle)",
+  };
+
+  const unlockEffectLabels: Record<GameplayUnlockEffect, string> = {
+    go_to_next: "Passe au bloc suivant",
+    disappear: "Disparait de la scene",
+    modify_stats: "Modifie les stats",
+  };
+
+  // Build a helper to draw SVG arrows from key → lock on the scene
+  const sceneRef = useRef<HTMLDivElement>(null);
+  const keyLockPairs = block.objects
+    .filter((o) => o.objectType === "lock" && o.linkedKeyId)
+    .map((lock) => {
+      const key = block.objects.find((o) => o.id === lock.linkedKeyId);
+      return key ? { key, lock } : null;
+    })
+    .filter(Boolean) as { key: GameplayObject; lock: GameplayObject }[];
+
   return (
     <div className="subsection">
       <div className="title-with-help">
         <h3>Bloc gameplay</h3>
-        <HelpHint title="Bloc point & clic">
-          Cree une scene interactive 2D avec objets superposes et zones cliquables. Les actions au
-          clic pilotent le scenario.
+        <HelpHint title="Scene interactive">
+          Place des objets sur un decor. 4 types: decoration, collectible, cle et serrure.
+          Les cles sont deplacables a la souris pour les deposer sur leur serrure.
         </HelpHint>
       </div>
-      <p className="empty-placeholder">
-        Mode actif: <strong>point_and_click</strong>
-      </p>
+
+      {/* ── Objectif ── */}
       <label>
         Objectif
         <textarea
@@ -1340,32 +1782,31 @@ function GameplayEditorSection({
           disabled={!canEdit}
         />
       </label>
+
+      {/* ── Background ── */}
       <label>
         Image fond
-        <input
-          type="file"
-          accept="image/*"
-          onChange={onAssetInput("backgroundAssetId")}
-          disabled={!canEdit}
-        />
+        <input type="file" accept="image/*" onChange={onAssetInput("backgroundAssetId")} disabled={!canEdit} />
       </label>
       {renderAssetAttachment("backgroundAssetId", block.backgroundAssetId)}
+
+      {/* ── Visual scene with arrows ── */}
       <div className="pointclick-editor-scene-wrap">
         <div className="section-title-row">
           <div className="title-with-help">
             <strong>Scene interactive</strong>
             <HelpHint title="Placement visuel">
-              Clique sur `Placer sur la scene` puis clique dans l&apos;image pour positionner
-              overlays et zones. Le glisser-deposer est aussi actif.
+              Glisse les objets pour les positionner. Clique &quot;Placer&quot; puis clique dans la scene.
             </HelpHint>
           </div>
           <small>
             {gameplayPlacementTarget
-              ? `Placement actif: ${gameplayPlacementTarget.kind}`
-              : 'Selectionne "Placer" sur un objet/une zone'}
+              ? "Clique dans la scene pour placer l'objet"
+              : "Deplace les objets a la souris"}
           </small>
         </div>
         <div
+          ref={sceneRef}
           className="pointclick-editor-scene"
           onClick={onGameplaySceneClick}
           onPointerMove={onGameplayScenePointerMove}
@@ -1381,163 +1822,103 @@ function GameplayEditorSection({
             <div className="pointclick-editor-empty-bg">Ajoute une image de fond</div>
           )}
 
-          {[...block.overlays]
+          {[...block.objects]
             .sort((a, b) => a.zIndex - b.zIndex)
-            .map((overlay) => (
+            .map((obj) => (
               <div
-                key={overlay.id}
+                key={obj.id}
                 className={`pointclick-overlay-box ${
-                  gameplayPlacementTarget?.kind === "overlay" &&
-                  gameplayPlacementTarget.id === overlay.id
-                    ? "pointclick-overlay-active"
-                    : ""
-                }`}
+                  gameplayPlacementTarget?.objectId === obj.id ? "pointclick-overlay-active" : ""
+                } pointclick-type-${obj.objectType}`}
                 style={{
-                  left: `${overlay.x}%`,
-                  top: `${overlay.y}%`,
-                  width: `${overlay.width}%`,
-                  height: `${overlay.height}%`,
-                  zIndex: overlay.zIndex,
-                  backgroundImage: assetPreviewSrcById[overlay.assetId ?? ""]
-                    ? `url(${assetPreviewSrcById[overlay.assetId ?? ""]})`
+                  left: `${obj.x}%`,
+                  top: `${obj.y}%`,
+                  width: `${obj.width}%`,
+                  height: `${obj.height}%`,
+                  zIndex: obj.zIndex,
+                  backgroundImage: assetPreviewSrcById[obj.assetId ?? ""]
+                    ? `url(${assetPreviewSrcById[obj.assetId ?? ""]})`
                     : undefined,
-                  opacity: overlay.visibleByDefault ? 1 : 0.45,
+                  opacity: obj.visibleByDefault ? 1 : 0.45,
                 }}
-                onPointerDown={(event) =>
-                  onStartGameplayElementDrag(event, "overlay", overlay.id, overlay.x, overlay.y)
-                }
+                onPointerDown={(event) => onStartGameplayObjectDrag(event, obj.id)}
                 onClick={(event) => event.stopPropagation()}
               >
-                {!assetPreviewSrcById[overlay.assetId ?? ""] && <span>{overlay.name || "Overlay"}</span>}
+                {!assetPreviewSrcById[obj.assetId ?? ""] && <span>{obj.name || "Objet"}</span>}
               </div>
             ))}
 
-          {block.hotspots.map((hotspot) => (
-            <div
-              key={hotspot.id}
-              className={`pointclick-hotspot-box ${
-                gameplayPlacementTarget?.kind === "hotspot" &&
-                gameplayPlacementTarget.id === hotspot.id
-                  ? "pointclick-hotspot-active"
-                  : ""
-              }`}
-              style={{
-                left: `${hotspot.x}%`,
-                top: `${hotspot.y}%`,
-                width: `${hotspot.width}%`,
-                height: `${hotspot.height}%`,
-              }}
-              onPointerDown={(event) =>
-                onStartGameplayElementDrag(event, "hotspot", hotspot.id, hotspot.x, hotspot.y)
-              }
-              onClick={(event) => event.stopPropagation()}
-            >
-              <span>{hotspot.name || "Zone"}</span>
-            </div>
-          ))}
+          {/* SVG arrows from key center → lock center */}
+          <svg className="pointclick-arrows-svg">
+            {keyLockPairs.map(({ key: k, lock: l }) => {
+              const kx = k.x + k.width / 2;
+              const ky = k.y + k.height / 2;
+              const lx = l.x + l.width / 2;
+              const ly = l.y + l.height / 2;
+              return (
+                <line
+                  key={`${k.id}-${l.id}`}
+                  x1={`${kx}%`} y1={`${ky}%`}
+                  x2={`${lx}%`} y2={`${ly}%`}
+                  stroke="#f59e0b"
+                  strokeWidth="2"
+                  strokeDasharray="6 4"
+                  markerEnd="url(#arrowhead)"
+                />
+              );
+            })}
+            <defs>
+              <marker id="arrowhead" markerWidth="8" markerHeight="6" refX="8" refY="3" orient="auto">
+                <polygon points="0 0, 8 3, 0 6" fill="#f59e0b" />
+              </marker>
+            </defs>
+          </svg>
         </div>
       </div>
+
+      {/* ── Ambiance ── */}
       <label>
         Audio ambiance
-        <input
-          type="file"
-          accept="audio/*"
-          onChange={onAssetInput("voiceAssetId")}
-          disabled={!canEdit}
-        />
+        <input type="file" accept="audio/*" onChange={onAssetInput("voiceAssetId")} disabled={!canEdit} />
       </label>
       {renderAssetAttachment("voiceAssetId", block.voiceAssetId)}
-      <label>
-        Condition de fin
-        <select
-          value={block.completionRule.type}
-          onChange={(event) =>
-            onUpdateSelectedBlock((candidate) => {
-              if (candidate.type !== "gameplay") return candidate;
-              return {
-                ...candidate,
-                completionRule: {
-                  ...candidate.completionRule,
-                  type:
-                    event.target.value === "required_count" ? "required_count" : "all_required",
-                },
-              };
-            })
-          }
-          disabled={!canEdit}
-        >
-          <option value="all_required">Tous les hotspots requis</option>
-          <option value="required_count">Nombre minimum de hotspots</option>
-        </select>
-      </label>
-      {block.completionRule.type === "required_count" && (
-        <label>
-          Nombre minimum
-          <input
-            type="number"
-            min={1}
-            value={block.completionRule.requiredCount}
-            onChange={(event) =>
-              onUpdateSelectedBlock((candidate) => {
-                if (candidate.type !== "gameplay") return candidate;
-                return {
-                  ...candidate,
-                  completionRule: {
-                    ...candidate.completionRule,
-                    requiredCount: Math.max(1, normalizeDelta(event.target.value)),
-                  },
-                };
-              })
-            }
-            disabled={!canEdit}
-          />
-        </label>
-      )}
 
+      {/* ── Objects list ── */}
       <div className="section-title-row">
         <div className="title-with-help">
-          <h3>Objets superposes</h3>
-          <HelpHint title="Overlays">
-            Images placees au-dessus du decor (objets, indices, portes...). Tu controles leur
-            taille, position, ordre et visibilite.
+          <h3>Objets</h3>
+          <HelpHint title="Les 4 types">
+            Decoration: pas d&apos;action. Collectible: va dans l&apos;inventaire.
+            Cle: deplacable a la souris jusqu&apos;a la serrure. Serrure: attend sa cle.
           </HelpHint>
         </div>
-        <button className="button-secondary" onClick={onAddGameplayOverlay} disabled={!canEdit}>
+        <button className="button-secondary" onClick={onAddGameplayObject} disabled={!canEdit}>
           + objet
         </button>
       </div>
-      {block.overlays.map((overlay) => (
-        <div key={overlay.id} className="choice-card">
+
+      {block.objects.length === 0 && (
+        <p className="empty-placeholder">Aucun objet. Clique &quot;+ objet&quot; pour commencer.</p>
+      )}
+
+      {block.objects.map((obj) => (
+        <div key={obj.id} className="choice-card">
           <div className="section-title-row">
-            <strong>{overlay.name || "Objet"}</strong>
-            <button
-              className="button-danger"
-              onClick={() => onRemoveGameplayOverlay(overlay.id)}
-              disabled={!canEdit}
-            >
+            <strong>{obj.name || "Objet"}</strong>
+            <button className="button-danger" onClick={() => onRemoveGameplayObject(obj.id)} disabled={!canEdit}>
               Supprimer
             </button>
           </div>
           <label>
             Nom
             <input
-              value={overlay.name}
-              onChange={(event) =>
-                onUpdateSelectedBlock((candidate) => {
-                  if (candidate.type !== "gameplay") return candidate;
-                  return {
-                    ...candidate,
-                    overlays: candidate.overlays.map((item) =>
-                      item.id === overlay.id ? { ...item, name: event.target.value } : item,
-                    ),
-                  };
-                })
-              }
+              value={obj.name}
+              onChange={(event) => onUpdateGameplayObjectField(obj.id, "name", event.target.value)}
               disabled={!canEdit}
             />
           </label>
           <label>
-            Image overlay
+            Image
             <input
               type="file"
               accept="image/*"
@@ -1547,107 +1928,53 @@ function GameplayEditorSection({
                 if (!file) return;
                 const assetId = onRegisterAsset(file);
                 void onEnsureAssetPreviewSrc(assetId);
-                onUpdateSelectedBlock((candidate) => {
-                  if (candidate.type !== "gameplay") return candidate;
-                  return {
-                    ...candidate,
-                    overlays: candidate.overlays.map((item) =>
-                      item.id === overlay.id ? { ...item, assetId } : item,
-                    ),
-                  };
-                });
+                onUpdateGameplayObjectField(obj.id, "assetId", assetId);
                 onStatusMessage(`Asset ${file.name} ajoute.`);
                 event.target.value = "";
               }}
               disabled={!canEdit}
             />
           </label>
-          {renderAssetAttachmentWithRemove(overlay.assetId, () => onClearGameplayOverlayAsset(overlay.id))}
+          {renderAssetAttachmentWithRemove(obj.assetId, () => onClearGameplayObjectAsset(obj.id))}
+
+          {/* ── Type ── */}
+          <label>
+            Type
+            <select
+              value={obj.objectType}
+              onChange={(event) => onUpdateGameplayObjectField(obj.id, "objectType", event.target.value as GameplayObjectType)}
+              disabled={!canEdit}
+            >
+              {(Object.keys(typeLabels) as GameplayObjectType[]).map((key) => (
+                <option key={key} value={key}>{typeLabels[key]}</option>
+              ))}
+            </select>
+          </label>
+
+          {/* ── Size & zIndex (no X/Y — position via mouse drag only) ── */}
           <div className="grid-two">
             <label>
-              X %
-              <input
-                type="number"
-                value={overlay.x}
-                onChange={(event) =>
-                  onUpdateGameplayOverlayRect(overlay.id, "x", normalizeDelta(event.target.value))
-                }
-                disabled={!canEdit}
-              />
-            </label>
-            <label>
-              Y %
-              <input
-                type="number"
-                value={overlay.y}
-                onChange={(event) =>
-                  onUpdateGameplayOverlayRect(overlay.id, "y", normalizeDelta(event.target.value))
-                }
-                disabled={!canEdit}
-              />
-            </label>
-            <label>
               Largeur %
-              <input
-                type="number"
-                value={overlay.width}
-                onChange={(event) =>
-                  onUpdateGameplayOverlayRect(overlay.id, "width", normalizeDelta(event.target.value))
-                }
-                disabled={!canEdit}
-              />
+              <input type="number" value={obj.width} onChange={(event) => onUpdateGameplayObjectRect(obj.id, "width", normalizeDelta(event.target.value))} disabled={!canEdit} />
             </label>
             <label>
               Hauteur %
-              <input
-                type="number"
-                value={overlay.height}
-                onChange={(event) =>
-                  onUpdateGameplayOverlayRect(overlay.id, "height", normalizeDelta(event.target.value))
-                }
-                disabled={!canEdit}
-              />
+              <input type="number" value={obj.height} onChange={(event) => onUpdateGameplayObjectRect(obj.id, "height", normalizeDelta(event.target.value))} disabled={!canEdit} />
             </label>
-          </div>
-          <div className="grid-two">
             <label>
               z-index
               <input
                 type="number"
-                value={overlay.zIndex}
-                onChange={(event) =>
-                  onUpdateSelectedBlock((candidate) => {
-                    if (candidate.type !== "gameplay") return candidate;
-                    return {
-                      ...candidate,
-                      overlays: candidate.overlays.map((item) =>
-                        item.id === overlay.id
-                          ? { ...item, zIndex: normalizeDelta(event.target.value) }
-                          : item,
-                      ),
-                    };
-                  })
-                }
+                value={obj.zIndex}
+                onChange={(event) => onUpdateGameplayObjectField(obj.id, "zIndex", normalizeDelta(event.target.value))}
                 disabled={!canEdit}
               />
             </label>
             <label>
               Visible au depart
               <select
-                value={overlay.visibleByDefault ? "yes" : "no"}
-                onChange={(event) =>
-                  onUpdateSelectedBlock((candidate) => {
-                    if (candidate.type !== "gameplay") return candidate;
-                    return {
-                      ...candidate,
-                      overlays: candidate.overlays.map((item) =>
-                        item.id === overlay.id
-                          ? { ...item, visibleByDefault: event.target.value === "yes" }
-                          : item,
-                      ),
-                    };
-                  })
-                }
+                value={obj.visibleByDefault ? "yes" : "no"}
+                onChange={(event) => onUpdateGameplayObjectField(obj.id, "visibleByDefault", event.target.value === "yes")}
                 disabled={!canEdit}
               >
                 <option value="yes">oui</option>
@@ -1655,181 +1982,76 @@ function GameplayEditorSection({
               </select>
             </label>
           </div>
-          <button
-            className="button-secondary"
-            onClick={() => onSetGameplayPlacementTarget({ kind: "overlay", id: overlay.id })}
-            disabled={!canEdit}
-          >
-            Placer sur la scene
-          </button>
-        </div>
-      ))}
 
-      <div className="section-title-row">
-        <div className="title-with-help">
-          <h3>Zones cliquables</h3>
-          <HelpHint title="Hotspots">
-            Zones invisibles ou visibles que le joueur peut toucher. Elles peuvent afficher un
-            message, donner un objet ou changer de bloc.
-          </HelpHint>
-        </div>
-        <button className="button-secondary" onClick={onAddGameplayHotspot} disabled={!canEdit}>
-          + zone
-        </button>
-      </div>
-      {block.hotspots.map((hotspot) => (
-        <div key={hotspot.id} className="choice-card">
-          <div className="section-title-row">
-            <strong>{hotspot.name || "Zone cliquable"}</strong>
-            <button
-              className="button-danger"
-              onClick={() => onRemoveGameplayHotspot(hotspot.id)}
-              disabled={!canEdit}
-            >
-              Supprimer
-            </button>
-          </div>
-          <label>
-            Nom
-            <input
-              value={hotspot.name}
-              onChange={(event) =>
-                onUpdateSelectedBlock((candidate) => {
-                  if (candidate.type !== "gameplay") return candidate;
-                  return {
-                    ...candidate,
-                    hotspots: candidate.hotspots.map((item) =>
-                      item.id === hotspot.id ? { ...item, name: event.target.value } : item,
-                    ),
-                  };
-                })
-              }
-              disabled={!canEdit}
-            />
-          </label>
-          <label>
-            Message affiche
-            <textarea
-              rows={2}
-              value={hotspot.message}
-              onChange={(event) =>
-                onUpdateSelectedBlock((candidate) => {
-                  if (candidate.type !== "gameplay") return candidate;
-                  return {
-                    ...candidate,
-                    hotspots: candidate.hotspots.map((item) =>
-                      item.id === hotspot.id ? { ...item, message: event.target.value } : item,
-                    ),
-                  };
-                })
-              }
-              disabled={!canEdit}
-            />
-          </label>
-          <label>
-            Requise pour terminer
-            <select
-              value={hotspot.required ? "yes" : "no"}
-              onChange={(event) =>
-                onUpdateSelectedBlock((candidate) => {
-                  if (candidate.type !== "gameplay") return candidate;
-                  return {
-                    ...candidate,
-                    hotspots: candidate.hotspots.map((item) =>
-                      item.id === hotspot.id
-                        ? { ...item, required: event.target.value === "yes" }
-                        : item,
-                    ),
-                  };
-                })
-              }
-              disabled={!canEdit}
-            >
-              <option value="yes">oui</option>
-              <option value="no">non</option>
-            </select>
-          </label>
-          <div className="grid-two">
+          {/* ── Type-specific fields ── */}
+          {obj.objectType === "collectible" && (
             <label>
-              X %
-              <input
-                type="number"
-                value={hotspot.x}
-                onChange={(event) =>
-                  onUpdateGameplayHotspotRect(hotspot.id, "x", normalizeDelta(event.target.value))
-                }
+              Objet donne
+              <select
+                value={obj.grantItemId ?? ""}
+                onChange={(event) => onUpdateGameplayObjectField(obj.id, "grantItemId", event.target.value || null)}
                 disabled={!canEdit}
-              />
+              >
+                <option value="">Aucun</option>
+                {project.items.map((item) => (
+                  <option key={item.id} value={item.id}>{item.name}</option>
+                ))}
+              </select>
             </label>
-            <label>
-              Y %
-              <input
-                type="number"
-                value={hotspot.y}
-                onChange={(event) =>
-                  onUpdateGameplayHotspotRect(hotspot.id, "y", normalizeDelta(event.target.value))
-                }
-                disabled={!canEdit}
-              />
-            </label>
-            <label>
-              Largeur %
-              <input
-                type="number"
-                value={hotspot.width}
-                onChange={(event) =>
-                  onUpdateGameplayHotspotRect(
-                    hotspot.id,
-                    "width",
-                    normalizeDelta(event.target.value),
-                  )
-                }
-                disabled={!canEdit}
-              />
-            </label>
-            <label>
-              Hauteur %
-              <input
-                type="number"
-                value={hotspot.height}
-                onChange={(event) =>
-                  onUpdateGameplayHotspotRect(
-                    hotspot.id,
-                    "height",
-                    normalizeDelta(event.target.value),
-                  )
-                }
-                disabled={!canEdit}
-              />
-            </label>
-          </div>
-          <label>
-            Toggle overlay au clic
-            <select
-              value={hotspot.toggleOverlayId ?? ""}
-              onChange={(event) =>
-                onUpdateSelectedBlock((candidate) => {
-                  if (candidate.type !== "gameplay") return candidate;
-                  return {
-                    ...candidate,
-                    hotspots: candidate.hotspots.map((item) =>
-                      item.id === hotspot.id
-                        ? { ...item, toggleOverlayId: event.target.value || null }
-                        : item,
-                    ),
-                  };
-                })
-              }
-              disabled={!canEdit}
-            >
-              <option value="">Aucun</option>
-              {block.overlays.map((overlay) => (
-                <option key={overlay.id} value={overlay.id}>
-                  {overlay.name || overlay.id}
-                </option>
-              ))}
-            </select>
-          </label>
+          )}
+
+          {obj.objectType === "lock" && (
+            <>
+              <label>
+                Cle associee
+                <select
+                  value={obj.linkedKeyId ?? ""}
+                  onChange={(event) => onUpdateGameplayObjectField(obj.id, "linkedKeyId", event.target.value || null)}
+                  disabled={!canEdit}
+                >
+                  <option value="">Aucune</option>
+                  {block.objects
+                    .filter((o) => o.objectType === "key")
+                    .map((o) => (
+                      <option key={o.id} value={o.id}>{o.name || o.id}</option>
+                    ))}
+                </select>
+              </label>
+              <label>
+                Effet au deverrouillage
+                <select
+                  value={obj.unlockEffect}
+                  onChange={(event) => onUpdateGameplayObjectField(obj.id, "unlockEffect", event.target.value as GameplayUnlockEffect)}
+                  disabled={!canEdit}
+                >
+                  {(Object.keys(unlockEffectLabels) as GameplayUnlockEffect[]).map((key) => (
+                    <option key={key} value={key}>{unlockEffectLabels[key]}</option>
+                  ))}
+                </select>
+              </label>
+              <label>
+                Message si verrouille
+                <textarea
+                  rows={2}
+                  value={obj.lockedMessage}
+                  placeholder="Il te manque quelque chose..."
+                  onChange={(event) => onUpdateGameplayObjectField(obj.id, "lockedMessage", event.target.value)}
+                  disabled={!canEdit}
+                />
+              </label>
+              <label>
+                Message de succes
+                <textarea
+                  rows={2}
+                  value={obj.successMessage}
+                  onChange={(event) => onUpdateGameplayObjectField(obj.id, "successMessage", event.target.value)}
+                  disabled={!canEdit}
+                />
+              </label>
+            </>
+          )}
+
+          {/* ── Sound ── */}
           <label>
             Son au clic
             <input
@@ -1840,277 +2062,61 @@ function GameplayEditorSection({
                 const file = event.target.files?.[0];
                 if (!file) return;
                 const assetId = onRegisterAsset(file);
-                onUpdateSelectedBlock((candidate) => {
-                  if (candidate.type !== "gameplay") return candidate;
-                  return {
-                    ...candidate,
-                    hotspots: candidate.hotspots.map((item) =>
-                      item.id === hotspot.id ? { ...item, soundAssetId: assetId } : item,
-                    ),
-                  };
-                });
+                onUpdateGameplayObjectField(obj.id, "soundAssetId", assetId);
                 onStatusMessage(`Asset ${file.name} ajoute.`);
                 event.target.value = "";
               }}
               disabled={!canEdit}
             />
           </label>
-          {renderAssetAttachmentWithRemove(hotspot.soundAssetId, () =>
-            onClearGameplayHotspotSound(hotspot.id),
-          )}
-          <button
-            className="button-secondary"
-            onClick={() => onSetGameplayPlacementTarget({ kind: "hotspot", id: hotspot.id })}
-            disabled={!canEdit}
-          >
-            Placer sur la scene
-          </button>
+          {renderAssetAttachmentWithRemove(obj.soundAssetId, () => onClearGameplayObjectSound(obj.id))}
+
+          {/* ── Effects ── */}
           <div className="effect-list">
             <div className="section-title-row">
-              <span>Effets variables (au clic)</span>
+              <span>Effets variables</span>
               <button
                 className="button-secondary"
-                onClick={() => onAddGameplayHotspotEffect(hotspot.id)}
-                disabled={!canEdit || project.variables.length === 0}
+                onClick={() => onAddGameplayObjectEffect(obj.id)}
+                disabled={!canEdit}
               >
                 + effet
               </button>
             </div>
-            {hotspot.effects.map((effect, index) => (
-              <div key={`${hotspot.id}-effect-${index}`} className="effect-row">
+            {obj.effects.map((effect, idx) => (
+              <div key={`${obj.id}-effect-${idx}`} className="effect-row">
                 <select
                   value={effect.variableId}
-                  onChange={(event) =>
-                    onUpdateGameplayHotspotEffect(
-                      hotspot.id,
-                      index,
-                      "variableId",
-                      event.target.value,
-                    )
-                  }
+                  onChange={(event) => onUpdateGameplayObjectEffect(obj.id, idx, "variableId", event.target.value)}
                   disabled={!canEdit}
                 >
-                  {project.variables.map((variable) => (
-                    <option key={variable.id} value={variable.id}>
-                      {variable.name}
-                    </option>
+                  <option value="">--</option>
+                  {project.variables.map((v) => (
+                    <option key={v.id} value={v.id}>{v.name}</option>
                   ))}
                 </select>
                 <input
                   type="number"
                   value={effect.delta}
-                  onChange={(event) =>
-                    onUpdateGameplayHotspotEffect(hotspot.id, index, "delta", event.target.value)
-                  }
+                  onChange={(event) => onUpdateGameplayObjectEffect(obj.id, idx, "delta", normalizeDelta(event.target.value))}
                   disabled={!canEdit}
                 />
-                <button
-                  className="button-danger"
-                  onClick={() => onRemoveGameplayHotspotEffect(hotspot.id, index)}
-                  disabled={!canEdit}
-                >
-                  x
-                </button>
+                <button className="button-danger" onClick={() => onRemoveGameplayObjectEffect(obj.id, idx)} disabled={!canEdit}>x</button>
               </div>
             ))}
           </div>
-          <div className="effect-list">
-            <div className="section-title-row">
-              <div className="title-with-help">
-                <span>Actions au clic</span>
-                <HelpHint title="Script simple au clic">
-                  Chaques action est executee dans l&apos;ordre: texte, ajout d&apos;objet,
-                  desactivation de zone, saut vers un bloc.
-                </HelpHint>
-              </div>
-            </div>
-            <div className="row-inline">
-              <button
-                className="button-secondary"
-                onClick={() => onAddGameplayHotspotAction(hotspot.id, "message")}
-                disabled={!canEdit}
-              >
-                + texte
-              </button>
-              <button
-                className="button-secondary"
-                onClick={() => onAddGameplayHotspotAction(hotspot.id, "add_item")}
-                disabled={!canEdit}
-              >
-                + objet
-              </button>
-              <button
-                className="button-secondary"
-                onClick={() => onAddGameplayHotspotAction(hotspot.id, "disable_hotspot")}
-                disabled={!canEdit}
-              >
-                + desactiver zone
-              </button>
-              <button
-                className="button-secondary"
-                onClick={() => onAddGameplayHotspotAction(hotspot.id, "go_to_block")}
-                disabled={!canEdit}
-              >
-                + aller bloc
-              </button>
-            </div>
-            {hotspot.onClickActions.length === 0 && (
-              <small className="empty-placeholder">
-                Astuce: ajoute une action pour afficher un texte, donner un objet, desactiver une
-                zone ou sauter vers un autre bloc.
-              </small>
-            )}
-            {hotspot.onClickActions.map((action) => (
-              <div key={action.id} className="choice-card">
-                <div className="section-title-row">
-                  <strong>Action</strong>
-                  <button
-                    className="button-danger"
-                    onClick={() => onRemoveGameplayHotspotAction(hotspot.id, action.id)}
-                    disabled={!canEdit}
-                  >
-                    Supprimer
-                  </button>
-                </div>
-                <label>
-                  Type
-                  <select
-                    value={action.type}
-                    onChange={(event) =>
-                      onUpdateGameplayHotspotAction(hotspot.id, action.id, "type", event.target.value)
-                    }
-                    disabled={!canEdit}
-                  >
-                    <option value="message">Afficher un texte</option>
-                    <option value="add_item">Ajouter un objet</option>
-                    <option value="disable_hotspot">Desactiver une zone</option>
-                    <option value="go_to_block">Aller vers un bloc</option>
-                  </select>
-                </label>
 
-                {action.type === "message" && (
-                  <label>
-                    Texte a afficher
-                    <textarea
-                      rows={2}
-                      value={action.message}
-                      onChange={(event) =>
-                        onUpdateGameplayHotspotAction(
-                          hotspot.id,
-                          action.id,
-                          "message",
-                          event.target.value,
-                        )
-                      }
-                      disabled={!canEdit}
-                    />
-                  </label>
-                )}
-
-                {action.type === "add_item" && (
-                  <>
-                    <label>
-                      Objet
-                      <select
-                        value={action.itemId ?? ""}
-                        onChange={(event) =>
-                          onUpdateGameplayHotspotAction(
-                            hotspot.id,
-                            action.id,
-                            "itemId",
-                            event.target.value,
-                          )
-                        }
-                        disabled={!canEdit}
-                      >
-                        <option value="">Aucun</option>
-                        {project.items.map((item) => (
-                          <option key={item.id} value={item.id}>
-                            {item.name}
-                          </option>
-                        ))}
-                      </select>
-                    </label>
-                    <label>
-                      Quantite
-                      <input
-                        type="number"
-                        min={1}
-                        value={action.quantity}
-                        onChange={(event) =>
-                          onUpdateGameplayHotspotAction(
-                            hotspot.id,
-                            action.id,
-                            "quantity",
-                            event.target.value,
-                          )
-                        }
-                        disabled={!canEdit}
-                      />
-                    </label>
-                  </>
-                )}
-
-                {action.type === "disable_hotspot" && (
-                  <label>
-                    Zone a desactiver
-                    <select
-                      value={action.targetHotspotId ?? ""}
-                      onChange={(event) =>
-                        onUpdateGameplayHotspotAction(
-                          hotspot.id,
-                          action.id,
-                          "targetHotspotId",
-                          event.target.value,
-                        )
-                      }
-                      disabled={!canEdit}
-                    >
-                      <option value="">Zone cliquee</option>
-                      {block.hotspots.map((candidate) => (
-                        <option key={candidate.id} value={candidate.id}>
-                          {candidate.name || candidate.id}
-                        </option>
-                      ))}
-                    </select>
-                  </label>
-                )}
-
-                {action.type === "go_to_block" && (
-                  <label>
-                    Bloc cible
-                    <select
-                      value={action.targetBlockId ?? ""}
-                      onChange={(event) =>
-                        onUpdateGameplayHotspotAction(
-                          hotspot.id,
-                          action.id,
-                          "targetBlockId",
-                          event.target.value,
-                        )
-                      }
-                      disabled={!canEdit}
-                    >
-                      <option value="">Aucun</option>
-                      {blocks
-                        .filter(
-                          (candidate) =>
-                            candidate.type !== "hero_profile" &&
-                            candidate.type !== "npc_profile",
-                        )
-                        .map((candidate) => (
-                        <option key={candidate.id} value={candidate.id}>
-                          {candidate.name} ({BLOCK_LABELS[candidate.type]})
-                        </option>
-                      ))}
-                    </select>
-                  </label>
-                )}
-              </div>
-            ))}
-          </div>
+          <button
+            className="button-secondary"
+            onClick={() => onSetGameplayPlacementTarget({ objectId: obj.id })}
+            disabled={!canEdit}
+          >
+            Placer sur la scene
+          </button>
         </div>
       ))}
+
+      {/* ── Next block ── */}
       <NextBlockSelect
         selectedBlockId={block.id}
         nextBlockId={block.nextBlockId}
@@ -2118,19 +2124,21 @@ function GameplayEditorSection({
         canEdit={canEdit}
         onChange={(targetId) => onSetConnection(block.id, "next", targetId)}
       />
+
+      {/* ── Completion effects ── */}
       <div className="effect-list">
         <div className="section-title-row">
           <div className="title-with-help">
             <span>Effets a la fin du gameplay</span>
             <HelpHint title="Recompenses de fin">
-              Effets appliques une fois l&apos;objectif de la scene atteint, juste avant de passer au
-              bloc suivant.
+              Effets appliques une fois l&apos;objectif de la scene atteint, juste avant de passer
+              au bloc suivant.
             </HelpHint>
           </div>
           <button
             className="button-secondary"
-            onClick={onAddGameplayEffect}
-            disabled={!canEdit || project.variables.length === 0}
+            onClick={onAddGameplayCompletionEffect}
+            disabled={!canEdit}
           >
             + effet
           </button>
@@ -2139,26 +2147,21 @@ function GameplayEditorSection({
           <div key={`g-effect-${index}`} className="effect-row">
             <select
               value={effect.variableId}
-              onChange={(event) => onUpdateGameplayEffect(index, "variableId", event.target.value)}
+              onChange={(event) => onUpdateGameplayCompletionEffect(index, "variableId", event.target.value)}
               disabled={!canEdit}
             >
-              {project.variables.map((variable) => (
-                <option key={variable.id} value={variable.id}>
-                  {variable.name}
-                </option>
+              <option value="">--</option>
+              {project.variables.map((v) => (
+                <option key={v.id} value={v.id}>{v.name}</option>
               ))}
             </select>
             <input
               type="number"
               value={effect.delta}
-              onChange={(event) => onUpdateGameplayEffect(index, "delta", event.target.value)}
+              onChange={(event) => onUpdateGameplayCompletionEffect(index, "delta", normalizeDelta(event.target.value))}
               disabled={!canEdit}
             />
-            <button
-              className="button-danger"
-              onClick={() => onRemoveGameplayEffect(index)}
-              disabled={!canEdit}
-            >
+            <button className="button-danger" onClick={() => onRemoveGameplayCompletionEffect(index)} disabled={!canEdit}>
               x
             </button>
           </div>
@@ -2248,6 +2251,17 @@ function NpcProfileEditorSection({
         />
       </label>
       <label>
+        Affinite initiale ({block.initialAffinity}/100)
+        <input
+          type="range"
+          min={0}
+          max={100}
+          value={block.initialAffinity}
+          onChange={(event) => onSetSelectedDynamicField("initialAffinity", Number(event.target.value))}
+          disabled={!canEdit}
+        />
+      </label>
+      <label>
         Ajouter une image PNJ
         <input
           type="file"
@@ -2295,13 +2309,6 @@ function NpcProfileEditorSection({
               <small>Image {index + 1}</small>
             </div>
             <div className="item-library-actions">
-              <button
-                className="button-secondary"
-                onClick={() => onSetSelectedDynamicField("defaultImageAssetId", assetId)}
-                disabled={!canEdit || block.defaultImageAssetId === assetId}
-              >
-                {block.defaultImageAssetId === assetId ? "Par defaut" : "Definir defaut"}
-              </button>
               <button
                 className="button-danger"
                 onClick={() =>
@@ -2370,26 +2377,21 @@ export function AuthorStudioBlockEditorPanel({
   onUpdateChoiceOptionDescription,
   onSetChoiceOptionImage,
   onClearChoiceOptionImage,
-  onAddGameplayOverlay,
-  onRemoveGameplayOverlay,
-  onUpdateGameplayOverlayRect,
-  onClearGameplayOverlayAsset,
-  onAddGameplayHotspot,
-  onRemoveGameplayHotspot,
-  onUpdateGameplayHotspotRect,
-  onClearGameplayHotspotSound,
-  onAddGameplayHotspotEffect,
-  onUpdateGameplayHotspotEffect,
-  onRemoveGameplayHotspotEffect,
-  onAddGameplayHotspotAction,
-  onUpdateGameplayHotspotAction,
-  onRemoveGameplayHotspotAction,
-  onAddGameplayEffect,
-  onUpdateGameplayEffect,
-  onRemoveGameplayEffect,
+  onAddGameplayObject,
+  onRemoveGameplayObject,
+  onUpdateGameplayObjectField,
+  onUpdateGameplayObjectRect,
+  onClearGameplayObjectAsset,
+  onClearGameplayObjectSound,
+  onAddGameplayObjectEffect,
+  onUpdateGameplayObjectEffect,
+  onRemoveGameplayObjectEffect,
+  onAddGameplayCompletionEffect,
+  onUpdateGameplayCompletionEffect,
+  onRemoveGameplayCompletionEffect,
   gameplayPlacementTarget,
   onSetGameplayPlacementTarget,
-  onStartGameplayElementDrag,
+  onStartGameplayObjectDrag,
   onGameplaySceneClick,
   onGameplayScenePointerMove,
   onGameplayScenePointerEnd,
@@ -2531,10 +2533,13 @@ export function AuthorStudioBlockEditorPanel({
                 block={selectedBlock}
                 canEdit={canEdit}
                 blocks={blocks}
+                assetPreviewSrcById={assetPreviewSrcById}
                 onSetSelectedDynamicField={onSetSelectedDynamicField}
+                onUpdateSelectedBlock={onUpdateSelectedBlock}
                 onSetConnection={onSetConnection}
                 onAssetInput={onAssetInput}
                 renderAssetAttachment={renderAssetAttachment}
+                onStatusMessage={onStatusMessage}
               />
             )}
 
@@ -2561,6 +2566,7 @@ export function AuthorStudioBlockEditorPanel({
                 onAddResponseEffect={onAddResponseEffect}
                 onUpdateResponseEffect={onUpdateResponseEffect}
                 onRemoveResponseEffect={onRemoveResponseEffect}
+                onStatusMessage={onStatusMessage}
               />
             )}
 
@@ -2616,26 +2622,21 @@ export function AuthorStudioBlockEditorPanel({
                 onAssetInput={onAssetInput}
                 renderAssetAttachment={renderAssetAttachment}
                 renderAssetAttachmentWithRemove={renderAssetAttachmentWithRemove}
-                onAddGameplayOverlay={onAddGameplayOverlay}
-                onRemoveGameplayOverlay={onRemoveGameplayOverlay}
-                onUpdateGameplayOverlayRect={onUpdateGameplayOverlayRect}
-                onClearGameplayOverlayAsset={onClearGameplayOverlayAsset}
-                onAddGameplayHotspot={onAddGameplayHotspot}
-                onRemoveGameplayHotspot={onRemoveGameplayHotspot}
-                onUpdateGameplayHotspotRect={onUpdateGameplayHotspotRect}
-                onClearGameplayHotspotSound={onClearGameplayHotspotSound}
-                onAddGameplayHotspotEffect={onAddGameplayHotspotEffect}
-                onUpdateGameplayHotspotEffect={onUpdateGameplayHotspotEffect}
-                onRemoveGameplayHotspotEffect={onRemoveGameplayHotspotEffect}
-                onAddGameplayHotspotAction={onAddGameplayHotspotAction}
-                onUpdateGameplayHotspotAction={onUpdateGameplayHotspotAction}
-                onRemoveGameplayHotspotAction={onRemoveGameplayHotspotAction}
-                onAddGameplayEffect={onAddGameplayEffect}
-                onUpdateGameplayEffect={onUpdateGameplayEffect}
-                onRemoveGameplayEffect={onRemoveGameplayEffect}
+                onAddGameplayObject={onAddGameplayObject}
+                onRemoveGameplayObject={onRemoveGameplayObject}
+                onUpdateGameplayObjectField={onUpdateGameplayObjectField}
+                onUpdateGameplayObjectRect={onUpdateGameplayObjectRect}
+                onClearGameplayObjectAsset={onClearGameplayObjectAsset}
+                onClearGameplayObjectSound={onClearGameplayObjectSound}
+                onAddGameplayObjectEffect={onAddGameplayObjectEffect}
+                onUpdateGameplayObjectEffect={onUpdateGameplayObjectEffect}
+                onRemoveGameplayObjectEffect={onRemoveGameplayObjectEffect}
+                onAddGameplayCompletionEffect={onAddGameplayCompletionEffect}
+                onUpdateGameplayCompletionEffect={onUpdateGameplayCompletionEffect}
+                onRemoveGameplayCompletionEffect={onRemoveGameplayCompletionEffect}
                 gameplayPlacementTarget={gameplayPlacementTarget}
                 onSetGameplayPlacementTarget={onSetGameplayPlacementTarget}
-                onStartGameplayElementDrag={onStartGameplayElementDrag}
+                onStartGameplayObjectDrag={onStartGameplayObjectDrag}
                 onGameplaySceneClick={onGameplaySceneClick}
                 onGameplayScenePointerMove={onGameplayScenePointerMove}
                 onGameplayScenePointerEnd={onGameplayScenePointerEnd}

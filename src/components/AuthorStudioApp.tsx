@@ -1,8 +1,6 @@
 "use client";
 
 import {
-  MouseEvent,
-  PointerEvent as ReactPointerEvent,
   useCallback,
   useEffect,
   useMemo,
@@ -27,12 +25,16 @@ import {
 import { AuthorStudioCloudPanel } from "@/components/AuthorStudioCloudPanel";
 import { AuthorStudioBlockEditorPanel } from "@/components/AuthorStudioBlockEditorPanel";
 import { AuthorStudioProjectPanel } from "@/components/AuthorStudioProjectPanel";
-import { AuthorStudioStatusPanel } from "@/components/AuthorStudioStatusPanel";
 import { HelpHint } from "@/components/HelpHint";
+import { PreviewOverlay } from "@/components/PreviewOverlay";
 import { StoryNode, StoryNodeData, DeletableEdge } from "@/components/StoryNode";
+import { useBlockEffectOperations } from "@/components/useBlockEffectOperations";
+import { useChoiceOperations } from "@/components/useChoiceOperations";
 import { useCloudProjectActions } from "@/components/useCloudProjectActions";
 import { useCloudProjectState } from "@/components/useCloudProjectState";
 import { useCloudProjectSession } from "@/components/useCloudProjectSession";
+import { useDialogueOperations } from "@/components/useDialogueOperations";
+import { useGameplayOperations } from "@/components/useGameplayOperations";
 import { usePreviewRuntime } from "@/components/usePreviewRuntime";
 import { useStudioAssets } from "@/components/useStudioAssets";
 import {
@@ -46,14 +48,7 @@ import {
   buildEdge,
   buildInitialStudio,
   choiceLabelFromHandle,
-  clampPercent,
-  defaultGameplayHotspotDraft,
-  defaultGameplayHotspotActionDraft,
-  defaultGameplayOverlayDraft,
-  describeEffect,
   lineIdFromHandle,
-  normalizeDelta,
-  normalizeRectPercent,
   rebuildEdgesFromNodes,
   removeItemReferences,
   removeNodeReferences,
@@ -62,38 +57,21 @@ import {
 } from "@/components/author-studio-core";
 import {
   PlatformRole,
-  GameplayPlacementTarget,
 } from "@/components/author-studio-types";
 import {
   BLOCK_LABELS,
   BlockType,
-  ChoiceBlock,
-  CHOICE_LABELS,
-  DialogueBlock,
-  DialogueLine,
-  DialogueResponse,
-  GameplayHotspotClickActionType,
   ProjectMeta,
   StoryBlock,
   ValidationIssue,
   blockTypeColor,
   createBlock,
-  createDefaultLine,
-  createDefaultResponse,
   createId,
   normalizeHeroProfile,
   normalizeStoryBlock,
   validateStoryBlocks,
 } from "@/lib/story";
 import { allowSelfSignup } from "@/lib/runtimeFlags";
-
-interface GameplayDragState {
-  kind: "overlay" | "hotspot";
-  id: string;
-  pointerId: number;
-  offsetX: number;
-  offsetY: number;
-}
 
 const nodeTypes: NodeTypes = { storyBlock: StoryNode };
 const edgeTypes: EdgeTypes = { deletable: DeletableEdge };
@@ -143,6 +121,9 @@ export function AuthorStudioApp() {
   );
   const [lastValidation, setLastValidation] = useState<ValidationIssue[]>([]);
   const [statusMessage, setStatusMessage] = useState<string>("");
+  const [toasts, setToasts] = useState<Array<{ id: number; text: string; level: "info" | "warn" | "error"; exiting: boolean }>>([]);
+  const toastIdRef = useRef(0);
+  const importZipInputRef = useRef<HTMLInputElement | null>(null);
   const [newVariableName, setNewVariableName] = useState("");
   const [ownPasswordInput, setOwnPasswordInput] = useState("");
   const [ownPasswordConfirmInput, setOwnPasswordConfirmInput] = useState("");
@@ -193,9 +174,7 @@ export function AuthorStudioApp() {
   const [lastSavedFingerprint, setLastSavedFingerprint] = useState(() =>
     buildStudioChangeFingerprint(seed.project, seed.nodes, seed.edges, {}),
   );
-  const [gameplayPlacementTarget, setGameplayPlacementTarget] =
-    useState<GameplayPlacementTarget | null>(null);
-  const [gameplayDragState, setGameplayDragState] = useState<GameplayDragState | null>(null);
+  const rfInstanceRef = useRef<{ screenToFlowPosition: (pos: { x: number; y: number }) => { x: number; y: number } } | null>(null);
 
   const blocks = useMemo(() => nodes.map((node) => blockFromNode(node)), [nodes]);
   const blockById = useMemo(
@@ -207,14 +186,14 @@ export function AuthorStudioApp() {
     setPreviewOpen,
     previewState,
     previewBlock,
-    previewFoundHotspotSet,
-    previewDisabledHotspotSet,
+    previewInteractedSet,
     previewGameplayCompleted,
     previewGameplayProgressLabel,
     startPreview,
     continuePreview,
     pickPreviewChoice,
-    pickPreviewHotspot,
+    pickPreviewObject,
+    dropKeyOnLock,
     resetPreview,
   } = usePreviewRuntime({
     project,
@@ -269,6 +248,18 @@ export function AuthorStudioApp() {
     Boolean(cloudLatestUpdatedAt) &&
     cloudProjectUpdatedAt !== cloudLatestUpdatedAt;
   const canEdit = canUseAuthorTools && localCanEdit && cloudCanWrite && !cloudLockHeldByOther;
+
+  // ── Safety net: auto-reset cloudBusy if stuck for more than 120 s ──
+  useEffect(() => {
+    if (!cloudBusy) return;
+    const safety = window.setTimeout(() => {
+      console.error("[AuthorStudio] cloudBusy stuck — force-resetting after 120 s");
+      setCloudBusy(false);
+      setStatusMessage("Operation cloud expiree (delai depasse). Reessaie ou recharge la page.");
+    }, 120_000);
+    return () => window.clearTimeout(safety);
+  }, [cloudBusy, setCloudBusy, setStatusMessage]);
+
   const {
     refreshCloudSideData,
     appendCloudLog,
@@ -406,6 +397,7 @@ export function AuthorStudioApp() {
     hydrateAssetRefs,
     exportZip,
     cleanupLocalOrphanAssetRefs,
+    importFromZip,
   } = useStudioAssets({
     blocks,
     project,
@@ -423,6 +415,35 @@ export function AuthorStudioApp() {
     [assetRefs, edges, nodes, project],
   );
   const hasUnsavedChanges = currentFingerprint !== lastSavedFingerprint;
+
+  // ── Toast system: push statusMessage changes as auto-fading toasts ──
+  const prevStatusRef = useRef("");
+  useEffect(() => {
+    if (!statusMessage || statusMessage === prevStatusRef.current) return;
+    prevStatusRef.current = statusMessage;
+
+    const level: "info" | "warn" | "error" = /erreur|error|echoue|timeout|refusee|expiree/i.test(
+      statusMessage,
+    )
+      ? "error"
+      : /attention|conflit|verrou|recharge/i.test(statusMessage)
+        ? "warn"
+        : "info";
+
+    const id = ++toastIdRef.current;
+    setToasts((prev) => [...prev, { id, text: statusMessage, level, exiting: false }]);
+
+    // Each toast manages its own independent timers — not tied to useEffect cleanup
+    // so that a new statusMessage never cancels a previous toast's removal.
+    window.setTimeout(() => {
+      setToasts((prev) => prev.map((t) => (t.id === id ? { ...t, exiting: true } : t)));
+    }, 4200);
+
+    window.setTimeout(() => {
+      setToasts((prev) => prev.filter((t) => t.id !== id));
+    }, 4600);
+  }, [statusMessage]);
+
   const markStudioClean = useCallback(
     (fingerprint?: string) => {
       setLastSavedFingerprint(fingerprint ?? currentFingerprint);
@@ -430,115 +451,51 @@ export function AuthorStudioApp() {
     [currentFingerprint],
   );
 
-  const hydrateStudioFromPayload = useCallback((payload: CloudPayload) => {
-    const normalizedNodes = payload.nodes.map((node) => {
-      const block = node.data.block as StoryBlock;
-      const normalizedBlock = normalizeStoryBlock(block);
-      return {
-        ...node,
-        data: {
-          ...node.data,
-          block: normalizedBlock,
-        },
-      } as EditorNode;
-    });
-
-    const normalizedProject: ProjectMeta = {
-      ...payload.project,
-      items: normalizeProjectItems((payload.project as ProjectMeta & { items?: unknown }).items),
-    };
-    normalizedProject.hero = normalizeProjectHero(
-      (payload.project as ProjectMeta & { hero?: unknown }).hero,
-      normalizedProject.variables,
-      normalizedProject.items,
-    );
-
-    setProject(normalizedProject);
-    setNodes(normalizedNodes);
-    setEdges(rebuildEdgesFromNodes(normalizedNodes));
-    hydrateAssetRefs(payload.assetRefs ?? {});
-    setGameplayPlacementTarget(null);
-    setGameplayDragState(null);
-    setCloudEditingLockUserId(null);
-    setCloudProjectUpdatedAt(null);
-    setCloudLatestUpdatedAt(null);
-    setCloudProfiles({});
-    setSelectedBlockId(normalizedProject.info.startBlockId ?? null);
-    setLastValidation([]);
-    markStudioClean(
-      buildStudioChangeFingerprint(
-        normalizedProject,
-        normalizedNodes,
-        rebuildEdgesFromNodes(normalizedNodes),
-        payload.assetRefs ?? {},
-      ),
-    );
-  }, [
-    hydrateAssetRefs,
-    markStudioClean,
-    setCloudEditingLockUserId,
-    setCloudLatestUpdatedAt,
-    setCloudProfiles,
-    setCloudProjectUpdatedAt,
-  ]);
-
   useEffect(() => {
     const timer = window.setTimeout(() => {
-      if (!selectedBlock) {
-        setGameplayPlacementTarget(null);
-        setGameplayDragState(null);
-        return;
+      if (!selectedBlock) return;
+
+      if (selectedBlock.type === "npc_profile") {
+        for (const assetId of selectedBlock.imageAssetIds) {
+          void ensureAssetPreviewSrc(assetId);
+        }
       }
 
-      if (selectedBlock.type !== "gameplay") {
-        setGameplayPlacementTarget(null);
-        setGameplayDragState(null);
-
-        if (selectedBlock.type === "npc_profile") {
-          for (const assetId of selectedBlock.imageAssetIds) {
-            void ensureAssetPreviewSrc(assetId);
-          }
-        }
-
-        if (selectedBlock.type === "dialogue") {
-          if (selectedBlock.backgroundAssetId) void ensureAssetPreviewSrc(selectedBlock.backgroundAssetId);
-          if (selectedBlock.characterAssetId) void ensureAssetPreviewSrc(selectedBlock.characterAssetId);
-          if (selectedBlock.npcImageAssetId) void ensureAssetPreviewSrc(selectedBlock.npcImageAssetId);
-          if (selectedBlock.npcProfileBlockId) {
-            const npcBlock = blockById.get(selectedBlock.npcProfileBlockId);
-            if (npcBlock?.type === "npc_profile" && npcBlock.defaultImageAssetId) {
-              void ensureAssetPreviewSrc(npcBlock.defaultImageAssetId);
+      if (selectedBlock.type === "dialogue") {
+        if (selectedBlock.backgroundAssetId) void ensureAssetPreviewSrc(selectedBlock.backgroundAssetId);
+        if (selectedBlock.characterAssetId) void ensureAssetPreviewSrc(selectedBlock.characterAssetId);
+        if (selectedBlock.npcImageAssetId) void ensureAssetPreviewSrc(selectedBlock.npcImageAssetId);
+        if (selectedBlock.npcProfileBlockId) {
+          const npcBlock = blockById.get(selectedBlock.npcProfileBlockId);
+          if (npcBlock?.type === "npc_profile") {
+            for (const imgId of npcBlock.imageAssetIds) {
+              void ensureAssetPreviewSrc(imgId);
             }
           }
         }
-        return;
       }
 
-      if (gameplayDragState) {
-        const exists =
-          gameplayDragState.kind === "overlay"
-            ? selectedBlock.overlays.some((overlay) => overlay.id === gameplayDragState.id)
-            : selectedBlock.hotspots.some((hotspot) => hotspot.id === gameplayDragState.id);
-        if (!exists) {
-          setGameplayDragState(null);
+      if (selectedBlock.type === "cinematic") {
+        if (selectedBlock.backgroundAssetId) void ensureAssetPreviewSrc(selectedBlock.backgroundAssetId);
+        if (selectedBlock.characterAssetId) void ensureAssetPreviewSrc(selectedBlock.characterAssetId);
+      }
+
+      if (selectedBlock.type === "gameplay") {
+        const wantedAssetIds = new Set<string>();
+        if (selectedBlock.backgroundAssetId) wantedAssetIds.add(selectedBlock.backgroundAssetId);
+        for (const obj of selectedBlock.objects) {
+          if (obj.assetId) wantedAssetIds.add(obj.assetId);
         }
-      }
-
-      const wantedAssetIds = new Set<string>();
-      if (selectedBlock.backgroundAssetId) wantedAssetIds.add(selectedBlock.backgroundAssetId);
-      for (const overlay of selectedBlock.overlays) {
-        if (overlay.assetId) wantedAssetIds.add(overlay.assetId);
-      }
-
-      for (const assetId of wantedAssetIds) {
-        void ensureAssetPreviewSrc(assetId);
+        for (const assetId of wantedAssetIds) {
+          void ensureAssetPreviewSrc(assetId);
+        }
       }
     }, 0);
 
     return () => {
       window.clearTimeout(timer);
     };
-  }, [blockById, ensureAssetPreviewSrc, gameplayDragState, selectedBlock]);
+  }, [blockById, ensureAssetPreviewSrc, selectedBlock]);
 
   useEffect(() => {
     const timer = window.setTimeout(() => {
@@ -552,6 +509,7 @@ export function AuthorStudioApp() {
         if (block.backgroundAssetId) wantedAssetIds.add(block.backgroundAssetId);
       } else if (block.type === "cinematic") {
         if (block.backgroundAssetId) wantedAssetIds.add(block.backgroundAssetId);
+        if (block.characterAssetId) wantedAssetIds.add(block.characterAssetId);
         if (block.videoAssetId) wantedAssetIds.add(block.videoAssetId);
         if (block.voiceAssetId) wantedAssetIds.add(block.voiceAssetId);
       } else if (block.type === "dialogue") {
@@ -564,7 +522,6 @@ export function AuthorStudioApp() {
         if (block.npcProfileBlockId) {
           const npcBlock = blockById.get(block.npcProfileBlockId);
           if (npcBlock && npcBlock.type === "npc_profile") {
-            if (npcBlock.defaultImageAssetId) wantedAssetIds.add(npcBlock.defaultImageAssetId);
             for (const imageAssetId of npcBlock.imageAssetIds) {
               wantedAssetIds.add(imageAssetId);
             }
@@ -584,8 +541,8 @@ export function AuthorStudioApp() {
       } else if (block.type === "gameplay") {
         if (block.backgroundAssetId) wantedAssetIds.add(block.backgroundAssetId);
         if (block.voiceAssetId) wantedAssetIds.add(block.voiceAssetId);
-        for (const overlay of block.overlays) {
-          if (overlay.assetId) wantedAssetIds.add(overlay.assetId);
+        for (const obj of block.objects) {
+          if (obj.assetId) wantedAssetIds.add(obj.assetId);
         }
       }
 
@@ -752,7 +709,7 @@ export function AuthorStudioApp() {
             node.data.block.npcImageAssetId &&
             npcBlock.imageAssetIds.includes(node.data.block.npcImageAssetId)
               ? node.data.block.npcImageAssetId
-              : npcBlock.defaultImageAssetId ?? npcBlock.imageAssetIds[0] ?? null;
+              : null;
 
           return {
             ...node,
@@ -811,10 +768,29 @@ export function AuthorStudioApp() {
     (type: BlockType) => {
       if (!canEdit) return;
 
-      const position = {
+      let position = {
         x: 120 + (nodes.length % 5) * 90,
         y: 120 + Math.floor(nodes.length / 3) * 70,
       };
+
+      // Place the new block at the center of the current viewport
+      const rf = rfInstanceRef.current;
+      if (rf) {
+        const canvasEl = document.querySelector('.panel-canvas');
+        if (canvasEl) {
+          const rect = canvasEl.getBoundingClientRect();
+          const center = rf.screenToFlowPosition({
+            x: rect.x + rect.width / 2,
+            y: rect.y + rect.height / 2,
+          });
+          // Small random offset so multiple consecutive blocks don't stack exactly
+          position = {
+            x: Math.round(center.x - 80 + (Math.random() * 60 - 30)),
+            y: Math.round(center.y - 40 + (Math.random() * 60 - 30)),
+          };
+        }
+      }
+
       const block = createBlock(type, position);
 
       setNodes((current) => [...current, blockToNode(block)]);
@@ -1033,74 +1009,142 @@ export function AuthorStudioApp() {
     logAction("set_start_block", blockId);
   };
 
-  /* ---------- Dialogue: lines & responses ---------- */
+  /* ---------- Domain operation hooks ---------- */
 
-  const addDialogueLine = () => {
-    if (!canEdit || !selectedBlock || selectedBlock.type !== "dialogue") return;
-    const newLine = createDefaultLine();
-    updateSelectedBlock((block) => {
-      if (block.type !== "dialogue") return block;
-      return { ...block, lines: [...block.lines, newLine] };
-    });
-    logAction("add_dialogue_line", `${selectedBlock.id} line ${newLine.id}`);
-  };
+  const {
+    addDialogueLine,
+    removeDialogueLine,
+    updateDialogueLineField,
+    addDialogueLineResponse,
+    removeDialogueLineResponse,
+    updateDialogueResponseField,
+    addResponseEffect,
+    updateResponseEffect,
+    removeResponseEffect,
+  } = useDialogueOperations({
+    canEdit,
+    selectedBlock,
+    updateSelectedBlock,
+    setEdges,
+    setConnection,
+    touchProject,
+    logAction,
+    setStatusMessage,
+    projectVariables: project.variables,
+  });
 
-  const removeDialogueLine = (lineId: string) => {
-    if (!canEdit || !selectedBlock || selectedBlock.type !== "dialogue") return;
-    if (selectedBlock.lines.length <= 1) return;
-    const removedLine = selectedBlock.lines.find((l) => l.id === lineId);
-    if (!removedLine) return;
+  const {
+    addChoiceOption,
+    removeChoiceOption,
+    updateChoiceOptionDescription,
+    setChoiceOptionImage,
+    clearChoiceOptionImage,
+    updateChoiceField,
+    addChoiceEffect,
+    updateChoiceEffect,
+    removeChoiceEffect,
+  } = useChoiceOperations({
+    canEdit,
+    selectedBlock,
+    updateSelectedBlock,
+    setConnection,
+    logAction,
+    setStatusMessage,
+    projectVariables: project.variables,
+    registerAsset,
+    ensureAssetPreviewSrc,
+  });
 
-    // Collect source handles of responses that have connections
-    const removedRespHandles = new Set(
-      removedLine.responses
-        .filter((r) => r.targetBlockId || r.targetLineId)
-        .map((r) => `resp-${r.id}`),
-    );
+  const {
+    gameplayPlacementTarget,
+    setGameplayPlacementTarget,
+    resetGameplayState,
+    addGameplayObject,
+    removeGameplayObject,
+    updateGameplayObject,
+    updateGameplayObjectField,
+    updateGameplayObjectRect,
+    clearGameplayObjectAsset,
+    clearGameplayObjectSound,
+    addGameplayObjectEffect,
+    updateGameplayObjectEffect,
+    removeGameplayObjectEffect,
+    addGameplayCompletionEffect,
+    updateGameplayCompletionEffect,
+    removeGameplayCompletionEffect,
+    startGameplayObjectDrag,
+    onGameplayScenePointerMove,
+    onGameplayScenePointerEnd,
+    onGameplaySceneClick,
+  } = useGameplayOperations({
+    canEdit,
+    selectedBlock,
+    updateSelectedBlock,
+    setStatusMessage,
+  });
 
-    // Single pass: remove edges FROM removed responses + edges TARGETING this line handle
-    setEdges((current) =>
-      current.filter((edge) => {
-        if (edge.source === selectedBlock.id && removedRespHandles.has(edge.sourceHandle ?? "")) {
-          return false;
-        }
-        if (edge.target === selectedBlock.id && edge.targetHandle === `line-${lineId}`) {
-          return false;
-        }
-        return true;
-      }),
-    );
+  const {
+    addBlockEntryEffect,
+    updateBlockEntryEffect,
+    removeBlockEntryEffect,
+  } = useBlockEffectOperations({
+    selectedBlock,
+    updateSelectedBlock,
+    setStatusMessage,
+    projectVariables: project.variables,
+  });
 
-    // Clear any internal references to this line from other lines' responses
-    updateSelectedBlock((block) => {
-      if (block.type !== "dialogue") return block;
-      const newLines = block.lines
-        .filter((l) => l.id !== lineId)
-        .map((l) => ({
-          ...l,
-          responses: l.responses.map((r) =>
-            r.targetLineId === lineId ? { ...r, targetLineId: null } : r,
-          ),
-        }));
-      const startLineId =
-        block.startLineId === lineId ? (newLines[0]?.id ?? block.startLineId) : block.startLineId;
-      return { ...block, lines: newLines, startLineId };
-    });
-    logAction("remove_dialogue_line", `${selectedBlock.id} line ${lineId}`);
-  };
-
-  const updateDialogueLineField = (lineId: string, field: string, value: string | null) => {
-    if (!canEdit || !selectedBlock || selectedBlock.type !== "dialogue") return;
-    updateSelectedBlock((block) => {
-      if (block.type !== "dialogue") return block;
+  const hydrateStudioFromPayload = useCallback((payload: CloudPayload) => {
+    const normalizedNodes = payload.nodes.map((node) => {
+      const block = node.data.block as StoryBlock;
+      const normalizedBlock = normalizeStoryBlock(block);
       return {
-        ...block,
-        lines: block.lines.map((l) =>
-          l.id === lineId ? { ...l, [field]: value } : l,
-        ),
-      };
+        ...node,
+        data: {
+          ...node.data,
+          block: normalizedBlock,
+        },
+      } as EditorNode;
     });
-  };
+
+    const normalizedProject: ProjectMeta = {
+      ...payload.project,
+      items: normalizeProjectItems((payload.project as ProjectMeta & { items?: unknown }).items),
+    };
+    normalizedProject.hero = normalizeProjectHero(
+      (payload.project as ProjectMeta & { hero?: unknown }).hero,
+      normalizedProject.variables,
+      normalizedProject.items,
+    );
+
+    setProject(normalizedProject);
+    setNodes(normalizedNodes);
+    setEdges(rebuildEdgesFromNodes(normalizedNodes));
+    hydrateAssetRefs(payload.assetRefs ?? {});
+    resetGameplayState();
+    setCloudEditingLockUserId(null);
+    setCloudProjectUpdatedAt(null);
+    setCloudLatestUpdatedAt(null);
+    setCloudProfiles({});
+    setSelectedBlockId(normalizedProject.info.startBlockId ?? null);
+    setLastValidation([]);
+    markStudioClean(
+      buildStudioChangeFingerprint(
+        normalizedProject,
+        normalizedNodes,
+        rebuildEdgesFromNodes(normalizedNodes),
+        payload.assetRefs ?? {},
+      ),
+    );
+  }, [
+    hydrateAssetRefs,
+    markStudioClean,
+    resetGameplayState,
+    setCloudEditingLockUserId,
+    setCloudLatestUpdatedAt,
+    setCloudProfiles,
+    setCloudProjectUpdatedAt,
+  ]);
 
   const onDialogueLineVoiceInput = useCallback(
     (lineId: string) =>
@@ -1144,337 +1188,6 @@ export function AuthorStudioApp() {
     ),
     [canEdit, getAssetFileName, selectedBlockId, updateBlock],
   );
-
-  const addDialogueLineResponse = (lineId: string) => {
-    if (!canEdit || !selectedBlock || selectedBlock.type !== "dialogue") return;
-    const line = selectedBlock.lines.find((l) => l.id === lineId);
-    if (!line || line.responses.length >= 4) return;
-    const label = CHOICE_LABELS[line.responses.length];
-    const newResp = createDefaultResponse(label);
-    updateSelectedBlock((block) => {
-      if (block.type !== "dialogue") return block;
-      return {
-        ...block,
-        lines: block.lines.map((l) =>
-          l.id === lineId ? { ...l, responses: [...l.responses, newResp] } : l,
-        ),
-      };
-    });
-    logAction("add_dialogue_response", `${selectedBlock.id} line ${lineId} resp ${newResp.id}`);
-  };
-
-  const removeDialogueLineResponse = (lineId: string, responseId: string) => {
-    if (!canEdit || !selectedBlock || selectedBlock.type !== "dialogue") return;
-    const line = selectedBlock.lines.find((l) => l.id === lineId);
-    if (!line || line.responses.length <= 1) return;
-    const removed = line.responses.find((r) => r.id === responseId);
-    if (!removed) return;
-    if (removed.targetBlockId || removed.targetLineId) {
-      setEdges((current) =>
-        current.filter(
-          (edge) =>
-            !(edge.source === selectedBlock.id && edge.sourceHandle === `resp-${removed.id}`),
-        ),
-      );
-    }
-    updateSelectedBlock((block) => {
-      if (block.type !== "dialogue") return block;
-      return {
-        ...block,
-        lines: block.lines.map((l) =>
-          l.id === lineId
-            ? { ...l, responses: l.responses.filter((r) => r.id !== responseId) }
-            : l,
-        ),
-      };
-    });
-    logAction("remove_dialogue_response", `${selectedBlock.id} resp ${responseId}`);
-  };
-
-  const updateDialogueResponseField = (
-    lineId: string,
-    responseId: string,
-    field: "text" | "targetLineId" | "targetBlockId",
-    value: string,
-  ) => {
-    if (!canEdit || !selectedBlock || selectedBlock.type !== "dialogue") return;
-
-    if (field === "targetBlockId") {
-      // Clear internal target when setting external
-      updateSelectedBlock((block) => {
-        if (block.type !== "dialogue") return block;
-        return {
-          ...block,
-          lines: block.lines.map((l) =>
-            l.id === lineId
-              ? {
-                  ...l,
-                  responses: l.responses.map((r) =>
-                    r.id === responseId
-                      ? { ...r, targetBlockId: value || null, targetLineId: null }
-                      : r,
-                  ),
-                }
-              : l,
-          ),
-        };
-      });
-      setConnection(selectedBlock.id, `resp-${responseId}`, value || null);
-      return;
-    }
-
-    if (field === "targetLineId") {
-      // Remove any existing edge for this response first
-      const resp = selectedBlock.lines
-        .flatMap((l) => l.responses)
-        .find((r) => r.id === responseId);
-      if (resp?.targetBlockId || resp?.targetLineId) {
-        // Clear old edge
-        setEdges((current) =>
-          current.filter(
-            (edge) =>
-              !(edge.source === selectedBlock.id && edge.sourceHandle === `resp-${responseId}`),
-          ),
-        );
-      }
-
-      if (value) {
-        // Internal routing → self-edge: targetBlockId = same block, targetLineId = target line
-        updateSelectedBlock((block) => {
-          if (block.type !== "dialogue") return block;
-          return {
-            ...block,
-            lines: block.lines.map((l) =>
-              l.id === lineId
-                ? {
-                    ...l,
-                    responses: l.responses.map((r) =>
-                      r.id === responseId
-                        ? { ...r, targetLineId: value, targetBlockId: null }
-                        : r,
-                    ),
-                  }
-                : l,
-            ),
-          };
-        });
-        // Create self-edge
-        setEdges((current) => [
-          ...current,
-          buildEdge(selectedBlock.id, selectedBlock.id, `resp-${responseId}`, undefined, `line-${value}`),
-        ]);
-      } else {
-        // Clear internal target
-        updateSelectedBlock((block) => {
-          if (block.type !== "dialogue") return block;
-          return {
-            ...block,
-            lines: block.lines.map((l) =>
-              l.id === lineId
-                ? {
-                    ...l,
-                    responses: l.responses.map((r) =>
-                      r.id === responseId
-                        ? { ...r, targetLineId: null, targetBlockId: null }
-                        : r,
-                    ),
-                  }
-                : l,
-            ),
-          };
-        });
-      }
-      touchProject();
-      return;
-    }
-
-    // text field
-    updateSelectedBlock((block) => {
-      if (block.type !== "dialogue") return block;
-      return {
-        ...block,
-        lines: block.lines.map((l) =>
-          l.id === lineId
-            ? {
-                ...l,
-                responses: l.responses.map((r) =>
-                  r.id === responseId ? { ...r, [field]: value } : r,
-                ),
-              }
-            : l,
-        ),
-      };
-    });
-  };
-
-  /* ---------- Dialogue: response effects ---------- */
-
-  const addResponseEffect = (lineId: string, responseId: string) => {
-    if (!canEdit || !selectedBlock || selectedBlock.type !== "dialogue") return;
-    const fallbackVariableId = project.variables[0]?.id;
-    if (!fallbackVariableId) {
-      setStatusMessage("Ajoute d'abord une variable globale.");
-      return;
-    }
-    updateSelectedBlock((block) => {
-      if (block.type !== "dialogue") return block;
-      return {
-        ...block,
-        lines: block.lines.map((l) =>
-          l.id === lineId
-            ? {
-                ...l,
-                responses: l.responses.map((r) =>
-                  r.id === responseId
-                    ? { ...r, effects: [...r.effects, { variableId: fallbackVariableId, delta: 1 }] }
-                    : r,
-                ),
-              }
-            : l,
-        ),
-      };
-    });
-  };
-
-  const updateResponseEffect = (
-    lineId: string,
-    responseId: string,
-    effectIndex: number,
-    key: "variableId" | "delta",
-    value: string,
-  ) => {
-    updateSelectedBlock((block) => {
-      if (block.type !== "dialogue") return block;
-      return {
-        ...block,
-        lines: block.lines.map((l) =>
-          l.id === lineId
-            ? {
-                ...l,
-                responses: l.responses.map((r) =>
-                  r.id === responseId
-                    ? {
-                        ...r,
-                        effects: r.effects.map((eff, idx) =>
-                          idx === effectIndex
-                            ? { ...eff, [key]: key === "delta" ? normalizeDelta(value) : value }
-                            : eff,
-                        ),
-                      }
-                    : r,
-                ),
-              }
-            : l,
-        ),
-      };
-    });
-  };
-
-  const removeResponseEffect = (lineId: string, responseId: string, effectIndex: number) => {
-    updateSelectedBlock((block) => {
-      if (block.type !== "dialogue") return block;
-      return {
-        ...block,
-        lines: block.lines.map((l) =>
-          l.id === lineId
-            ? {
-                ...l,
-                responses: l.responses.map((r) =>
-                  r.id === responseId
-                    ? { ...r, effects: r.effects.filter((_, idx) => idx !== effectIndex) }
-                    : r,
-                ),
-              }
-            : l,
-        ),
-      };
-    });
-  };
-
-  const addChoiceOption = () => {
-    if (!canEdit || !selectedBlock || selectedBlock.type !== "choice") return;
-    if (selectedBlock.choices.length >= 4) return;
-
-    const label = CHOICE_LABELS[selectedBlock.choices.length];
-    updateSelectedBlock((block) => {
-      if (block.type !== "choice") return block;
-      return {
-        ...block,
-        choices: [
-          ...block.choices,
-          {
-            id: createId("option"),
-            label,
-            text: "",
-            description: "",
-            imageAssetId: null,
-            targetBlockId: null,
-            effects: [],
-          },
-        ],
-      };
-    });
-    logAction("add_choice_option", `${selectedBlock.id} option ${label}`);
-  };
-
-  const removeChoiceOption = () => {
-    if (!canEdit || !selectedBlock || selectedBlock.type !== "choice") return;
-    if (selectedBlock.choices.length <= 1) return;
-
-    const removed = selectedBlock.choices[selectedBlock.choices.length - 1];
-    setConnection(selectedBlock.id, `choice-${removed.label}`, null);
-    updateSelectedBlock((block) => {
-      if (block.type !== "choice") return block;
-      return {
-        ...block,
-        choices: block.choices.slice(0, -1),
-      };
-    });
-    logAction("remove_choice_option", `${selectedBlock.id} option ${removed.label}`);
-  };
-
-  const updateChoiceOptionDescription = (optionId: string, description: string) => {
-    if (!canEdit || !selectedBlock || selectedBlock.type !== "choice") return;
-    updateSelectedBlock((block) => {
-      if (block.type !== "choice") return block;
-      return {
-        ...block,
-        choices: block.choices.map((option) =>
-          option.id === optionId ? { ...option, description } : option,
-        ),
-      };
-    });
-  };
-
-  const setChoiceOptionImage = (optionId: string, file: File) => {
-    if (!canEdit || !selectedBlock || selectedBlock.type !== "choice") return;
-    const assetId = registerAsset(file);
-    void ensureAssetPreviewSrc(assetId);
-    updateSelectedBlock((block) => {
-      if (block.type !== "choice") return block;
-      return {
-        ...block,
-        choices: block.choices.map((option) =>
-          option.id === optionId ? { ...option, imageAssetId: assetId } : option,
-        ),
-      };
-    });
-    logAction("set_choice_option_image", `${selectedBlock.id} option ${optionId}`);
-  };
-
-  const clearChoiceOptionImage = (optionId: string) => {
-    if (!canEdit || !selectedBlock || selectedBlock.type !== "choice") return;
-    updateSelectedBlock((block) => {
-      if (block.type !== "choice") return block;
-      return {
-        ...block,
-        choices: block.choices.map((option) =>
-          option.id === optionId ? { ...option, imageAssetId: null } : option,
-        ),
-      };
-    });
-    logAction("clear_choice_option_image", `${selectedBlock.id} option ${optionId}`);
-  };
 
   const addVariable = () => {
     if (!canEdit) return;
@@ -1649,651 +1362,6 @@ export function AuthorStudioApp() {
     setStatusMessage(`Image objet mise a jour: ${file.name}.`);
   }, [canEdit, ensureAssetPreviewSrc, logAction, registerAsset, setStatusMessage]);
 
-  const updateChoiceField = (
-    choiceId: string,
-    field: "text" | "targetBlockId",
-    value: string,
-  ) => {
-    if (!selectedBlock || selectedBlock.type !== "choice") return;
-
-    if (field === "targetBlockId") {
-      const choice = selectedBlock.choices.find((item) => item.id === choiceId);
-      if (!choice) return;
-      setConnection(
-        selectedBlock.id,
-        `choice-${choice.label}`,
-        value ? value : null,
-      );
-      return;
-    }
-
-    updateSelectedBlock((block) => {
-      if (block.type === "choice") {
-        return {
-          ...block,
-          choices: block.choices.map((option) =>
-            option.id === choiceId ? { ...option, [field]: value } : option,
-          ),
-        };
-      }
-      return block;
-    });
-  };
-
-  const addBlockEntryEffect = () => {
-    if (!selectedBlock) return;
-    const fallbackVariableId = project.variables[0]?.id;
-    if (!fallbackVariableId) {
-      setStatusMessage("Ajoute d'abord une variable globale.");
-      return;
-    }
-
-    updateSelectedBlock((block) => ({
-      ...block,
-      entryEffects: [...(block.entryEffects ?? []), { variableId: fallbackVariableId, delta: 1 }],
-    }));
-  };
-
-  const updateBlockEntryEffect = (
-    effectIndex: number,
-    key: "variableId" | "delta",
-    value: string,
-  ) => {
-    updateSelectedBlock((block) => ({
-      ...block,
-      entryEffects: (block.entryEffects ?? []).map((effect, index) =>
-        index === effectIndex
-          ? {
-              ...effect,
-              [key]: key === "delta" ? normalizeDelta(value) : value,
-            }
-          : effect,
-      ),
-    }));
-  };
-
-  const removeBlockEntryEffect = (effectIndex: number) => {
-    updateSelectedBlock((block) => ({
-      ...block,
-      entryEffects: (block.entryEffects ?? []).filter((_, index) => index !== effectIndex),
-    }));
-  };
-
-  const addChoiceEffect = (choiceId: string) => {
-    if (!selectedBlock || selectedBlock.type !== "choice") return;
-    const fallbackVariableId = project.variables[0]?.id;
-    if (!fallbackVariableId) {
-      setStatusMessage("Ajoute d'abord une variable globale.");
-      return;
-    }
-
-    const addEffect = <T extends { id: string; effects: { variableId: string; delta: number }[] }>(choice: T): T =>
-      choice.id === choiceId
-        ? { ...choice, effects: [...choice.effects, { variableId: fallbackVariableId, delta: 1 }] }
-        : choice;
-
-    updateSelectedBlock((block) => {
-      if (block.type === "choice") return { ...block, choices: block.choices.map(addEffect) };
-      return block;
-    });
-  };
-
-  const updateChoiceEffect = (
-    choiceId: string,
-    effectIndex: number,
-    key: "variableId" | "delta",
-    value: string,
-  ) => {
-    const patchEffect = <T extends { id: string; effects: { variableId: string; delta: number }[] }>(choice: T): T => {
-      if (choice.id !== choiceId) return choice;
-      return {
-        ...choice,
-        effects: choice.effects.map((effect, index) =>
-          index === effectIndex
-            ? { ...effect, [key]: key === "delta" ? normalizeDelta(value) : value }
-            : effect,
-        ),
-      };
-    };
-
-    updateSelectedBlock((block) => {
-      if (block.type === "choice") return { ...block, choices: block.choices.map(patchEffect) };
-      return block;
-    });
-  };
-
-  const removeChoiceEffect = (choiceId: string, effectIndex: number) => {
-    const dropEffect = <T extends { id: string; effects: { variableId: string; delta: number }[] }>(choice: T): T =>
-      choice.id === choiceId
-        ? { ...choice, effects: choice.effects.filter((_, index) => index !== effectIndex) }
-        : choice;
-
-    updateSelectedBlock((block) => {
-      if (block.type === "choice") return { ...block, choices: block.choices.map(dropEffect) };
-      return block;
-    });
-  };
-
-  const addGameplayEffect = () => {
-    if (!selectedBlock || selectedBlock.type !== "gameplay") return;
-    const fallbackVariableId = project.variables[0]?.id;
-    if (!fallbackVariableId) {
-      setStatusMessage("Ajoute d'abord une variable globale.");
-      return;
-    }
-
-    updateSelectedBlock((block) => {
-      if (block.type !== "gameplay") return block;
-      return {
-        ...block,
-        completionEffects: [
-          ...block.completionEffects,
-          { variableId: fallbackVariableId, delta: 1 },
-        ],
-      };
-    });
-  };
-
-  const updateGameplayEffect = (
-    effectIndex: number,
-    key: "variableId" | "delta",
-    value: string,
-  ) => {
-    updateSelectedBlock((block) => {
-      if (block.type !== "gameplay") return block;
-      return {
-        ...block,
-        completionEffects: block.completionEffects.map((effect, index) =>
-          index === effectIndex
-            ? {
-                ...effect,
-                [key]: key === "delta" ? normalizeDelta(value) : value,
-              }
-            : effect,
-        ),
-      };
-    });
-  };
-
-  const removeGameplayEffect = (effectIndex: number) => {
-    updateSelectedBlock((block) => {
-      if (block.type !== "gameplay") return block;
-      return {
-        ...block,
-        completionEffects: block.completionEffects.filter(
-          (_, index) => index !== effectIndex,
-        ),
-      };
-    });
-  };
-
-  const updateGameplayOverlayRect = (
-    overlayId: string,
-    key: "x" | "y" | "width" | "height",
-    value: number,
-  ) => {
-    updateSelectedBlock((block) => {
-      if (block.type !== "gameplay") return block;
-      return {
-        ...block,
-        overlays: block.overlays.map((overlay) => {
-          if (overlay.id !== overlayId) return overlay;
-          const next = normalizeRectPercent({
-            x: key === "x" ? value : overlay.x,
-            y: key === "y" ? value : overlay.y,
-            width: key === "width" ? value : overlay.width,
-            height: key === "height" ? value : overlay.height,
-          });
-          return {
-            ...overlay,
-            ...next,
-          };
-        }),
-      };
-    });
-  };
-
-  const updateGameplayHotspotRect = (
-    hotspotId: string,
-    key: "x" | "y" | "width" | "height",
-    value: number,
-  ) => {
-    updateSelectedBlock((block) => {
-      if (block.type !== "gameplay") return block;
-      return {
-        ...block,
-        hotspots: block.hotspots.map((hotspot) => {
-          if (hotspot.id !== hotspotId) return hotspot;
-          const next = normalizeRectPercent({
-            x: key === "x" ? value : hotspot.x,
-            y: key === "y" ? value : hotspot.y,
-            width: key === "width" ? value : hotspot.width,
-            height: key === "height" ? value : hotspot.height,
-          });
-          return {
-            ...hotspot,
-            ...next,
-          };
-        }),
-      };
-    });
-  };
-
-  const addGameplayOverlay = () => {
-    updateSelectedBlock((block) => {
-      if (block.type !== "gameplay") return block;
-      return {
-        ...block,
-        overlays: [...block.overlays, defaultGameplayOverlayDraft()],
-      };
-    });
-  };
-
-  const removeGameplayOverlay = (overlayId: string) => {
-    setGameplayPlacementTarget((current) =>
-      current?.kind === "overlay" && current.id === overlayId ? null : current,
-    );
-    setGameplayDragState((current) =>
-      current?.kind === "overlay" && current.id === overlayId ? null : current,
-    );
-    updateSelectedBlock((block) => {
-      if (block.type !== "gameplay") return block;
-      return {
-        ...block,
-        overlays: block.overlays.filter((overlay) => overlay.id !== overlayId),
-        hotspots: block.hotspots.map((hotspot) =>
-          hotspot.toggleOverlayId === overlayId
-            ? { ...hotspot, toggleOverlayId: null }
-            : hotspot,
-        ),
-      };
-    });
-  };
-
-  const clearGameplayOverlayAsset = (overlayId: string) => {
-    updateSelectedBlock((block) => {
-      if (block.type !== "gameplay") return block;
-      return {
-        ...block,
-        overlays: block.overlays.map((overlay) =>
-          overlay.id === overlayId
-            ? { ...overlay, assetId: null }
-            : overlay,
-        ),
-      };
-    });
-  };
-
-  const addGameplayHotspot = () => {
-    updateSelectedBlock((block) => {
-      if (block.type !== "gameplay") return block;
-      return {
-        ...block,
-        hotspots: [...block.hotspots, defaultGameplayHotspotDraft()],
-      };
-    });
-  };
-
-  const removeGameplayHotspot = (hotspotId: string) => {
-    setGameplayPlacementTarget((current) =>
-      current?.kind === "hotspot" && current.id === hotspotId ? null : current,
-    );
-    setGameplayDragState((current) =>
-      current?.kind === "hotspot" && current.id === hotspotId ? null : current,
-    );
-    updateSelectedBlock((block) => {
-      if (block.type !== "gameplay") return block;
-      return {
-        ...block,
-        hotspots: block.hotspots.filter((hotspot) => hotspot.id !== hotspotId),
-      };
-    });
-  };
-
-  const clearGameplayHotspotSound = (hotspotId: string) => {
-    updateSelectedBlock((block) => {
-      if (block.type !== "gameplay") return block;
-      return {
-        ...block,
-        hotspots: block.hotspots.map((hotspot) =>
-          hotspot.id === hotspotId
-            ? { ...hotspot, soundAssetId: null }
-            : hotspot,
-        ),
-      };
-    });
-  };
-
-  const updateGameplayHotspotEffect = (
-    hotspotId: string,
-    effectIndex: number,
-    key: "variableId" | "delta",
-    value: string,
-  ) => {
-    updateSelectedBlock((block) => {
-      if (block.type !== "gameplay") return block;
-      return {
-        ...block,
-        hotspots: block.hotspots.map((hotspot) => {
-          if (hotspot.id !== hotspotId) return hotspot;
-          return {
-            ...hotspot,
-            effects: hotspot.effects.map((effect, index) =>
-              index === effectIndex
-                ? {
-                    ...effect,
-                    [key]: key === "delta" ? normalizeDelta(value) : value,
-                  }
-                : effect,
-            ),
-          };
-        }),
-      };
-    });
-  };
-
-  const addGameplayHotspotEffect = (hotspotId: string) => {
-    const fallbackVariableId = project.variables[0]?.id;
-    if (!fallbackVariableId) {
-      setStatusMessage("Ajoute d'abord une variable globale.");
-      return;
-    }
-
-    updateSelectedBlock((block) => {
-      if (block.type !== "gameplay") return block;
-      return {
-        ...block,
-        hotspots: block.hotspots.map((hotspot) =>
-          hotspot.id === hotspotId
-            ? {
-                ...hotspot,
-                effects: [...hotspot.effects, { variableId: fallbackVariableId, delta: 1 }],
-              }
-            : hotspot,
-        ),
-      };
-    });
-  };
-
-  const removeGameplayHotspotEffect = (hotspotId: string, effectIndex: number) => {
-    updateSelectedBlock((block) => {
-      if (block.type !== "gameplay") return block;
-      return {
-        ...block,
-        hotspots: block.hotspots.map((hotspot) =>
-          hotspot.id === hotspotId
-            ? {
-                ...hotspot,
-                effects: hotspot.effects.filter((_, index) => index !== effectIndex),
-              }
-            : hotspot,
-        ),
-      };
-    });
-  };
-
-  const addGameplayHotspotAction = (
-    hotspotId: string,
-    type: GameplayHotspotClickActionType = "message",
-  ) => {
-    updateSelectedBlock((block) => {
-      if (block.type !== "gameplay") return block;
-      return {
-        ...block,
-        hotspots: block.hotspots.map((hotspot) => {
-          if (hotspot.id !== hotspotId) return hotspot;
-          const draft = defaultGameplayHotspotActionDraft(type);
-          if (draft.type === "add_item" && project.items.length > 0) {
-            draft.itemId = project.items[0].id;
-          }
-          if (draft.type === "disable_hotspot") {
-            draft.targetHotspotId = hotspot.id;
-          }
-          return {
-            ...hotspot,
-            onClickActions: [...hotspot.onClickActions, draft],
-          };
-        }),
-      };
-    });
-  };
-
-  const updateGameplayHotspotAction = (
-    hotspotId: string,
-    actionId: string,
-    field:
-      | "type"
-      | "message"
-      | "itemId"
-      | "quantity"
-      | "targetHotspotId"
-      | "targetBlockId",
-    value: string,
-  ) => {
-    updateSelectedBlock((block) => {
-      if (block.type !== "gameplay") return block;
-      return {
-        ...block,
-        hotspots: block.hotspots.map((hotspot) => {
-          if (hotspot.id !== hotspotId) return hotspot;
-          return {
-            ...hotspot,
-            onClickActions: hotspot.onClickActions.map((action) => {
-              if (action.id !== actionId) return action;
-
-              if (field === "type") {
-                const actionType = value as GameplayHotspotClickActionType;
-                const draft = defaultGameplayHotspotActionDraft(actionType);
-                if (draft.type === "add_item" && project.items.length > 0) {
-                  draft.itemId = project.items[0].id;
-                }
-                if (draft.type === "disable_hotspot") {
-                  draft.targetHotspotId = hotspot.id;
-                }
-                return {
-                  ...draft,
-                  id: action.id,
-                };
-              }
-
-              if (field === "message" && action.type === "message") {
-                return {
-                  ...action,
-                  message: value,
-                };
-              }
-
-              if (field === "itemId" && action.type === "add_item") {
-                return {
-                  ...action,
-                  itemId: value || null,
-                };
-              }
-
-              if (field === "quantity" && action.type === "add_item") {
-                return {
-                  ...action,
-                  quantity: Math.max(1, Math.floor(normalizeDelta(value))),
-                };
-              }
-
-              if (field === "targetHotspotId" && action.type === "disable_hotspot") {
-                return {
-                  ...action,
-                  targetHotspotId: value || null,
-                };
-              }
-
-              if (field === "targetBlockId" && action.type === "go_to_block") {
-                return {
-                  ...action,
-                  targetBlockId: value || null,
-                };
-              }
-
-              return action;
-            }),
-          };
-        }),
-      };
-    });
-  };
-
-  const removeGameplayHotspotAction = (hotspotId: string, actionId: string) => {
-    updateSelectedBlock((block) => {
-      if (block.type !== "gameplay") return block;
-      return {
-        ...block,
-        hotspots: block.hotspots.map((hotspot) =>
-          hotspot.id === hotspotId
-            ? {
-                ...hotspot,
-                onClickActions: hotspot.onClickActions.filter((action) => action.id !== actionId),
-              }
-            : hotspot,
-        ),
-      };
-    });
-  };
-
-  const clampSceneCoordinate = (value: number, size: number) => {
-    const safeSize = clampPercent(size);
-    const maxOrigin = Math.max(0, 100 - safeSize);
-    return clampPercent(Math.min(Math.max(value, 0), maxOrigin));
-  };
-
-  const moveGameplayElement = (
-    kind: "overlay" | "hotspot",
-    elementId: string,
-    x: number,
-    y: number,
-  ) => {
-    updateSelectedBlock((block) => {
-      if (block.type !== "gameplay") return block;
-
-      if (kind === "overlay") {
-        return {
-          ...block,
-          overlays: block.overlays.map((overlay) => {
-            if (overlay.id !== elementId) return overlay;
-            return {
-              ...overlay,
-              x: clampSceneCoordinate(x, overlay.width),
-              y: clampSceneCoordinate(y, overlay.height),
-            };
-          }),
-        };
-      }
-
-      return {
-        ...block,
-        hotspots: block.hotspots.map((hotspot) => {
-          if (hotspot.id !== elementId) return hotspot;
-          return {
-            ...hotspot,
-            x: clampSceneCoordinate(x, hotspot.width),
-            y: clampSceneCoordinate(y, hotspot.height),
-          };
-        }),
-      };
-    });
-  };
-
-  const startGameplayElementDrag = (
-    event: ReactPointerEvent<HTMLDivElement>,
-    kind: "overlay" | "hotspot",
-    elementId: string,
-    elementX: number,
-    elementY: number,
-  ) => {
-    if (!canEdit || !selectedBlock || selectedBlock.type !== "gameplay") return;
-
-    const scene = event.currentTarget.parentElement;
-    if (!scene || !scene.classList.contains("pointclick-editor-scene")) return;
-
-    const rect = scene.getBoundingClientRect();
-    if (rect.width <= 0 || rect.height <= 0) return;
-
-    const pointerX = clampPercent(((event.clientX - rect.left) / rect.width) * 100);
-    const pointerY = clampPercent(((event.clientY - rect.top) / rect.height) * 100);
-
-    setGameplayPlacementTarget(null);
-    setGameplayDragState({
-      kind,
-      id: elementId,
-      pointerId: event.pointerId,
-      offsetX: pointerX - elementX,
-      offsetY: pointerY - elementY,
-    });
-
-    scene.setPointerCapture(event.pointerId);
-    event.preventDefault();
-    event.stopPropagation();
-  };
-
-  const onGameplayScenePointerMove = (event: ReactPointerEvent<HTMLDivElement>) => {
-    if (!gameplayDragState) return;
-    if (event.pointerId !== gameplayDragState.pointerId) return;
-    if (!selectedBlock || selectedBlock.type !== "gameplay") return;
-
-    const rect = event.currentTarget.getBoundingClientRect();
-    if (rect.width <= 0 || rect.height <= 0) return;
-
-    const pointerX = clampPercent(((event.clientX - rect.left) / rect.width) * 100);
-    const pointerY = clampPercent(((event.clientY - rect.top) / rect.height) * 100);
-
-    moveGameplayElement(
-      gameplayDragState.kind,
-      gameplayDragState.id,
-      pointerX - gameplayDragState.offsetX,
-      pointerY - gameplayDragState.offsetY,
-    );
-
-    event.preventDefault();
-  };
-
-  const onGameplayScenePointerEnd = (event: ReactPointerEvent<HTMLDivElement>) => {
-    if (!gameplayDragState) return;
-    if (event.pointerId !== gameplayDragState.pointerId) return;
-
-    if (event.currentTarget.hasPointerCapture(event.pointerId)) {
-      event.currentTarget.releasePointerCapture(event.pointerId);
-    }
-    setGameplayDragState(null);
-  };
-
-  const onGameplaySceneClick = (event: MouseEvent<HTMLDivElement>) => {
-    if (!selectedBlock || selectedBlock.type !== "gameplay" || !gameplayPlacementTarget) return;
-
-    const container = event.currentTarget;
-    const rect = container.getBoundingClientRect();
-    if (rect.width <= 0 || rect.height <= 0) return;
-
-    const xPercent = clampPercent(((event.clientX - rect.left) / rect.width) * 100);
-    const yPercent = clampPercent(((event.clientY - rect.top) / rect.height) * 100);
-
-    if (gameplayPlacementTarget.kind === "overlay") {
-      const overlay = selectedBlock.overlays.find((item) => item.id === gameplayPlacementTarget.id);
-      if (!overlay) return;
-      moveGameplayElement(
-        "overlay",
-        overlay.id,
-        xPercent - overlay.width / 2,
-        yPercent - overlay.height / 2,
-      );
-      return;
-    }
-
-    const hotspot = selectedBlock.hotspots.find((item) => item.id === gameplayPlacementTarget.id);
-    if (!hotspot) return;
-    moveGameplayElement(
-      "hotspot",
-      hotspot.id,
-      xPercent - hotspot.width / 2,
-      yPercent - hotspot.height / 2,
-    );
-  };
-
   const runValidation = () => {
     setLastValidation(liveIssues);
     const errorCount = liveIssues.filter((issue) => issue.level === "error").length;
@@ -2310,8 +1378,7 @@ export function AuthorStudioApp() {
     setNodes(fresh.nodes);
     setEdges(fresh.edges);
     clearAllAssetState();
-    setGameplayPlacementTarget(null);
-    setGameplayDragState(null);
+    resetGameplayState();
     setSelectedBlockId(fresh.project.info.startBlockId ?? null);
     setLastValidation([]);
     resetPreview();
@@ -2338,6 +1405,7 @@ export function AuthorStudioApp() {
     grantCloudAccess,
     revokeCloudAccess,
     cleanupCloudOrphanAssets,
+    deleteCloudProject,
   } = useCloudProjectActions({
     supabase,
     authUser,
@@ -2358,6 +1426,7 @@ export function AuthorStudioApp() {
     shareAccessLevel,
     cloudLockHeldByOther,
     hasUnsavedChanges,
+    isPlatformAdmin,
     setStatusMessage,
     setCloudBusy,
     setAssetRefs,
@@ -2430,10 +1499,10 @@ export function AuthorStudioApp() {
       const {
         data: { session },
         error: sessionError,
-      } = await supabase.auth.getSession();
+      } = await supabase.auth.refreshSession();
       if (sessionError || !session?.access_token) {
         setStatusMessage(
-          `Session admin invalide: ${sessionError?.message ?? "reconnecte-toi puis reessaie"}`,
+          `Session admin expiree: ${sessionError?.message ?? "reconnecte-toi puis reessaie"}`,
         );
         return;
       }
@@ -2490,6 +1559,36 @@ export function AuthorStudioApp() {
     setStatusMessage("Projet sauvegarde dans le cloud, puis nouveau projet initialise.");
   };
 
+  const handleImportZip = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+    event.target.value = "";
+
+    const result = await importFromZip(file);
+    if (!result) return;
+
+    setProject(result.project);
+    setNodes(result.nodes);
+    setEdges(result.edges);
+    resetGameplayState();
+    setSelectedBlockId(result.project.info.startBlockId ?? null);
+    setLastValidation([]);
+    resetPreview();
+    setCloudProjectId(null);
+    setCloudOwnerId(null);
+    setCloudEditingLockUserId(null);
+    setCloudProjectUpdatedAt(null);
+    setCloudLatestUpdatedAt(null);
+    setCloudAccessLevel(null);
+    setCloudAccessRows([]);
+    setCloudLogs([]);
+    setCloudProfiles({});
+    setShareEmailInput("");
+    markStudioClean(
+      buildStudioChangeFingerprint(result.project, result.nodes, result.edges, result.assetRefs),
+    );
+  };
+
   return (
     <div className="studio-root">
       <header className="studio-header">
@@ -2509,6 +1608,24 @@ export function AuthorStudioApp() {
           </HelpHint>
         </div>
         <div className="studio-header-actions">
+          {/* ── Navbar status indicators ── */}
+          <div className="nav-indicators">
+            <span className="nav-indicator" title={hasUnsavedChanges ? "Modifications non sauvegardees" : "Projet a jour"}>
+              <span className={`nav-indicator-dot ${hasUnsavedChanges ? "nav-indicator-dot-unsaved" : "nav-indicator-dot-saved"}`} />
+              {hasUnsavedChanges ? "Non sauvé" : "À jour"}
+            </span>
+            <span className="nav-indicator" title={`${totalErrors} erreur(s)`}>
+              <span className={`nav-indicator-badge ${totalErrors > 0 ? "nav-badge-errors" : "nav-badge-ok"}`}>
+                {totalErrors > 0 ? `⚠ ${totalErrors}` : "✓"}
+              </span>
+            </span>
+            {cloudLockHeldByOther && (
+              <span className="nav-indicator nav-indicator-lock" title={`Verrou: ${cloudLockHolderName}`}>
+                🔒 {cloudLockHolderName}
+              </span>
+            )}
+          </div>
+
           <a
             className="button-secondary nav-action-button nav-action-guide"
             href="/guide-premier-projet"
@@ -2545,25 +1662,55 @@ export function AuthorStudioApp() {
           >
             Export ZIP
           </button>
+          <button
+            className="button-secondary nav-action-button nav-action-import"
+            onClick={() => importZipInputRef.current?.click()}
+            disabled={!authUser || !canUseAuthorTools}
+          >
+            Import ZIP
+          </button>
+          <input
+            ref={importZipInputRef}
+            type="file"
+            accept=".zip"
+            style={{ display: "none" }}
+            onChange={(event) => {
+              void handleImportZip(event);
+            }}
+          />
         </div>
       </header>
 
-      <AuthorStudioStatusPanel
-        activeMemberLabel={activeMember ? `${activeMember.name} (${activeMember.role})` : "none"}
-        lockHolderName={lockHolder ? lockHolder.name : "libre"}
-        cloudLockHolderName={cloudLockHolderName}
-        blocksCount={blocks.length}
-        totalErrors={totalErrors}
-        cloudUserLabel={authUser?.email ?? "deconnecte"}
-        cloudAccessLevel={cloudAccessLevel}
-        cloudProjectUpdatedAt={cloudProjectUpdatedAt}
-        supabaseProjectRef={supabaseProjectRef}
-        hasUnsavedChanges={hasUnsavedChanges}
-        editBlockReason={editBlockReason}
-        cloudRevisionDrift={cloudRevisionDrift}
-        cloudLatestUpdatedAt={cloudLatestUpdatedAt}
-        statusMessage={statusMessage}
-      />
+      {/* ── Inline warnings (edit block / revision drift) ── */}
+      {editBlockReason && <div className="warning-banner">{editBlockReason}</div>}
+      {cloudRevisionDrift && (
+        <div className="warning-banner">
+          Une version cloud plus recente est disponible ({new Date(cloudLatestUpdatedAt ?? "").toLocaleString("fr-FR")}).
+          Recharge le projet avant de sauvegarder pour eviter d&apos;ecraser le travail d&apos;un collaborateur.
+        </div>
+      )}
+
+      {/* ── Toast notifications ── */}
+      {toasts.length > 0 && (
+        <div className="toast-container">
+          {toasts.map((toast) => (
+            <div
+              key={toast.id}
+              className={`toast toast-${toast.level}${toast.exiting ? " toast-exiting" : ""}`}
+            >
+              <span className="toast-icon">
+                {toast.level === "error" ? "✕" : toast.level === "warn" ? "⚠" : "ℹ"}
+              </span>
+              <span className="toast-message">{toast.text}</span>
+              <button
+                className="toast-close"
+                onClick={() => setToasts((prev) => prev.filter((t) => t.id !== toast.id))}
+                title="Fermer"
+              >×</button>
+            </div>
+          ))}
+        </div>
+      )}
 
       <div className="studio-grid">
         <div className="panel-left-stack">
@@ -2624,6 +1771,9 @@ export function AuthorStudioApp() {
             }}
             onDownloadProjectBundle={(projectId) => {
               void downloadCloudProjectBundle(projectId);
+            }}
+            onDeleteProject={(projectId) => {
+              void deleteCloudProject(projectId);
             }}
             canEdit={canEdit}
             onCleanupLocalOrphanAssetRefs={cleanupLocalOrphanAssetRefs}
@@ -2702,6 +1852,7 @@ export function AuthorStudioApp() {
                 onNodesChange={onNodesChange}
                 onEdgesChange={onEdgesChange}
                 onConnect={onConnect}
+                onInit={(instance) => { rfInstanceRef.current = instance as typeof rfInstanceRef.current; }}
                 onNodeClick={(_, node) => setSelectedBlockId(node.id)}
                 nodesDraggable={canEdit}
                 nodesConnectable={canEdit}
@@ -2759,26 +1910,21 @@ export function AuthorStudioApp() {
               onAddChoiceEffect={addChoiceEffect}
               onUpdateChoiceEffect={updateChoiceEffect}
               onRemoveChoiceEffect={removeChoiceEffect}
-              onAddGameplayOverlay={addGameplayOverlay}
-              onRemoveGameplayOverlay={removeGameplayOverlay}
-              onUpdateGameplayOverlayRect={updateGameplayOverlayRect}
-              onClearGameplayOverlayAsset={clearGameplayOverlayAsset}
-              onAddGameplayHotspot={addGameplayHotspot}
-              onRemoveGameplayHotspot={removeGameplayHotspot}
-              onUpdateGameplayHotspotRect={updateGameplayHotspotRect}
-              onClearGameplayHotspotSound={clearGameplayHotspotSound}
-              onAddGameplayHotspotEffect={addGameplayHotspotEffect}
-              onUpdateGameplayHotspotEffect={updateGameplayHotspotEffect}
-              onRemoveGameplayHotspotEffect={removeGameplayHotspotEffect}
-              onAddGameplayHotspotAction={addGameplayHotspotAction}
-              onUpdateGameplayHotspotAction={updateGameplayHotspotAction}
-              onRemoveGameplayHotspotAction={removeGameplayHotspotAction}
-              onAddGameplayEffect={addGameplayEffect}
-              onUpdateGameplayEffect={updateGameplayEffect}
-              onRemoveGameplayEffect={removeGameplayEffect}
+              onAddGameplayObject={addGameplayObject}
+              onRemoveGameplayObject={removeGameplayObject}
+              onUpdateGameplayObjectField={updateGameplayObjectField}
+              onUpdateGameplayObjectRect={updateGameplayObjectRect}
+              onClearGameplayObjectAsset={clearGameplayObjectAsset}
+              onClearGameplayObjectSound={clearGameplayObjectSound}
+              onAddGameplayObjectEffect={addGameplayObjectEffect}
+              onUpdateGameplayObjectEffect={updateGameplayObjectEffect}
+              onRemoveGameplayObjectEffect={removeGameplayObjectEffect}
+              onAddGameplayCompletionEffect={addGameplayCompletionEffect}
+              onUpdateGameplayCompletionEffect={updateGameplayCompletionEffect}
+              onRemoveGameplayCompletionEffect={removeGameplayCompletionEffect}
               gameplayPlacementTarget={gameplayPlacementTarget}
               onSetGameplayPlacementTarget={setGameplayPlacementTarget}
-              onStartGameplayElementDrag={startGameplayElementDrag}
+              onStartGameplayObjectDrag={startGameplayObjectDrag}
               onGameplaySceneClick={onGameplaySceneClick}
               onGameplayScenePointerMove={onGameplayScenePointerMove}
               onGameplayScenePointerEnd={onGameplayScenePointerEnd}
@@ -2851,397 +1997,23 @@ export function AuthorStudioApp() {
       )}
 
       {previewOpen && (
-        <div className="preview-overlay">
-          {/* Left wing — reserved for future options */}
-          <div className="preview-wing preview-wing-left" />
-
-          {/* Smartphone device */}
-          <div className="preview-device">
-            <div className="preview-device-notch" />
-            <div className="preview-device-screen">
-              {/* ── Status bar ── */}
-              <header className="preview-status-bar">
-                <span className="preview-status-block">
-                  {previewBlock ? previewBlock.name : "Fin"}
-                </span>
-                <div className="row-inline" style={{ gap: 4 }}>
-                  <button className="preview-status-btn" onClick={startPreview} title="Restart">↺</button>
-                  <button className="preview-status-btn" onClick={() => setPreviewOpen(false)} title="Fermer">✕</button>
-                </div>
-              </header>
-
-              {/* ── Content viewport ── */}
-              <div className="preview-device-viewport">
-
-              {/* ── END ── */}
-              {!previewBlock && (
-                <div className="preview-vn-end">
-                  <h3>Fin de parcours</h3>
-                  <p>Le parcours est terminé ou aucune cible n&apos;a été définie.</p>
-                </div>
-              )}
-
-              {/* ── TITLE ── */}
-              {previewBlock?.type === "title" && (() => {
-                const bgSrc = assetPreviewSrcById[previewBlock.backgroundAssetId ?? ""];
-                return (
-                  <div className="preview-vn-scene" style={bgSrc ? { backgroundImage: `url(${bgSrc})` } : undefined}>
-                    <div className="preview-vn-title-content">
-                      <h2 className="preview-vn-title-heading">{previewBlock.storyTitle || "Titre"}</h2>
-                      <p className="preview-vn-title-sub">{previewBlock.subtitle}</p>
-                      <button
-                        className="preview-vn-styled-btn"
-                        style={{
-                          backgroundColor: previewBlock.buttonStyle.backgroundColor,
-                          color: previewBlock.buttonStyle.textColor,
-                          borderColor: previewBlock.buttonStyle.borderColor,
-                          borderRadius: `${previewBlock.buttonStyle.radius}px`,
-                          fontSize: `${previewBlock.buttonStyle.fontSize}px`,
-                        }}
-                        onClick={continuePreview}
-                      >
-                        Continuer
-                      </button>
-                    </div>
-                  </div>
-                );
-              })()}
-
-              {/* ── CINEMATIC ── */}
-              {previewBlock?.type === "cinematic" && (() => {
-                const bgSrc = assetPreviewSrcById[previewBlock.backgroundAssetId ?? ""];
-                const videoSrc = assetPreviewSrcById[previewBlock.videoAssetId ?? ""];
-                const voiceSrc = assetPreviewSrcById[previewBlock.voiceAssetId ?? ""];
-                return (
-                  <div className="preview-vn-scene" style={bgSrc ? { backgroundImage: `url(${bgSrc})` } : undefined}>
-                    {videoSrc && (
-                      <video
-                        className="preview-vn-video"
-                        src={videoSrc}
-                        controls
-                        autoPlay
-                        playsInline
-                      />
-                    )}
-                    {voiceSrc && (
-                      <audio className="preview-vn-audio" src={voiceSrc} controls autoPlay />
-                    )}
-                    <div className="preview-vn-textbox">
-                      <div className="preview-vn-textbox-inner">
-                        {previewBlock.heading && (
-                          <span className="preview-vn-speaker">{previewBlock.heading}</span>
-                        )}
-                        <p className="preview-vn-text">{previewBlock.body || "…"}</p>
-                      </div>
-                      <button className="preview-vn-next-btn" onClick={continuePreview}>▶</button>
-                    </div>
-                  </div>
-                );
-              })()}
-
-              {/* ── DIALOGUE ── */}
-              {previewBlock?.type === "dialogue" && (() => {
-                const bgSrc = assetPreviewSrcById[previewBlock.backgroundAssetId ?? ""];
-                const charSrc = assetPreviewSrcById[previewBlock.characterAssetId ?? ""];
-                const npcImgSrc = assetPreviewSrcById[previewBlock.npcImageAssetId ?? ""];
-
-                const linkedNpc =
-                  previewBlock.npcProfileBlockId
-                    ? blockById.get(previewBlock.npcProfileBlockId)
-                    : null;
-                const npcDefaultImgSrc =
-                  linkedNpc && linkedNpc.type === "npc_profile" && linkedNpc.defaultImageAssetId
-                    ? assetPreviewSrcById[linkedNpc.defaultImageAssetId]
-                    : undefined;
-
-                const currentLine = previewBlock.lines.find(
-                  (l) => l.id === previewState?.currentDialogueLineId,
-                ) ?? previewBlock.lines.find(
-                  (l) => l.id === previewBlock.startLineId,
-                ) ?? previewBlock.lines[0];
-                if (!currentLine) return null;
-
-                const speakerName =
-                  linkedNpc && linkedNpc.type === "npc_profile" && linkedNpc.npcName.trim()
-                    ? linkedNpc.npcName
-                    : currentLine.speaker;
-
-                const voiceSrc = assetPreviewSrcById[currentLine.voiceAssetId ?? ""];
-                const portraitSrc = npcImgSrc || npcDefaultImgSrc || charSrc;
-                const sl = previewBlock.sceneLayout;
-
-                return (
-                  <div className="preview-vn-scene">
-                    {/* Background — positioned via sceneLayout */}
-                    {bgSrc && (
-                      <img
-                        className="preview-vn-bg-layer"
-                        src={bgSrc}
-                        alt=""
-                        style={{
-                          left: `${sl.background.x}%`,
-                          top: `${sl.background.y}%`,
-                          width: `${sl.background.width}%`,
-                          height: `${sl.background.height}%`,
-                        }}
-                      />
-                    )}
-
-                    {/* Character portrait — positioned via sceneLayout */}
-                    {portraitSrc && (
-                      <img
-                        className="preview-vn-char-layer"
-                        src={portraitSrc}
-                        alt={speakerName || "Personnage"}
-                        style={{
-                          left: `${sl.character.x}%`,
-                          top: `${sl.character.y}%`,
-                          width: `${sl.character.width}%`,
-                          height: `${sl.character.height}%`,
-                        }}
-                      />
-                    )}
-
-                    {/* Voice audio */}
-                    {voiceSrc && (
-                      <audio
-                        key={currentLine.id}
-                        className="preview-vn-audio"
-                        src={voiceSrc}
-                        controls
-                        autoPlay
-                      />
-                    )}
-
-                    {/* Textbox + responses */}
-                    <div className="preview-vn-dialogue-area">
-                      <div className="preview-vn-textbox">
-                        <div className="preview-vn-textbox-inner">
-                          <span className="preview-vn-speaker">{speakerName || "Personnage"}</span>
-                          <p className="preview-vn-text">{currentLine.text || "…"}</p>
-                        </div>
-                      </div>
-                      <div className="preview-vn-responses">
-                        {currentLine.responses.map((resp) => (
-                          <button
-                            key={resp.id}
-                            className="preview-vn-response-btn"
-                            onClick={() => pickPreviewChoice(resp.id)}
-                          >
-                            <strong>{resp.label}</strong>
-                            <span>{resp.text || "…"}</span>
-                          </button>
-                        ))}
-                      </div>
-                    </div>
-                  </div>
-                );
-              })()}
-
-              {/* ── CHOICE ── */}
-              {previewBlock?.type === "choice" && (() => {
-                const bgSrc = assetPreviewSrcById[previewBlock.backgroundAssetId ?? ""];
-                const voiceSrc = assetPreviewSrcById[previewBlock.voiceAssetId ?? ""];
-                return (
-                  <div className="preview-vn-scene" style={bgSrc ? { backgroundImage: `url(${bgSrc})` } : undefined}>
-                    {voiceSrc && (
-                      <audio className="preview-vn-audio" src={voiceSrc} controls autoPlay />
-                    )}
-                    <div className="preview-vn-choice-area">
-                      <h3 className="preview-vn-choice-prompt">{previewBlock.prompt || "Choisissez…"}</h3>
-                      <div className="preview-vn-choice-grid">
-                        {previewBlock.choices.map((option) => {
-                          const imgSrc = assetPreviewSrcById[option.imageAssetId ?? ""];
-                          return (
-                            <button
-                              key={option.id}
-                              className="preview-vn-choice-btn"
-                              onClick={() => pickPreviewChoice(option.id)}
-                            >
-                              {imgSrc && <img className="preview-vn-choice-img" src={imgSrc} alt={option.label} />}
-                              <strong>{option.label}</strong>
-                              <span>{option.text || "…"}</span>
-                              {option.description && <small>{option.description}</small>}
-                            </button>
-                          );
-                        })}
-                      </div>
-                    </div>
-                  </div>
-                );
-              })()}
-
-              {/* ── HERO PROFILE ── */}
-              {previewBlock?.type === "hero_profile" && (
-                <div className="preview-vn-scene preview-vn-profile-scene">
-                  <div className="preview-vn-profile-card">
-                    <h3>⚔ Fiche Héros</h3>
-                    <p>Bloc visuel de référence héros.</p>
-                    <button className="preview-vn-next-btn" onClick={continuePreview}>▶ Continuer</button>
-                  </div>
-                </div>
-              )}
-
-              {/* ── NPC PROFILE ── */}
-              {previewBlock?.type === "npc_profile" && (() => {
-                const defaultImgSrc = assetPreviewSrcById[previewBlock.defaultImageAssetId ?? ""];
-                return (
-                  <div className="preview-vn-scene preview-vn-profile-scene">
-                    {defaultImgSrc && (
-                      <img className="preview-vn-character" src={defaultImgSrc} alt={previewBlock.npcName || "PNJ"} />
-                    )}
-                    <div className="preview-vn-profile-card">
-                      <h3>{previewBlock.npcName || "PNJ"}</h3>
-                      <p>{previewBlock.npcLore || "Lore PNJ vide."}</p>
-                      <button className="preview-vn-next-btn" onClick={continuePreview}>▶ Continuer</button>
-                    </div>
-                  </div>
-                );
-              })()}
-
-              {/* ── GAMEPLAY ── */}
-              {previewBlock?.type === "gameplay" && (() => {
-                const bgSrc = assetPreviewSrcById[previewBlock.backgroundAssetId ?? ""];
-                const voiceSrc = assetPreviewSrcById[previewBlock.voiceAssetId ?? ""];
-                return (
-                  <div className="preview-vn-scene">
-                    <div className="preview-vn-gameplay-hud">
-                      <span className={`chip ${previewGameplayCompleted ? "chip-start" : "chip-warning"}`}>
-                        {previewGameplayCompleted ? "✓ objectif atteint" : "objectif en cours"}
-                      </span>
-                      <small>{previewGameplayProgressLabel}</small>
-                    </div>
-
-                    {voiceSrc && (
-                      <audio className="preview-vn-audio" src={voiceSrc} controls autoPlay />
-                    )}
-
-                    <div className="preview-vn-gameplay-scene"
-                      style={bgSrc ? { backgroundImage: `url(${bgSrc})` } : undefined}
-                    >
-                      {!bgSrc && (
-                        <div className="pointclick-editor-empty-bg">Fond gameplay manquant</div>
-                      )}
-
-                      {[...previewBlock.overlays]
-                        .sort((a, b) => a.zIndex - b.zIndex)
-                        .map((overlay) => {
-                          const isVisible =
-                            previewState?.gameplayOverlayVisibility[overlay.id] ??
-                            overlay.visibleByDefault;
-                          if (!isVisible) return null;
-                          return (
-                            <div
-                              key={overlay.id}
-                              className="preview-pointclick-overlay"
-                              style={{
-                                left: `${overlay.x}%`,
-                                top: `${overlay.y}%`,
-                                width: `${overlay.width}%`,
-                                height: `${overlay.height}%`,
-                                zIndex: overlay.zIndex,
-                                backgroundImage: assetPreviewSrcById[overlay.assetId ?? ""]
-                                  ? `url(${assetPreviewSrcById[overlay.assetId ?? ""]})`
-                                  : undefined,
-                              }}
-                            >
-                              {!assetPreviewSrcById[overlay.assetId ?? ""] && (
-                                <span>{overlay.name || "Overlay"}</span>
-                              )}
-                            </div>
-                          );
-                        })}
-
-                      {previewBlock.hotspots.map((hotspot) => {
-                        const found = previewFoundHotspotSet.has(hotspot.id);
-                        return (
-                          <button
-                            key={hotspot.id}
-                            type="button"
-                            className={`preview-pointclick-hotspot ${
-                              found ? "preview-pointclick-hotspot-found" : ""
-                            } ${
-                              previewDisabledHotspotSet.has(hotspot.id)
-                                ? "preview-pointclick-hotspot-disabled"
-                                : ""
-                            }`}
-                            style={{
-                              left: `${hotspot.x}%`,
-                              top: `${hotspot.y}%`,
-                              width: `${hotspot.width}%`,
-                              height: `${hotspot.height}%`,
-                            }}
-                            onClick={() => pickPreviewHotspot(hotspot.id)}
-                            disabled={previewDisabledHotspotSet.has(hotspot.id)}
-                          >
-                            <span>{hotspot.name || "Zone"}</span>
-                          </button>
-                        );
-                      })}
-                    </div>
-
-                    {previewState?.gameplayMessage && (
-                      <p className="preview-vn-gameplay-msg">{previewState.gameplayMessage}</p>
-                    )}
-
-                    <div className="preview-vn-gameplay-bottom">
-                      <p className="preview-vn-text" style={{ textAlign: "center" }}>
-                        {previewBlock.objective || "Objectif…"}
-                      </p>
-                      <button
-                        className="preview-vn-next-btn"
-                        onClick={continuePreview}
-                        disabled={!previewGameplayCompleted}
-                      >
-                        {previewGameplayCompleted ? "▶ Continuer" : "Objectif non atteint"}
-                      </button>
-                    </div>
-                  </div>
-                );
-              })()}
-              </div>
-
-              {/* ── Home indicator ── */}
-              <div className="preview-device-home" />
-            </div>
-          </div>
-
-          {/* Right wing — debug sidebar */}
-          <div className="preview-wing preview-wing-right">
-            <aside className="preview-wing-panel">
-              <details open>
-                <summary>Variables</summary>
-                {previewState && (
-                  <ul className="preview-wing-var-list">
-                    {project.variables.map((variable) => (
-                      <li key={variable.id}>
-                        <span>{variable.name}</span>
-                        <strong>{previewState.variables[variable.id] ?? 0}</strong>
-                      </li>
-                    ))}
-                  </ul>
-                )}
-              </details>
-              <details>
-                <summary>Inventaire</summary>
-                {previewState && previewInventoryItems.length > 0 && (
-                  <ul className="preview-wing-var-list">
-                    {previewInventoryItems.map((item) => (
-                      <li key={item.id}>
-                        <span>{item.name}</span>
-                        <strong>{previewState.inventory[item.id] ?? 0}</strong>
-                      </li>
-                    ))}
-                  </ul>
-                )}
-                {previewState && previewInventoryItems.length === 0 && (
-                  <p className="empty-placeholder">Aucun objet.</p>
-                )}
-              </details>
-              {previewState?.ended && <p className="ok-line">Parcours terminé.</p>}
-            </aside>
-          </div>
-        </div>
+        <PreviewOverlay
+          previewState={previewState}
+          previewBlock={previewBlock}
+          previewInteractedSet={previewInteractedSet}
+          previewGameplayCompleted={previewGameplayCompleted}
+          previewGameplayProgressLabel={previewGameplayProgressLabel}
+          previewInventoryItems={previewInventoryItems}
+          projectVariables={project.variables}
+          assetPreviewSrcById={assetPreviewSrcById}
+          blockById={blockById}
+          onRestart={startPreview}
+          onClose={() => setPreviewOpen(false)}
+          onContinue={continuePreview}
+          onPickChoice={pickPreviewChoice}
+          onPickObject={pickPreviewObject}
+          onDropKeyOnLock={dropKeyOnLock}
+        />
       )}
     </div>
   );

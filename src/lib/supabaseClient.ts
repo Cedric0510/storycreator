@@ -2,6 +2,40 @@ import { SupabaseClient, createClient } from "@supabase/supabase-js";
 
 let cachedClient: SupabaseClient | null = null;
 
+/**
+ * Default timeout (ms) for every Supabase HTTP request.
+ * Prevents the UI from hanging forever when the network drops.
+ */
+const SUPABASE_FETCH_TIMEOUT_MS = 30_000;
+
+function fetchWithTimeout(
+  input: RequestInfo | URL,
+  init?: RequestInit,
+): Promise<Response> {
+  const controller = new AbortController();
+  const existingSignal = init?.signal;
+
+  // If the caller already attached a signal, respect it too.
+  if (existingSignal) {
+    if (existingSignal.aborted) {
+      controller.abort(existingSignal.reason);
+    } else {
+      existingSignal.addEventListener("abort", () =>
+        controller.abort(existingSignal.reason),
+      );
+    }
+  }
+
+  const timeout = setTimeout(
+    () => controller.abort(new Error("Requete Supabase timeout (30 s)")),
+    SUPABASE_FETCH_TIMEOUT_MS,
+  );
+
+  return fetch(input, { ...init, signal: controller.signal }).finally(() =>
+    clearTimeout(timeout),
+  );
+}
+
 export function getSupabaseBrowserClient() {
   if (cachedClient) return cachedClient;
 
@@ -19,6 +53,9 @@ export function getSupabaseBrowserClient() {
       persistSession: true,
       autoRefreshToken: true,
       detectSessionInUrl: true,
+    },
+    global: {
+      fetch: fetchWithTimeout,
     },
   });
 

@@ -4,20 +4,23 @@ import { useCallback, useMemo, useState } from "react";
 
 import {
   applyEffects,
-  isGameplayPointClickCompleted,
-  requiredHotspotIds,
+  interactiveObjectIds,
+  isGameplayCompleted,
 } from "@/components/author-studio-core";
-import { ProjectMeta, DialogueBlock, StoryBlock } from "@/lib/story";
+import { ProjectMeta, DialogueBlock, DialogueLine, NpcProfileBlock, StoryBlock } from "@/lib/story";
 
 export interface PreviewRuntimeState {
   currentBlockId: string | null;
   currentDialogueLineId: string | null;
   variables: Record<string, number>;
   inventory: Record<string, number>;
+  /** Per-NPC affinity levels (keyed by npc_profile block id) */
+  npcAffinity: Record<string, number>;
   ended: boolean;
-  gameplayFoundHotspotIds: string[];
-  gameplayDisabledHotspotIds: string[];
-  gameplayOverlayVisibility: Record<string, boolean>;
+  /** IDs of gameplay objects the player has interacted with */
+  gameplayInteractedObjectIds: string[];
+  /** Runtime visibility of gameplay objects (false = hidden) */
+  gameplayObjectVisibility: Record<string, boolean>;
   gameplayMessage: string | null;
 }
 
@@ -25,6 +28,38 @@ interface UsePreviewRuntimeParams {
   project: ProjectMeta;
   blockById: Map<string, StoryBlock>;
   setStatusMessage: (message: string) => void;
+}
+
+/** Check if a dialogue line's conditions are met. */
+function lineConditionsMet(
+  line: DialogueLine,
+  npcAffinity: Record<string, number>,
+): boolean {
+  for (const cond of line.conditions ?? []) {
+    const affinity = npcAffinity[cond.npcProfileBlockId] ?? 0;
+    if (cond.type === "min_affinity" && affinity < cond.value) return false;
+    if (cond.type === "max_affinity" && affinity > cond.value) return false;
+  }
+  return true;
+}
+
+/** Resolve the actual line to show, following fallback chains if conditions fail. */
+function resolveDialogueLine(
+  block: DialogueBlock,
+  targetLineId: string | null,
+  npcAffinity: Record<string, number>,
+  visited?: Set<string>,
+): string | null {
+  if (!targetLineId) return null;
+  const line = block.lines.find((l) => l.id === targetLineId);
+  if (!line) return targetLineId;
+  if (lineConditionsMet(line, npcAffinity)) return targetLineId;
+  // Condition failed — use fallback
+  if (!line.fallbackLineId) return null; // skip line entirely
+  const seen = visited ?? new Set<string>();
+  if (seen.has(line.fallbackLineId)) return null; // prevent infinite loops
+  seen.add(line.fallbackLineId);
+  return resolveDialogueLine(block, line.fallbackLineId, npcAffinity, seen);
 }
 
 export function usePreviewRuntime({
@@ -40,6 +75,8 @@ export function usePreviewRuntime({
       targetBlockId: string | null,
       variables: Record<string, number>,
       inventory: Record<string, number>,
+      npcAffinity: Record<string, number>,
+      entryLineId?: string | null,
     ) => {
       if (!targetBlockId) {
         return {
@@ -47,10 +84,10 @@ export function usePreviewRuntime({
           currentDialogueLineId: null,
           variables,
           inventory,
+          npcAffinity,
           ended: true,
-          gameplayFoundHotspotIds: [],
-          gameplayDisabledHotspotIds: [],
-          gameplayOverlayVisibility: {},
+          gameplayInteractedObjectIds: [],
+          gameplayObjectVisibility: {},
           gameplayMessage: null,
         } as PreviewRuntimeState;
       }
@@ -61,15 +98,20 @@ export function usePreviewRuntime({
         : variables;
 
       if (block && block.type === "dialogue") {
+        const resolvedLineId = resolveDialogueLine(
+          block,
+          entryLineId || block.startLineId || block.lines[0]?.id || null,
+          npcAffinity,
+        );
         return {
           currentBlockId: targetBlockId,
-          currentDialogueLineId: block.startLineId || block.lines[0]?.id || null,
+          currentDialogueLineId: resolvedLineId,
           variables: nextVariables,
           inventory,
+          npcAffinity,
           ended: false,
-          gameplayFoundHotspotIds: [],
-          gameplayDisabledHotspotIds: [],
-          gameplayOverlayVisibility: {},
+          gameplayInteractedObjectIds: [],
+          gameplayObjectVisibility: {},
           gameplayMessage: null,
         } as PreviewRuntimeState;
       }
@@ -80,17 +122,18 @@ export function usePreviewRuntime({
           currentDialogueLineId: null,
           variables: nextVariables,
           inventory,
+          npcAffinity,
           ended: false,
-          gameplayFoundHotspotIds: [],
-          gameplayDisabledHotspotIds: [],
-          gameplayOverlayVisibility: {},
+          gameplayInteractedObjectIds: [],
+          gameplayObjectVisibility: {},
           gameplayMessage: null,
         } as PreviewRuntimeState;
       }
 
+      // Gameplay block — initialise object visibility
       const visibility: Record<string, boolean> = {};
-      for (const overlay of block.overlays) {
-        visibility[overlay.id] = overlay.visibleByDefault;
+      for (const obj of block.objects) {
+        visibility[obj.id] = obj.visibleByDefault;
       }
 
       return {
@@ -98,10 +141,10 @@ export function usePreviewRuntime({
         currentDialogueLineId: null,
         variables: nextVariables,
         inventory,
+        npcAffinity,
         ended: false,
-        gameplayFoundHotspotIds: [],
-        gameplayDisabledHotspotIds: [],
-        gameplayOverlayVisibility: visibility,
+        gameplayInteractedObjectIds: [],
+        gameplayObjectVisibility: visibility,
         gameplayMessage: null,
       } as PreviewRuntimeState;
     },
@@ -119,9 +162,17 @@ export function usePreviewRuntime({
       initialVariables[variable.id] = variable.initialValue;
     }
 
-    setPreviewState(buildPreviewState(project.info.startBlockId, initialVariables, {}));
+    // Initialize NPC affinity from npc_profile blocks
+    const initialAffinity: Record<string, number> = {};
+    for (const [, block] of blockById) {
+      if (block.type === "npc_profile") {
+        initialAffinity[block.id] = (block as NpcProfileBlock).initialAffinity ?? 50;
+      }
+    }
+
+    setPreviewState(buildPreviewState(project.info.startBlockId, initialVariables, {}, initialAffinity));
     setPreviewOpen(true);
-  }, [buildPreviewState, project.info.startBlockId, project.variables, setStatusMessage]);
+  }, [blockById, buildPreviewState, project.info.startBlockId, project.variables, setStatusMessage]);
 
   const resetPreview = useCallback(() => {
     setPreviewOpen(false);
@@ -130,39 +181,24 @@ export function usePreviewRuntime({
 
   const previewBlock =
     previewState?.currentBlockId ? blockById.get(previewState.currentBlockId) ?? null : null;
-  const previewFoundHotspotSet = useMemo(
-    () => new Set(previewState?.gameplayFoundHotspotIds ?? []),
-    [previewState?.gameplayFoundHotspotIds],
+
+  const previewInteractedSet = useMemo(
+    () => new Set(previewState?.gameplayInteractedObjectIds ?? []),
+    [previewState?.gameplayInteractedObjectIds],
   );
-  const previewDisabledHotspotSet = useMemo(
-    () => new Set(previewState?.gameplayDisabledHotspotIds ?? []),
-    [previewState?.gameplayDisabledHotspotIds],
-  );
-  const previewGameplayRequiredIds = useMemo(() => {
-    if (!previewBlock || previewBlock.type !== "gameplay") return [];
-    return requiredHotspotIds(previewBlock);
-  }, [previewBlock]);
+
   const previewGameplayCompleted = useMemo(() => {
     if (!previewBlock || previewBlock.type !== "gameplay") return false;
-    return isGameplayPointClickCompleted(previewBlock, previewFoundHotspotSet);
-  }, [previewBlock, previewFoundHotspotSet]);
+    return isGameplayCompleted(previewBlock, previewInteractedSet);
+  }, [previewBlock, previewInteractedSet]);
+
   const previewGameplayProgressLabel = useMemo(() => {
     if (!previewBlock || previewBlock.type !== "gameplay") return "";
-
-    if (previewBlock.completionRule.type === "required_count") {
-      const requiredCount = Math.max(1, Math.floor(previewBlock.completionRule.requiredCount || 1));
-      return `${previewFoundHotspotSet.size}/${requiredCount} zones activees`;
-    }
-
-    if (previewGameplayRequiredIds.length === 0) {
-      return "Aucune zone requise";
-    }
-
-    const foundRequiredCount = previewGameplayRequiredIds.filter((hotspotId) =>
-      previewFoundHotspotSet.has(hotspotId),
-    ).length;
-    return `${foundRequiredCount}/${previewGameplayRequiredIds.length} zones requises`;
-  }, [previewBlock, previewFoundHotspotSet, previewGameplayRequiredIds]);
+    const interactive = interactiveObjectIds(previewBlock);
+    if (interactive.length === 0) return "Aucun objet interactif";
+    const done = interactive.filter((id) => previewInteractedSet.has(id)).length;
+    return `${done}/${interactive.length} objets`;
+  }, [previewBlock, previewInteractedSet]);
 
   const continuePreview = useCallback(() => {
     if (!previewState || !previewBlock) return;
@@ -170,8 +206,7 @@ export function usePreviewRuntime({
     if (previewBlock.type === "dialogue" || previewBlock.type === "choice") return;
 
     if (previewBlock.type === "gameplay") {
-      const foundSet = new Set(previewState.gameplayFoundHotspotIds);
-      if (!isGameplayPointClickCompleted(previewBlock, foundSet)) {
+      if (!isGameplayCompleted(previewBlock, new Set(previewState.gameplayInteractedObjectIds))) {
         setStatusMessage("Objectif gameplay non atteint.");
         return;
       }
@@ -183,7 +218,7 @@ export function usePreviewRuntime({
         ? applyEffects(previewState.variables, previewBlock.completionEffects)
         : previewState.variables;
 
-    setPreviewState(buildPreviewState(nextBlockId, nextVariables, previewState.inventory));
+    setPreviewState(buildPreviewState(nextBlockId, nextVariables, previewState.inventory, previewState.npcAffinity));
   }, [buildPreviewState, previewBlock, previewState, setStatusMessage]);
 
   const pickPreviewChoice = useCallback(
@@ -199,19 +234,33 @@ export function usePreviewRuntime({
 
         const nextVariables = applyEffects(previewState.variables, resp.effects);
 
-        if (resp.targetLineId) {
-          // Internal navigation — stay in same block, move to target line
+        // Apply affinity effects
+        const nextAffinity = { ...previewState.npcAffinity };
+        for (const ae of resp.affinityEffects ?? []) {
+          nextAffinity[ae.npcProfileBlockId] = Math.max(
+            0,
+            Math.min(100, (nextAffinity[ae.npcProfileBlockId] ?? 0) + ae.delta),
+          );
+        }
+
+        if (resp.targetLineId && (!resp.targetBlockId || resp.targetBlockId === previewState.currentBlockId)) {
+          // Resolve conditions on target line
+          const resolvedLineId = resolveDialogueLine(
+            previewBlock,
+            resp.targetLineId,
+            nextAffinity,
+          );
           setPreviewState({
             ...previewState,
-            currentDialogueLineId: resp.targetLineId,
+            currentDialogueLineId: resolvedLineId,
             variables: nextVariables,
+            npcAffinity: nextAffinity,
           });
           return;
         }
 
-        // External navigation — go to target block (or end)
         setPreviewState(
-          buildPreviewState(resp.targetBlockId, nextVariables, previewState.inventory),
+          buildPreviewState(resp.targetBlockId, nextVariables, previewState.inventory, nextAffinity, resp.targetLineId),
         );
         return;
       }
@@ -226,6 +275,7 @@ export function usePreviewRuntime({
             choice.targetBlockId,
             applyEffects(previewState.variables, choice.effects),
             previewState.inventory,
+            previewState.npcAffinity,
           ),
         );
         return;
@@ -234,65 +284,108 @@ export function usePreviewRuntime({
     [buildPreviewState, previewBlock, previewState],
   );
 
-  const pickPreviewHotspot = useCallback(
-    (hotspotId: string) => {
+  /** Handle clicking a gameplay object in preview (V3: 4-type model) */
+  const pickPreviewObject = useCallback(
+    (objectId: string) => {
       if (!previewState || !previewBlock || previewBlock.type !== "gameplay") return;
-      if (previewState.gameplayDisabledHotspotIds.includes(hotspotId)) return;
 
-      const hotspot = previewBlock.hotspots.find((item) => item.id === hotspotId);
-      if (!hotspot) return;
+      const obj = previewBlock.objects.find((o) => o.id === objectId);
+      if (!obj) return;
+      if (previewState.gameplayObjectVisibility[objectId] === false) return;
 
-      const alreadyFound = previewState.gameplayFoundHotspotIds.includes(hotspotId);
-      const nextFound = alreadyFound
-        ? previewState.gameplayFoundHotspotIds
-        : [...previewState.gameplayFoundHotspotIds, hotspotId];
-      const nextVariables = alreadyFound
-        ? previewState.variables
-        : applyEffects(previewState.variables, hotspot.effects);
-      const nextOverlayVisibility = { ...previewState.gameplayOverlayVisibility };
+      const alreadyInteracted = previewState.gameplayInteractedObjectIds.includes(objectId);
+
+      if (obj.objectType === "decoration") {
+        // No-op for decoration
+        return;
+      }
+
+      if (obj.objectType === "collectible") {
+        if (alreadyInteracted) return;
+        const nextInventory = { ...previewState.inventory };
+        if (obj.grantItemId) {
+          nextInventory[obj.grantItemId] = (nextInventory[obj.grantItemId] ?? 0) + 1;
+        }
+        setPreviewState({
+          ...previewState,
+          variables: applyEffects(previewState.variables, obj.effects),
+          inventory: nextInventory,
+          gameplayInteractedObjectIds: [...previewState.gameplayInteractedObjectIds, objectId],
+          gameplayObjectVisibility: { ...previewState.gameplayObjectVisibility, [objectId]: false },
+          gameplayMessage: null,
+        });
+        return;
+      }
+
+      if (obj.objectType === "key") {
+        // Keys are dragged, not clicked — no action on click
+        return;
+      }
+
+      if (obj.objectType === "lock") {
+        // Show locked message when clicked without key
+        setPreviewState({
+          ...previewState,
+          gameplayMessage: obj.lockedMessage?.trim() || "Il manque quelque chose...",
+        });
+        return;
+      }
+    },
+    [previewBlock, previewState],
+  );
+
+  /** Handle dropping a key object onto a lock in preview */
+  const dropKeyOnLock = useCallback(
+    (keyId: string, lockId: string) => {
+      if (!previewState || !previewBlock || previewBlock.type !== "gameplay") return;
+
+      const keyObj = previewBlock.objects.find((o) => o.id === keyId);
+      const lockObj = previewBlock.objects.find((o) => o.id === lockId);
+      if (!keyObj || !lockObj) return;
+      if (lockObj.objectType !== "lock" || lockObj.linkedKeyId !== keyId) {
+        setPreviewState({
+          ...previewState,
+          gameplayMessage: "Ce n'est pas la bonne cle...",
+        });
+        return;
+      }
+
+      const nextVisibility = { ...previewState.gameplayObjectVisibility };
+      let nextVariables = applyEffects(previewState.variables, keyObj.effects);
+      nextVariables = applyEffects(nextVariables, lockObj.effects);
       const nextInventory = { ...previewState.inventory };
-      const nextDisabled = new Set(previewState.gameplayDisabledHotspotIds);
-      let nextMessage = hotspot.message?.trim() ? hotspot.message : null;
 
-      if (hotspot.toggleOverlayId) {
-        const current = Boolean(nextOverlayVisibility[hotspot.toggleOverlayId]);
-        nextOverlayVisibility[hotspot.toggleOverlayId] = !current;
+      // Hide key and lock
+      nextVisibility[keyId] = false;
+      nextVisibility[lockId] = false;
+
+      // Mark both as interacted
+      const nextInteracted = [...previewState.gameplayInteractedObjectIds];
+      if (!nextInteracted.includes(keyId)) nextInteracted.push(keyId);
+      if (!nextInteracted.includes(lockId)) nextInteracted.push(lockId);
+
+      const nextMessage = lockObj.successMessage?.trim() || null;
+
+      if (lockObj.unlockEffect === "go_to_next") {
+        // Apply completion effects and advance
+        const completionVars = applyEffects(nextVariables, previewBlock.completionEffects);
+        setPreviewState(
+          buildPreviewState(previewBlock.nextBlockId, completionVars, nextInventory, previewState.npcAffinity),
+        );
+        return;
       }
 
-      for (const action of hotspot.onClickActions) {
-        if (action.type === "message") {
-          if (action.message.trim()) {
-            nextMessage = action.message;
-          }
-          continue;
-        }
-
-        if (action.type === "add_item") {
-          if (!alreadyFound && action.itemId) {
-            const quantity = Math.max(1, Math.floor(action.quantity || 1));
-            nextInventory[action.itemId] = (nextInventory[action.itemId] ?? 0) + quantity;
-          }
-          continue;
-        }
-
-        if (action.type === "disable_hotspot") {
-          nextDisabled.add(action.targetHotspotId ?? hotspot.id);
-          continue;
-        }
-
-        if (action.type === "go_to_block" && action.targetBlockId) {
-          setPreviewState(buildPreviewState(action.targetBlockId, nextVariables, nextInventory));
-          return;
-        }
+      if (lockObj.unlockEffect === "modify_stats") {
+        // Effects already applied above
       }
 
+      // "disappear" or "modify_stats": stay on scene
       setPreviewState({
         ...previewState,
         variables: nextVariables,
         inventory: nextInventory,
-        gameplayFoundHotspotIds: nextFound,
-        gameplayDisabledHotspotIds: Array.from(nextDisabled),
-        gameplayOverlayVisibility: nextOverlayVisibility,
+        gameplayInteractedObjectIds: nextInteracted,
+        gameplayObjectVisibility: nextVisibility,
         gameplayMessage: nextMessage,
       });
     },
@@ -304,15 +397,14 @@ export function usePreviewRuntime({
     setPreviewOpen,
     previewState,
     previewBlock,
-    previewFoundHotspotSet,
-    previewDisabledHotspotSet,
-    previewGameplayRequiredIds,
+    previewInteractedSet,
     previewGameplayCompleted,
     previewGameplayProgressLabel,
     startPreview,
     continuePreview,
     pickPreviewChoice,
-    pickPreviewHotspot,
+    pickPreviewObject,
+    dropKeyOnLock,
     resetPreview,
   };
 }

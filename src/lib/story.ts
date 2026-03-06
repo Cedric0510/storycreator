@@ -1,4 +1,4 @@
-export const STORY_SCHEMA_VERSION = "1.2.0";
+export const STORY_SCHEMA_VERSION = "1.4.0";
 
 export type BlockType =
   | "title"
@@ -11,6 +11,75 @@ export type BlockType =
 export type ChoiceLabel = "A" | "B" | "C" | "D";
 export type GameplayMode = "point_and_click" | "map_move" | "static_scene";
 export type MemberRole = "owner" | "editor" | "viewer";
+
+/* ── V3 gameplay: ultra-simplified 4-type object model ───────── */
+
+/** What kind of object is this? */
+export type GameplayObjectType =
+  | "decoration"    // Not interactive — just visual
+  | "collectible"   // Goes to inventory on click
+  | "key"           // Draggable — must be dropped on its linked lock
+  | "lock";         // Waits for its linked key, then triggers unlock effect
+
+/** What happens when a lock is unlocked by its key. */
+export type GameplayUnlockEffect =
+  | "go_to_next"    // Advance to the next block
+  | "disappear"     // Lock (and key) disappear
+  | "modify_stats"; // Apply variable effects (future)
+
+export interface GameplayObject {
+  id: string;
+  name: string;
+  assetId: string | null;
+  x: number;       // % position
+  y: number;
+  width: number;   // % size
+  height: number;
+  zIndex: number;
+  visibleByDefault: boolean;
+  objectType: GameplayObjectType;
+  /** For collectible: which inventory item to grant */
+  grantItemId: string | null;
+  /** For lock: which "key" object unlocks this lock */
+  linkedKeyId: string | null;
+  /** For lock: what happens on unlock */
+  unlockEffect: GameplayUnlockEffect;
+  /** For lock: message shown when clicked without the key */
+  lockedMessage: string;
+  /** For lock: message shown on successful unlock */
+  successMessage: string;
+  /** Sound to play on interaction */
+  soundAssetId: string | null;
+  /** Variable effects when interacted */
+  effects: VariableEffect[];
+}
+
+/* ── Legacy V2 link types (kept for migration only) ──────────── */
+
+export type GameplayObjectAction =
+  | "pick_up" | "inspect" | "push" | "go_to_block" | "none";
+
+export type GameplayLinkInteraction =
+  | "use_on" | "destroy_both" | "reveal";
+
+export type GameplayLinkResult =
+  | "hide_source" | "hide_target" | "hide_both"
+  | "show_object" | "go_to_block" | "none";
+
+export interface GameplayLink {
+  id: string;
+  sourceObjectId: string;
+  targetObjectId: string;
+  interaction: GameplayLinkInteraction;
+  result: GameplayLinkResult;
+  resultObjectId: string | null;
+  resultBlockId: string | null;
+  successMessage: string;
+  lockedMessage: string;
+  consumeSource: boolean;
+}
+
+/* ── Legacy V1 gameplay types (kept for migration) ────────────── */
 export type GameplayHotspotClickActionType =
   | "message"
   | "add_item"
@@ -31,6 +100,21 @@ export interface VariableDefinition {
 export interface VariableEffect {
   variableId: string;
   delta: number;
+}
+
+/** Change to the affinity gauge of a specific NPC. */
+export interface AffinityEffect {
+  npcProfileBlockId: string;
+  delta: number;
+}
+
+/** Condition that must be met for a dialogue line to trigger. */
+export type DialogueLineConditionType = "min_affinity" | "max_affinity";
+
+export interface DialogueLineCondition {
+  type: DialogueLineConditionType;
+  npcProfileBlockId: string;
+  value: number;
 }
 
 export interface StoryItemDefinition {
@@ -80,6 +164,7 @@ export interface GameplayOverlay extends GameplayRect {
   assetId: string | null;
   zIndex: number;
   visibleByDefault: boolean;
+  draggable: boolean;
 }
 
 interface GameplayHotspotClickActionBase {
@@ -127,6 +212,10 @@ export interface GameplayHotspot extends GameplayRect {
   soundAssetId: string | null;
   effects: VariableEffect[];
   onClickActions: GameplayHotspotClickAction[];
+  requiredItemId: string | null;
+  consumeRequiredItem: boolean;
+  lockedMessage: string;
+  acceptOverlayId: string | null;
 }
 
 export interface GameplayCompletionRule {
@@ -174,6 +263,8 @@ export interface CinematicBlock extends BaseBlock {
   heading: string;
   body: string;
   backgroundAssetId: string | null;
+  characterAssetId: string | null;
+  sceneLayout: SceneLayout;
   videoAssetId: string | null;
   voiceAssetId: string | null;
   autoAdvanceSeconds: number | null;
@@ -187,6 +278,8 @@ export interface DialogueResponse {
   targetLineId: string | null;
   targetBlockId: string | null;
   effects: VariableEffect[];
+  /** Affinity changes when this response is picked */
+  affinityEffects: AffinityEffect[];
 }
 
 export interface DialogueLine {
@@ -194,6 +287,10 @@ export interface DialogueLine {
   speaker: string;
   text: string;
   voiceAssetId: string | null;
+  /** Conditions that must ALL be met for this line to trigger */
+  conditions: DialogueLineCondition[];
+  /** If conditions fail, jump to this line instead (null = skip responses) */
+  fallbackLineId: string | null;
   responses: DialogueResponse[];
 }
 
@@ -233,11 +330,17 @@ export interface GameplayBlock extends BaseBlock {
   objective: string;
   backgroundAssetId: string | null;
   voiceAssetId: string | null;
-  overlays: GameplayOverlay[];
-  hotspots: GameplayHotspot[];
-  completionRule: GameplayCompletionRule;
+  /** V3: simplified objects with 4 types */
+  objects: GameplayObject[];
   completionEffects: VariableEffect[];
   nextBlockId: string | null;
+  /* ── Legacy fields (kept for migration, not used in V3 UI) ── */
+  links?: GameplayLink[];
+  completionMode?: "all_interactive" | "manual_count";
+  completionCount?: number;
+  overlays?: GameplayOverlay[];
+  hotspots?: GameplayHotspot[];
+  completionRule?: GameplayCompletionRule;
 }
 
 export interface HeroProfileBlock extends BaseBlock {
@@ -251,6 +354,8 @@ export interface NpcProfileBlock extends BaseBlock {
   npcLore: string;
   imageAssetIds: string[];
   defaultImageAssetId: string | null;
+  /** Starting affinity value (0-100 scale) */
+  initialAffinity: number;
   nextBlockId: string | null;
 }
 
@@ -406,6 +511,7 @@ export function createDefaultResponse(label: ChoiceLabel): DialogueResponse {
     targetLineId: null,
     targetBlockId: null,
     effects: [],
+    affinityEffects: [],
   };
 }
 
@@ -416,6 +522,8 @@ export function createDefaultLine(speaker?: string): DialogueLine {
     speaker: speaker ?? "Narrateur",
     text: "",
     voiceAssetId: null,
+    conditions: [],
+    fallbackLineId: null,
     responses: [createDefaultResponse("A"), createDefaultResponse("B")],
   };
 }
@@ -443,6 +551,48 @@ function defaultGameplayOverlay(): GameplayOverlay {
     height: 20,
     zIndex: 2,
     visibleByDefault: true,
+    draggable: false,
+  };
+}
+
+export function defaultGameplayObject(): GameplayObject {
+  return {
+    id: createId("gobj"),
+    name: "Objet",
+    assetId: null,
+    x: 35,
+    y: 35,
+    width: 15,
+    height: 15,
+    zIndex: 2,
+    visibleByDefault: true,
+    objectType: "decoration",
+    grantItemId: null,
+    linkedKeyId: null,
+    unlockEffect: "go_to_next",
+    lockedMessage: "",
+    successMessage: "",
+    soundAssetId: null,
+    effects: [],
+  };
+}
+
+/** @deprecated Legacy — only used for migration */
+export function defaultGameplayLink(
+  sourceObjectId: string,
+  targetObjectId: string,
+): GameplayLink {
+  return {
+    id: createId("glink"),
+    sourceObjectId,
+    targetObjectId,
+    interaction: "use_on",
+    result: "hide_source",
+    resultObjectId: null,
+    resultBlockId: null,
+    successMessage: "",
+    lockedMessage: "",
+    consumeSource: true,
   };
 }
 
@@ -456,6 +606,10 @@ function defaultGameplayHotspot(): GameplayHotspot {
     soundAssetId: null,
     effects: [],
     onClickActions: [],
+    requiredItemId: null,
+    consumeRequiredItem: false,
+    lockedMessage: "",
+    acceptOverlayId: null,
     x: 35,
     y: 35,
     width: 20,
@@ -558,6 +712,25 @@ function normalizeVariableEffects(effects: unknown): VariableEffect[] {
   }));
 }
 
+function normalizeAffinityEffects(effects: unknown): AffinityEffect[] {
+  if (!Array.isArray(effects)) return [];
+  return effects.map((effect) => ({
+    npcProfileBlockId: typeof effect?.npcProfileBlockId === "string" ? effect.npcProfileBlockId : "",
+    delta: Number.isFinite(effect?.delta) ? effect.delta : 0,
+  }));
+}
+
+function normalizeConditions(conds: unknown): DialogueLineCondition[] {
+  if (!Array.isArray(conds)) return [];
+  return conds
+    .filter((c) => c && typeof c === "object" && typeof c.type === "string")
+    .map((c) => ({
+      type: (c.type === "min_affinity" || c.type === "max_affinity" ? c.type : "min_affinity") as DialogueLineConditionType,
+      npcProfileBlockId: typeof c.npcProfileBlockId === "string" ? c.npcProfileBlockId : "",
+      value: Number.isFinite(c.value) ? c.value : 0,
+    }));
+}
+
 function normalizeLayerLayout(raw: unknown, defaults: SceneLayerLayout): SceneLayerLayout {
   const obj = raw && typeof raw === "object" ? raw as Record<string, unknown> : {};
   return {
@@ -612,6 +785,8 @@ export function createBlock(type: BlockType, position: XYPosition): StoryBlock {
       heading: "Cinematique",
       body: "",
       backgroundAssetId: null,
+      characterAssetId: null,
+      sceneLayout: { ...DEFAULT_SCENE_LAYOUT },
       videoAssetId: null,
       voiceAssetId: null,
       autoAdvanceSeconds: null,
@@ -677,6 +852,7 @@ export function createBlock(type: BlockType, position: XYPosition): StoryBlock {
       npcLore: "",
       imageAssetIds: [],
       defaultImageAssetId: null,
+      initialAffinity: 50,
       nextBlockId: null,
     };
   }
@@ -692,77 +868,176 @@ export function createBlock(type: BlockType, position: XYPosition): StoryBlock {
     objective: "",
     backgroundAssetId: null,
     voiceAssetId: null,
-    overlays: [defaultGameplayOverlay()],
-    hotspots: [defaultGameplayHotspot()],
-    completionRule: {
-      type: "all_required",
-      requiredCount: 1,
-    },
+    objects: [],
     completionEffects: [],
     nextBlockId: null,
   };
 }
 
 export function normalizeGameplayBlock(block: GameplayBlock): GameplayBlock {
+  const raw = block as unknown as Record<string, unknown>;
+
+  // ── Detect data generation ──
+  const hasV1 =
+    (Array.isArray(raw.overlays) && (raw.overlays as unknown[]).length > 0) ||
+    (Array.isArray(raw.hotspots) && (raw.hotspots as unknown[]).length > 0);
+  const hasObjects = Array.isArray(raw.objects) && (raw.objects as unknown[]).length > 0;
+  // V3 objects have "objectType"; V2 had "action"
+  const isV3 = hasObjects && (raw.objects as Record<string, unknown>[])[0]?.objectType != null;
+
+  // ── Helper: normalize a single V3 object ──
+  function normObj(obj: Record<string, unknown>): GameplayObject {
+    return {
+      id: (obj.id as string) ?? createId("gobj"),
+      name: typeof obj.name === "string" ? obj.name : "Objet",
+      assetId: (obj.assetId as string) ?? null,
+      x: Number.isFinite(obj.x) ? (obj.x as number) : 35,
+      y: Number.isFinite(obj.y) ? (obj.y as number) : 35,
+      width: Number.isFinite(obj.width) ? (obj.width as number) : 15,
+      height: Number.isFinite(obj.height) ? (obj.height as number) : 15,
+      zIndex: Number.isFinite(obj.zIndex) ? (obj.zIndex as number) : 2,
+      visibleByDefault: typeof obj.visibleByDefault === "boolean" ? obj.visibleByDefault : true,
+      objectType: (["decoration", "collectible", "key", "lock"] as string[]).includes(obj.objectType as string)
+        ? (obj.objectType as GameplayObjectType)
+        : "decoration",
+      grantItemId: typeof obj.grantItemId === "string" && obj.grantItemId ? obj.grantItemId : null,
+      linkedKeyId: typeof obj.linkedKeyId === "string" && obj.linkedKeyId ? obj.linkedKeyId : null,
+      unlockEffect: (["go_to_next", "disappear", "modify_stats"] as string[]).includes(obj.unlockEffect as string)
+        ? (obj.unlockEffect as GameplayUnlockEffect)
+        : "go_to_next",
+      lockedMessage: typeof obj.lockedMessage === "string" ? obj.lockedMessage : "",
+      successMessage: typeof obj.successMessage === "string" ? obj.successMessage : "",
+      soundAssetId: typeof obj.soundAssetId === "string" && obj.soundAssetId ? obj.soundAssetId : null,
+      effects: normalizeVariableEffects(obj.effects),
+    };
+  }
+
+  let objects: GameplayObject[] = [];
+
+  if (isV3) {
+    // ── Already V3: just normalize field values ──
+    objects = (raw.objects as Record<string, unknown>[]).map(normObj);
+  } else if (hasObjects) {
+    // ── V2 → V3 migration: convert action + links to 4-type model ──
+    const v2Objs = raw.objects as Record<string, unknown>[];
+    const v2Links = Array.isArray(raw.links) ? (raw.links as Record<string, unknown>[]) : [];
+
+    // Map V2 action → V3 objectType
+    const actionToType: Record<string, GameplayObjectType> = {
+      pick_up: "collectible",
+      push: "key",
+      none: "decoration",
+      inspect: "decoration",
+      go_to_block: "decoration",
+    };
+
+    // First pass: convert objects
+    const objMap = new Map<string, GameplayObject>();
+    for (const v2 of v2Objs) {
+      const action = (v2.action as string) ?? "none";
+      const obj: GameplayObject = {
+        id: (v2.id as string) ?? createId("gobj"),
+        name: typeof v2.name === "string" ? v2.name : "Objet",
+        assetId: (v2.assetId as string) ?? null,
+        x: Number.isFinite(v2.x) ? (v2.x as number) : 35,
+        y: Number.isFinite(v2.y) ? (v2.y as number) : 35,
+        width: Number.isFinite(v2.width) ? (v2.width as number) : 15,
+        height: Number.isFinite(v2.height) ? (v2.height as number) : 15,
+        zIndex: Number.isFinite(v2.zIndex) ? (v2.zIndex as number) : 2,
+        visibleByDefault: typeof v2.visibleByDefault === "boolean" ? v2.visibleByDefault : true,
+        objectType: actionToType[action] ?? "decoration",
+        grantItemId: typeof v2.grantItemId === "string" && v2.grantItemId ? v2.grantItemId : null,
+        linkedKeyId: null,
+        unlockEffect: "go_to_next",
+        lockedMessage: "",
+        successMessage: "",
+        soundAssetId: typeof v2.soundAssetId === "string" && v2.soundAssetId ? v2.soundAssetId : null,
+        effects: normalizeVariableEffects(v2.effects),
+      };
+      objMap.set(obj.id, obj);
+    }
+
+    // Second pass: apply link info (source=key, target=lock)
+    for (const link of v2Links) {
+      const sourceId = link.sourceObjectId as string;
+      const targetId = link.targetObjectId as string;
+      const source = sourceId ? objMap.get(sourceId) : undefined;
+      const target = targetId ? objMap.get(targetId) : undefined;
+      if (source && target) {
+        source.objectType = "key";
+        target.objectType = "lock";
+        target.linkedKeyId = sourceId;
+        target.lockedMessage = typeof link.lockedMessage === "string" ? link.lockedMessage : "";
+        target.successMessage = typeof link.successMessage === "string" ? link.successMessage : "";
+        target.unlockEffect = link.result === "go_to_block" ? "go_to_next" : "disappear";
+      }
+    }
+
+    objects = Array.from(objMap.values());
+  } else if (hasV1) {
+    // ── V1 → V3 migration: convert overlays+hotspots directly ──
+    const legacyOverlays = Array.isArray(raw.overlays) ? (raw.overlays as GameplayOverlay[]) : [];
+    const legacyHotspots = Array.isArray(raw.hotspots) ? (raw.hotspots as GameplayHotspot[]) : [];
+
+    for (const ov of legacyOverlays) {
+      objects.push({
+        id: createId("gobj"),
+        name: ov.name || "Objet",
+        assetId: ov.assetId,
+        x: ov.x, y: ov.y, width: ov.width, height: ov.height,
+        zIndex: ov.zIndex,
+        visibleByDefault: ov.visibleByDefault,
+        objectType: "decoration",
+        grantItemId: null, linkedKeyId: null,
+        unlockEffect: "go_to_next", lockedMessage: "", successMessage: "",
+        soundAssetId: null,
+        effects: [],
+      });
+    }
+
+    for (const hs of legacyHotspots) {
+      let objectType: GameplayObjectType = "decoration";
+      let grantItemId: string | null = null;
+      for (const a of hs.onClickActions) {
+        if (a.type === "add_item" && a.itemId) {
+          objectType = "collectible";
+          grantItemId = a.itemId;
+        }
+      }
+      objects.push({
+        id: createId("gobj"),
+        name: hs.name || "Zone",
+        assetId: null,
+        x: hs.x, y: hs.y, width: hs.width, height: hs.height,
+        zIndex: 10,
+        visibleByDefault: true,
+        objectType,
+        grantItemId,
+        linkedKeyId: null,
+        unlockEffect: "go_to_next", lockedMessage: hs.lockedMessage || "", successMessage: "",
+        soundAssetId: hs.soundAssetId,
+        effects: normalizeVariableEffects(hs.effects),
+      });
+    }
+  }
+
   return {
     ...block,
-    entryEffects: normalizeVariableEffects((block as { entryEffects?: unknown }).entryEffects),
-    mode: "point_and_click",
+    entryEffects: normalizeVariableEffects(raw.entryEffects),
+    mode: "point_and_click" as const,
     objective: block.objective ?? "",
     backgroundAssetId: block.backgroundAssetId ?? null,
     voiceAssetId: block.voiceAssetId ?? null,
-    overlays: Array.isArray(block.overlays)
-      ? block.overlays.map((overlay) => ({
-          id: overlay.id ?? createId("overlay"),
-          name: overlay.name ?? "Objet",
-          assetId: overlay.assetId ?? null,
-          x: Number.isFinite(overlay.x) ? overlay.x : 35,
-          y: Number.isFinite(overlay.y) ? overlay.y : 35,
-          width: Number.isFinite(overlay.width) ? overlay.width : 20,
-          height: Number.isFinite(overlay.height) ? overlay.height : 20,
-          zIndex: Number.isFinite(overlay.zIndex) ? overlay.zIndex : 2,
-          visibleByDefault:
-            typeof overlay.visibleByDefault === "boolean" ? overlay.visibleByDefault : true,
-        }))
-      : [],
-    hotspots: Array.isArray(block.hotspots)
-      ? block.hotspots.map((hotspot) => ({
-          id: hotspot.id ?? createId("hotspot"),
-          name: hotspot.name ?? "Zone cliquable",
-          required: typeof hotspot.required === "boolean" ? hotspot.required : true,
-          message: hotspot.message ?? "",
-          toggleOverlayId: hotspot.toggleOverlayId ?? null,
-          soundAssetId: hotspot.soundAssetId ?? null,
-          effects: normalizeVariableEffects(hotspot.effects),
-          onClickActions: Array.isArray(hotspot.onClickActions)
-            ? hotspot.onClickActions
-                .map((action) => normalizeHotspotAction(action))
-                .filter((action): action is GameplayHotspotClickAction => Boolean(action))
-            : [],
-          x: Number.isFinite(hotspot.x) ? hotspot.x : 35,
-          y: Number.isFinite(hotspot.y) ? hotspot.y : 35,
-          width: Number.isFinite(hotspot.width) ? hotspot.width : 20,
-          height: Number.isFinite(hotspot.height) ? hotspot.height : 20,
-        }))
-      : [],
-    completionRule: block.completionRule
-      ? {
-          type:
-            block.completionRule.type === "required_count"
-              ? "required_count"
-              : "all_required",
-          requiredCount:
-            Number.isFinite(block.completionRule.requiredCount) &&
-            block.completionRule.requiredCount > 0
-              ? Math.floor(block.completionRule.requiredCount)
-              : 1,
-        }
-      : {
-          type: "all_required",
-          requiredCount: 1,
-        },
+    objects,
     completionEffects: normalizeVariableEffects(block.completionEffects),
     nextBlockId: block.nextBlockId ?? null,
+    // Clear all legacy fields
+    links: undefined,
+    overlays: undefined,
+    hotspots: undefined,
+    completionMode: undefined,
+    completionCount: undefined,
+    completionRule: undefined,
   };
 }
 
@@ -789,6 +1064,7 @@ export function normalizeStoryBlock(block: StoryBlock): StoryBlock {
         targetLineId: null,
         targetBlockId: typeof choice.targetBlockId === "string" ? choice.targetBlockId : null,
         effects: normalizeVariableEffects(choice.effects),
+        affinityEffects: normalizeAffinityEffects(choice.affinityEffects),
       }));
 
       return {
@@ -808,6 +1084,8 @@ export function normalizeStoryBlock(block: StoryBlock): StoryBlock {
           speaker: oldSpeaker,
           text: oldText,
           voiceAssetId: oldVoice,
+          conditions: [],
+          fallbackLineId: null,
           responses: migratedResponses,
         }],
         startLineId: lineId,
@@ -833,17 +1111,33 @@ export function normalizeStoryBlock(block: StoryBlock): StoryBlock {
             speaker: line.speaker ?? "Narrateur",
             text: line.text ?? "",
             voiceAssetId: line.voiceAssetId ?? null,
+            conditions: normalizeConditions((line as unknown as Record<string, unknown>).conditions),
+            fallbackLineId: typeof (line as unknown as Record<string, unknown>).fallbackLineId === "string" ? (line as unknown as Record<string, unknown>).fallbackLineId as string : null,
             responses: Array.isArray(line.responses)
               ? line.responses.map((resp) => ({
                   ...resp,
                   targetLineId: resp.targetLineId ?? null,
                   targetBlockId: resp.targetBlockId ?? null,
                   effects: normalizeVariableEffects(resp.effects),
+                  affinityEffects: normalizeAffinityEffects((resp as unknown as Record<string, unknown>).affinityEffects),
                 }))
               : [],
           }))
         : [],
       startLineId: block.startLineId ?? (Array.isArray(block.lines) && block.lines.length > 0 ? block.lines[0].id : ""),
+    };
+  }
+
+  if (block.type === "cinematic") {
+    const raw = block as unknown as Record<string, unknown>;
+    return {
+      ...block,
+      entryEffects: normalizeVariableEffects(raw.entryEffects),
+      characterAssetId:
+        typeof raw.characterAssetId === "string" && raw.characterAssetId
+          ? raw.characterAssetId as string
+          : null,
+      sceneLayout: normalizeSceneLayout(raw.sceneLayout),
     };
   }
 
@@ -889,6 +1183,9 @@ export function normalizeStoryBlock(block: StoryBlock): StoryBlock {
       npcLore: block.npcLore ?? "",
       imageAssetIds,
       defaultImageAssetId,
+      initialAffinity: typeof (block as unknown as Record<string, unknown>).initialAffinity === "number"
+        ? block.initialAffinity
+        : 50,
       nextBlockId: block.nextBlockId ?? null,
     };
   }
@@ -918,18 +1215,7 @@ export function getBlockOutgoingTargets(block: StoryBlock) {
   }
 
   if (block.type === "gameplay") {
-    const targets = new Set<string>();
-    if (block.nextBlockId) {
-      targets.add(block.nextBlockId);
-    }
-    for (const hotspot of block.hotspots) {
-      for (const action of hotspot.onClickActions) {
-        if (action.type === "go_to_block" && action.targetBlockId) {
-          targets.add(action.targetBlockId);
-        }
-      }
-    }
-    return Array.from(targets);
+    return block.nextBlockId ? [block.nextBlockId] : [];
   }
 
   return block.nextBlockId ? [block.nextBlockId] : [];
@@ -1049,6 +1335,29 @@ export function validateStoryBlocks(
           });
         }
 
+        // Validate conditions
+        for (const cond of line.conditions ?? []) {
+          if (cond.npcProfileBlockId) {
+            const npcBlock = blockById.get(cond.npcProfileBlockId);
+            if (!npcBlock || npcBlock.type !== "npc_profile") {
+              issues.push({
+                level: "error",
+                message: `Condition de "${line.speaker || "?"}" reference un PNJ supprime.`,
+                blockId: block.id,
+              });
+            }
+          }
+        }
+
+        // Validate fallback line
+        if (line.fallbackLineId && !lineIds.has(line.fallbackLineId)) {
+          issues.push({
+            level: "error",
+            message: `Ligne de repli de "${line.speaker || "?"}" pointe vers une ligne supprimee.`,
+            blockId: block.id,
+          });
+        }
+
         for (const resp of line.responses) {
           if (!resp.text.trim()) {
             issues.push({
@@ -1066,12 +1375,19 @@ export function validateStoryBlocks(
             });
           }
 
-          if (resp.targetLineId && !lineIds.has(resp.targetLineId)) {
-            issues.push({
-              level: "error",
-              message: `Reponse ${resp.label} de "${line.speaker || "?"}" pointe vers une ligne supprimee.`,
-              blockId: block.id,
-            });
+          if (resp.targetLineId) {
+            // If the response targets an external block, validate the lineId against that block's lines
+            const ownerBlock = resp.targetBlockId ? blockById.get(resp.targetBlockId) : block;
+            const ownerLineIds = ownerBlock && ownerBlock.type === "dialogue"
+              ? new Set(ownerBlock.lines.map((l) => l.id))
+              : lineIds;
+            if (!ownerLineIds.has(resp.targetLineId)) {
+              issues.push({
+                level: "error",
+                message: `Reponse ${resp.label} de "${line.speaker || "?"}" pointe vers une ligne supprimee.`,
+                blockId: block.id,
+              });
+            }
           }
         }
       }
@@ -1154,60 +1470,39 @@ export function validateStoryBlocks(
         });
       }
 
-      if (block.hotspots.length === 0) {
-        issues.push({
-          level: "error",
-          message: "Ajoute au moins une zone cliquable.",
-          blockId: block.id,
-        });
-      }
-
-      const overlayIds = new Set(block.overlays.map((overlay) => overlay.id));
-      const hotspotIds = new Set(block.hotspots.map((hotspot) => hotspot.id));
-      for (const hotspot of block.hotspots) {
-        if (hotspot.toggleOverlayId && !overlayIds.has(hotspot.toggleOverlayId)) {
+      const objectIds = new Set(block.objects.map((o) => o.id));
+      for (const obj of block.objects) {
+        if (obj.objectType === "collectible" && obj.grantItemId && !itemIds.has(obj.grantItemId)) {
           issues.push({
             level: "error",
-            message: `La zone ${hotspot.name || hotspot.id} pointe vers un overlay introuvable.`,
+            message: `L'objet "${obj.name}" donne un item introuvable.`,
             blockId: block.id,
           });
         }
-
-        for (const action of hotspot.onClickActions) {
-          if (action.type === "go_to_block" && action.targetBlockId && !blockById.has(action.targetBlockId)) {
+        if (obj.objectType === "lock" && obj.linkedKeyId && !objectIds.has(obj.linkedKeyId)) {
+          issues.push({
+            level: "error",
+            message: `La serrure "${obj.name}" pointe vers une cle introuvable.`,
+            blockId: block.id,
+          });
+        }
+        if (obj.objectType === "lock" && !obj.linkedKeyId) {
+          issues.push({
+            level: "warning",
+            message: `La serrure "${obj.name}" n'a aucune cle associee.`,
+            blockId: block.id,
+          });
+        }
+        if (obj.objectType === "key") {
+          const hasLock = block.objects.some(
+            (o) => o.objectType === "lock" && o.linkedKeyId === obj.id,
+          );
+          if (!hasLock) {
             issues.push({
-              level: "error",
-              message: `La zone ${hotspot.name || hotspot.id} contient une action vers un bloc supprime.`,
+              level: "warning",
+              message: `La cle "${obj.name}" n'est associee a aucune serrure.`,
               blockId: block.id,
             });
-          }
-
-          if (
-            action.type === "disable_hotspot" &&
-            action.targetHotspotId &&
-            !hotspotIds.has(action.targetHotspotId)
-          ) {
-            issues.push({
-              level: "error",
-              message: `La zone ${hotspot.name || hotspot.id} desactive une zone introuvable.`,
-              blockId: block.id,
-            });
-          }
-
-          if (action.type === "add_item") {
-            if (!action.itemId) {
-              issues.push({
-                level: "warning",
-                message: `La zone ${hotspot.name || hotspot.id} a une recompense sans objet cible.`,
-                blockId: block.id,
-              });
-            } else if (!itemIds.has(action.itemId)) {
-              issues.push({
-                level: "error",
-                message: `La zone ${hotspot.name || hotspot.id} donne un objet introuvable.`,
-                blockId: block.id,
-              });
-            }
           }
         }
       }

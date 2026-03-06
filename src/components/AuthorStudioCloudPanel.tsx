@@ -1,3 +1,4 @@
+import { useState } from "react";
 import { User } from "@supabase/supabase-js";
 
 import {
@@ -9,6 +10,7 @@ import {
   PlatformProfileRow,
   PlatformRole,
 } from "@/components/author-studio-types";
+import { CollapsibleSection } from "@/components/CollapsibleSection";
 import { HelpHint } from "@/components/HelpHint";
 
 interface AuthorStudioCloudPanelProps {
@@ -47,6 +49,7 @@ interface AuthorStudioCloudPanelProps {
   cloudProjects: CloudProjectRow[];
   onOpenProject: (projectId: string) => void;
   onDownloadProjectBundle: (projectId: string) => void;
+  onDeleteProject: (projectId: string) => void;
   canEdit: boolean;
   onCleanupLocalOrphanAssetRefs: () => void;
   onCleanupCloudOrphanAssets: () => void;
@@ -108,6 +111,7 @@ export function AuthorStudioCloudPanel({
   cloudProjects,
   onOpenProject,
   onDownloadProjectBundle,
+  onDeleteProject,
   canEdit,
   onCleanupLocalOrphanAssetRefs,
   onCleanupCloudOrphanAssets,
@@ -145,16 +149,23 @@ export function AuthorStudioCloudPanel({
     return isPlatformAdmin ? email : maskEmail(email);
   };
 
+  const [pendingDeleteProject, setPendingDeleteProject] = useState<{
+    id: string;
+    title: string;
+  } | null>(null);
+
   return (
     <aside className="panel panel-cloud">
-      <section className="panel-section">
-        <div className="title-with-help">
-          <h2>Supabase Cloud</h2>
+      <CollapsibleSection
+        storageKey="cloud-connection"
+        title="Supabase Cloud"
+        headerExtra={
           <HelpHint title="Connexion cloud">
             Espace de connexion et sauvegarde en ligne. Depuis ici, tu te connectes, tu
             sauvegardes le projet actif et tu geres le verrou d&apos;edition cloud.
           </HelpHint>
-        </div>
+        }
+      >
         {!supabaseEnabled && (
           <p className="empty-placeholder">
             Configure `NEXT_PUBLIC_SUPABASE_URL` et `NEXT_PUBLIC_SUPABASE_ANON_KEY` (ou
@@ -228,8 +239,18 @@ export function AuthorStudioCloudPanel({
                     onClick={onSaveProject}
                     disabled={cloudBusy || !cloudCanWrite}
                   >
-                    {cloudProjectId ? "Sauvegarder cloud" : "Creer + sauvegarder"}
+                    {cloudBusy
+                      ? "Sauvegarde en cours..."
+                      : cloudProjectId
+                        ? "Sauvegarder cloud"
+                        : "Creer + sauvegarder"}
                   </button>
+                  {!cloudCanWrite && (
+                    <small className="cloud-save-disabled-hint">
+                      Sauvegarde desactivee: verifie que ton compte a le role auteur
+                      et que tu as les droits write/owner sur ce projet.
+                    </small>
+                  )}
                   {cloudProjectId && (
                     <div className="cloud-auth-top-row">
                       <button
@@ -314,74 +335,100 @@ export function AuthorStudioCloudPanel({
             )}
           </>
         )}
-      </section>
+      </CollapsibleSection>
 
-      <section className="panel-section">
-        <div className="title-with-help">
-          <h2>User name (mail)</h2>
+      <CollapsibleSection
+        storageKey="cloud-username"
+        title="User name (mail)"
+        headerExtra={
           <HelpHint title="Compte actif">
             Affiche le compte actuellement connecte dans le studio. Si rien n&apos;apparait, aucun
             utilisateur n&apos;est connecte.
           </HelpHint>
-        </div>
+        }
+      >
         <p className="empty-placeholder">{displayEmail(authUser?.email ?? null) ?? "Aucun utilisateur connecte."}</p>
-      </section>
+      </CollapsibleSection>
 
       {authUser && (
-        <section className="panel-section">
-          <div className="title-with-help">
-            <h2>Mes projets cloud</h2>
+        <CollapsibleSection
+          storageKey="cloud-projects"
+          title="Mes projets cloud"
+          headerExtra={
             <HelpHint title="Liste projets">
-              Liste des projets ou tu as un droit owner, write ou read. Ouvre un projet pour
-              recuperer son graphe et ses assets.
+              Clique &laquo;&nbsp;Ouvrir&nbsp;&raquo; pour charger un projet directement dans
+              l&apos;editeur (graphe + images). &laquo;&nbsp;Export&nbsp;&raquo; telecharge un ZIP
+              avec le JSON et les images (destine au moteur de jeu, pas a l&apos;editeur).
             </HelpHint>
-          </div>
-          <small>Affiche les projets auxquels ton compte a acces (owner, write, read).</small>
+          }
+        >
+          <small>Clique Ouvrir pour charger un projet. Les images se chargent automatiquement depuis le cloud.</small>
           {cloudProjects.length === 0 ? (
             <p className="empty-placeholder">
               Aucun projet visible. Clique sur Creer + sauvegarder puis sur Refresh liste.
             </p>
           ) : (
             <ul className="list-compact">
-              {cloudProjects.map((item) => (
-                <li key={item.id} className="cloud-project-row">
-                  <div>
-                    <strong>{item.title}</strong>
-                    <small>{new Date(item.updated_at).toLocaleString("fr-FR")}</small>
-                  </div>
-                  <div className="row-inline">
-                    <span className="chip chip-start">{item.access_level}</span>
-                    <button
-                      className="button-secondary"
-                      onClick={() => onDownloadProjectBundle(item.id)}
-                      disabled={cloudBusy}
-                    >
-                      DL bundle
-                    </button>
-                    <button
-                      className="button-secondary"
-                      onClick={() => onOpenProject(item.id)}
-                      disabled={cloudBusy}
-                    >
-                      Ouvrir
-                    </button>
-                  </div>
-                </li>
-              ))}
+              {cloudProjects.map((item) => {
+                const isActive = item.id === cloudProjectId;
+                return (
+                  <li key={item.id} className={`cloud-project-row${isActive ? " cloud-project-active" : ""}`}>
+                    <div>
+                      <strong>{item.title}</strong>
+                      <small>{new Date(item.updated_at).toLocaleString("fr-FR")}</small>
+                    </div>
+                    <div className="row-inline">
+                      <span className="chip chip-start">{item.access_level}</span>
+                      {isActive ? (
+                        <span className="chip chip-active">Actif</span>
+                      ) : (
+                        <button
+                          className="button-primary"
+                          onClick={() => onOpenProject(item.id)}
+                          disabled={cloudBusy}
+                        >
+                          Ouvrir
+                        </button>
+                      )}
+                      <button
+                        className="button-secondary button-small"
+                        onClick={() => onDownloadProjectBundle(item.id)}
+                        disabled={cloudBusy}
+                        title="Exporter un ZIP avec le JSON et les images (pour le moteur de jeu)"
+                      >
+                        Export
+                      </button>
+                      {isPlatformAdmin && (
+                        <button
+                          className="button-danger button-small"
+                          onClick={() => setPendingDeleteProject({ id: item.id, title: item.title })}
+                          disabled={cloudBusy}
+                          title="Supprimer definitivement ce projet (admin)"
+                        >
+                          Supprimer
+                        </button>
+                      )}
+                    </div>
+                  </li>
+                );
+              })}
             </ul>
           )}
-        </section>
+        </CollapsibleSection>
       )}
 
       {authUser && isPlatformAdmin && (
-        <section className="panel-section">
-          <div className="title-with-help">
-            <h2>Administration plateforme</h2>
+        <CollapsibleSection
+          storageKey="cloud-admin"
+          title="Administration plateforme"
+          defaultCollapsed
+          headerExtra={
             <HelpHint title="Roles plateforme">
               Zone reservee admin pour promouvoir ou retrograder les comptes entre `reader`,
               `author` et `admin`.
             </HelpHint>
-          </div>
+          }
+        >
           <div className="row-inline">
             <button
               className="button-secondary"
@@ -486,18 +533,21 @@ export function AuthorStudioCloudPanel({
               })}
             </ul>
           )}
-        </section>
+        </CollapsibleSection>
       )}
 
       {isPlatformAdmin && (
-        <section className="panel-section">
-          <div className="title-with-help">
-            <h2>Maintenance assets</h2>
+        <CollapsibleSection
+          storageKey="cloud-maintenance"
+          title="Maintenance assets"
+          defaultCollapsed
+          headerExtra={
             <HelpHint title="Nettoyage">
               Outils admin pour supprimer les references ou fichiers assets inutilises.
               Utiliser apres sauvegarde cloud.
             </HelpHint>
-          </div>
+          }
+        >
           <p className="empty-placeholder">
             Nettoie les references assets non utilisees et les fichiers cloud orphelins.
           </p>
@@ -518,18 +568,21 @@ export function AuthorStudioCloudPanel({
             </button>
           </div>
           <small>Conseil: fais d&apos;abord une sauvegarde cloud, puis lance la purge cloud.</small>
-        </section>
+        </CollapsibleSection>
       )}
 
-      {cloudProjectId && isPlatformAdmin && (
-        <section className="panel-section">
-          <div className="title-with-help">
-            <h2>Droits cloud</h2>
+      {cloudProjectId && (cloudCanManageAccess || isPlatformAdmin) && (
+        <CollapsibleSection
+          storageKey="cloud-share"
+          title="Partager le projet"
+          headerExtra={
             <HelpHint title="Partage projet">
-              Permet de donner ou retirer l&apos;acces a un projet cloud. Le niveau `write` autorise
-              l&apos;edition, `read` autorise uniquement la lecture.
+              Invite un collaborateur par email pour qu&apos;il puisse ouvrir le projet.
+              Le niveau &laquo;&nbsp;write&nbsp;&raquo; autorise l&apos;edition,
+              &laquo;&nbsp;read&nbsp;&raquo; autorise uniquement la consultation.
             </HelpHint>
-          </div>
+          }
+        >
           {cloudAccessLevel !== "owner" && (
             <p className="empty-placeholder">Seul le owner peut modifier les droits du projet.</p>
           )}
@@ -586,18 +639,21 @@ export function AuthorStudioCloudPanel({
               );
             })}
           </ul>
-        </section>
+        </CollapsibleSection>
       )}
 
       {cloudProjectId && cloudLogs.length > 0 && (
-        <section className="panel-section">
-          <div className="title-with-help">
-            <h2>Logs cloud</h2>
+        <CollapsibleSection
+          storageKey="cloud-logs"
+          title="Logs cloud"
+          defaultCollapsed
+          headerExtra={
             <HelpHint title="Historique cloud">
               Journal des actions cloud sur le projet courant: ouvertures, sauvegardes, droits et
               verrous.
             </HelpHint>
-          </div>
+          }
+        >
           <ul className="log-list">
             {cloudLogs.map((entry) => {
               const profile = cloudProfiles[entry.actor_id];
@@ -613,7 +669,42 @@ export function AuthorStudioCloudPanel({
               );
             })}
           </ul>
-        </section>
+        </CollapsibleSection>
+      )}
+
+      {pendingDeleteProject && (
+        <div className="confirm-overlay">
+          <div className="confirm-modal">
+            <h2>Supprimer le projet</h2>
+            <p>
+              Tu es sur le point de supprimer definitivement le projet{" "}
+              <strong>{pendingDeleteProject.title}</strong>.
+            </p>
+            <p className="confirm-warning">
+              Cette action est irreversible: toutes les donnees, assets et droits d&apos;acces
+              seront supprimes.
+            </p>
+            <div className="confirm-actions">
+              <button
+                className="button-secondary"
+                onClick={() => setPendingDeleteProject(null)}
+                disabled={cloudBusy}
+              >
+                Annuler
+              </button>
+              <button
+                className="button-danger"
+                onClick={() => {
+                  onDeleteProject(pendingDeleteProject.id);
+                  setPendingDeleteProject(null);
+                }}
+                disabled={cloudBusy}
+              >
+                Supprimer definitivement
+              </button>
+            </div>
+          </div>
+        </div>
       )}
     </aside>
   );

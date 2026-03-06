@@ -3,8 +3,10 @@ import { Edge, MarkerType, Node } from "@xyflow/react";
 import { StoryNodeData } from "@/components/StoryNode";
 import {
   AssetRef,
+  BlockType,
   ChoiceLabel,
   ChoiceBlock,
+  DEFAULT_SCENE_LAYOUT,
   DialogueBlock,
   DialogueLine,
   DialogueResponse,
@@ -12,6 +14,8 @@ import {
   GameplayHotspotClickAction,
   GameplayHotspotClickActionType,
   GameplayHotspot,
+  GameplayLink,
+  GameplayObject,
   GameplayOverlay,
   ProjectMeta,
   STORY_SCHEMA_VERSION,
@@ -183,7 +187,7 @@ export function collectAssetIds(block: StoryBlock) {
     return block.backgroundAssetId ? [block.backgroundAssetId] : [];
   }
   if (block.type === "cinematic") {
-    return [block.backgroundAssetId, block.videoAssetId, block.voiceAssetId].filter(
+    return [block.backgroundAssetId, block.characterAssetId, block.videoAssetId, block.voiceAssetId].filter(
       (value): value is string => Boolean(value),
     );
   }
@@ -209,13 +213,13 @@ export function collectAssetIds(block: StoryBlock) {
   if (block.type === "npc_profile") {
     return block.imageAssetIds.filter((value): value is string => Boolean(value));
   }
-  const overlayIds = block.overlays
-    .map((overlay) => overlay.assetId)
+  const objectAssetIds = block.objects
+    .map((obj) => obj.assetId)
     .filter((value): value is string => Boolean(value));
-  const hotspotSoundIds = block.hotspots
-    .map((hotspot) => hotspot.soundAssetId)
+  const objectSoundIds = block.objects
+    .map((obj) => obj.soundAssetId)
     .filter((value): value is string => Boolean(value));
-  return [block.backgroundAssetId, block.voiceAssetId, ...overlayIds, ...hotspotSoundIds].filter(
+  return [block.backgroundAssetId, block.voiceAssetId, ...objectAssetIds, ...objectSoundIds].filter(
     (value): value is string => Boolean(value),
   );
 }
@@ -271,6 +275,7 @@ export function defaultGameplayOverlayDraft(): GameplayOverlay {
     height: 20,
     zIndex: 2,
     visibleByDefault: true,
+    draggable: false,
   };
 }
 
@@ -284,6 +289,10 @@ export function defaultGameplayHotspotDraft(): GameplayHotspot {
     soundAssetId: null,
     effects: [],
     onClickActions: [],
+    requiredItemId: null,
+    consumeRequiredItem: false,
+    lockedMessage: "",
+    acceptOverlayId: null,
     x: 35,
     y: 35,
     width: 20,
@@ -297,21 +306,32 @@ export function defaultGameplayHotspotActionDraft(
   return createGameplayHotspotClickAction(type);
 }
 
-export function requiredHotspotIds(block: GameplayBlock) {
-  const required = block.hotspots.filter((hotspot) => hotspot.required).map((hotspot) => hotspot.id);
-  if (required.length > 0) return required;
-  return block.hotspots.map((hotspot) => hotspot.id);
+/** V3: IDs of objects that are interactive (not "decoration"). */
+export function interactiveObjectIds(block: GameplayBlock): string[] {
+  return block.objects
+    .filter((obj) => obj.objectType !== "decoration")
+    .map((obj) => obj.id);
 }
 
-export function isGameplayPointClickCompleted(block: GameplayBlock, foundHotspotIds: Set<string>) {
-  if (block.hotspots.length === 0) return true;
-  if (block.completionRule.type === "required_count") {
-    const requiredCount = Math.max(1, Math.floor(block.completionRule.requiredCount || 1));
-    return foundHotspotIds.size >= requiredCount;
+export function requiredHotspotIds(block: GameplayBlock) {
+  // Legacy compat — if the block still has hotspots (should not after normalization)
+  if (Array.isArray(block.hotspots) && block.hotspots.length > 0) {
+    const required = block.hotspots.filter((hotspot) => hotspot.required).map((hotspot) => hotspot.id);
+    if (required.length > 0) return required;
+    return block.hotspots.map((hotspot) => hotspot.id);
   }
+  return interactiveObjectIds(block);
+}
 
-  const mustFind = requiredHotspotIds(block);
-  return mustFind.every((hotspotId) => foundHotspotIds.has(hotspotId));
+export function isGameplayCompleted(block: GameplayBlock, interactedObjectIds: Set<string>) {
+  if (block.objects.length === 0) return true;
+  const mustInteract = interactiveObjectIds(block);
+  return mustInteract.every((id) => interactedObjectIds.has(id));
+}
+
+/** @deprecated Legacy V1 completion check — kept for backward compat */
+export function isGameplayPointClickCompleted(block: GameplayBlock, foundHotspotIds: Set<string>) {
+  return isGameplayCompleted(block, foundHotspotIds);
 }
 
 export async function fileToDataUrl(file: File) {
@@ -434,18 +454,9 @@ export function removeNodeReferences(block: StoryBlock, removedBlockId: string):
   }
 
   if (block.type === "gameplay") {
-    const nextBlockId = block.nextBlockId === removedBlockId ? null : block.nextBlockId;
     return {
       ...block,
-      nextBlockId,
-      hotspots: block.hotspots.map((hotspot) => ({
-        ...hotspot,
-        onClickActions: hotspot.onClickActions.map((action) =>
-          action.type === "go_to_block" && action.targetBlockId === removedBlockId
-            ? { ...action, targetBlockId: null }
-            : action,
-        ),
-      })),
+      nextBlockId: block.nextBlockId === removedBlockId ? null : block.nextBlockId,
     };
   }
 
@@ -490,9 +501,9 @@ export function removeVariableReferences(block: StoryBlock, removedVariableId: s
     return {
       ...block,
       entryEffects: nextEntryEffects,
-      hotspots: block.hotspots.map((hotspot) => ({
-        ...hotspot,
-        effects: hotspot.effects.filter((effect) => effect.variableId !== removedVariableId),
+      objects: block.objects.map((obj) => ({
+        ...obj,
+        effects: obj.effects.filter((effect) => effect.variableId !== removedVariableId),
       })),
       completionEffects: block.completionEffects.filter(
         (effect) => effect.variableId !== removedVariableId,
@@ -513,14 +524,11 @@ export function removeItemReferences(block: StoryBlock, removedItemId: string): 
 
   return {
     ...block,
-    hotspots: block.hotspots.map((hotspot) => ({
-      ...hotspot,
-      onClickActions: hotspot.onClickActions.map((action) =>
-        action.type === "add_item" && action.itemId === removedItemId
-          ? { ...action, itemId: null }
-          : action,
-      ),
-    })),
+    objects: block.objects.map((obj) =>
+      obj.grantItemId === removedItemId
+        ? { ...obj, grantItemId: null }
+        : obj,
+    ),
   };
 }
 
@@ -592,6 +600,8 @@ export function serializeBlock(
       heading: block.heading,
       body: block.body,
       backgroundPath: assetPath(block.backgroundAssetId, assetRefs),
+      characterPath: assetPath(block.characterAssetId, assetRefs),
+      sceneLayout: block.sceneLayout,
       videoPath: assetPath(block.videoAssetId, assetRefs),
       voicePath: assetPath(block.voiceAssetId, assetRefs),
       autoAdvanceSeconds: block.autoAdvanceSeconds,
@@ -609,6 +619,7 @@ export function serializeBlock(
       entryEffects: serializeEffects(block.entryEffects ?? [], variableNameById),
       backgroundPath: assetPath(block.backgroundAssetId, assetRefs),
       characterPath: assetPath(block.characterAssetId, assetRefs),
+      sceneLayout: block.sceneLayout,
       npcProfileBlockId: block.npcProfileBlockId,
       npcImageAssetId: block.npcImageAssetId,
       npcImagePath: assetPath(block.npcImageAssetId, assetRefs),
@@ -618,6 +629,8 @@ export function serializeBlock(
         speaker: line.speaker,
         text: line.text,
         voicePath: assetPath(line.voiceAssetId, assetRefs),
+        conditions: line.conditions,
+        fallbackLineId: line.fallbackLineId,
         responses: line.responses.map((resp) => ({
           id: resp.id,
           label: resp.label,
@@ -625,6 +638,7 @@ export function serializeBlock(
           targetLineId: resp.targetLineId,
           targetBlockId: resp.targetBlockId,
           effects: serializeEffects(resp.effects, variableNameById),
+          affinityEffects: resp.affinityEffects,
         })),
       })),
     };
@@ -674,6 +688,7 @@ export function serializeBlock(
       entryEffects: serializeEffects(block.entryEffects ?? [], variableNameById),
       npcName: block.npcName,
       npcLore: block.npcLore,
+      initialAffinity: block.initialAffinity,
       defaultImageAssetId: block.defaultImageAssetId,
       defaultImagePath: assetPath(block.defaultImageAssetId, assetRefs),
       images: block.imageAssetIds.map((assetId) => ({
@@ -694,66 +709,292 @@ export function serializeBlock(
     objective: block.objective,
     backgroundPath: assetPath(block.backgroundAssetId, assetRefs),
     voicePath: assetPath(block.voiceAssetId, assetRefs),
-    overlays: block.overlays.map((overlay) => ({
-      id: overlay.id,
-      name: overlay.name,
-      x: overlay.x,
-      y: overlay.y,
-      width: overlay.width,
-      height: overlay.height,
-      zIndex: overlay.zIndex,
-      visibleByDefault: overlay.visibleByDefault,
-      imagePath: assetPath(overlay.assetId, assetRefs),
+    objects: block.objects.map((obj) => ({
+      id: obj.id,
+      name: obj.name,
+      x: obj.x,
+      y: obj.y,
+      width: obj.width,
+      height: obj.height,
+      zIndex: obj.zIndex,
+      visibleByDefault: obj.visibleByDefault,
+      objectType: obj.objectType,
+      grantItemId: obj.grantItemId,
+      linkedKeyId: obj.linkedKeyId,
+      unlockEffect: obj.unlockEffect,
+      lockedMessage: obj.lockedMessage,
+      successMessage: obj.successMessage,
+      soundPath: assetPath(obj.soundAssetId, assetRefs),
+      imagePath: assetPath(obj.assetId, assetRefs),
+      effects: serializeEffects(obj.effects, variableNameById),
     })),
-    hotspots: block.hotspots.map((hotspot) => ({
-      id: hotspot.id,
-      name: hotspot.name,
-      x: hotspot.x,
-      y: hotspot.y,
-      width: hotspot.width,
-      height: hotspot.height,
-      required: hotspot.required,
-      message: hotspot.message,
-      toggleOverlayId: hotspot.toggleOverlayId,
-      soundPath: assetPath(hotspot.soundAssetId, assetRefs),
-      effects: serializeEffects(hotspot.effects, variableNameById),
-      onClickActions: hotspot.onClickActions.map((action) => {
-        if (action.type === "message") {
-          return {
-            id: action.id,
-            type: action.type,
-            message: action.message,
-          };
-        }
-
-        if (action.type === "add_item") {
-          return {
-            id: action.id,
-            type: action.type,
-            itemId: action.itemId,
-            quantity: action.quantity,
-          };
-        }
-
-        if (action.type === "disable_hotspot") {
-          return {
-            id: action.id,
-            type: action.type,
-            targetHotspotId: action.targetHotspotId,
-          };
-        }
-
-        return {
-          id: action.id,
-          type: action.type,
-          targetBlockId: action.targetBlockId,
-        };
-      }),
-    })),
-    completionRule: block.completionRule,
     completionEffects: serializeEffects(block.completionEffects, variableNameById),
     nextBlockId: block.nextBlockId,
   };
+}
+
+/**
+ * Reverse-map an asset packagePath back to its assetId using the pathToAssetId index.
+ * Returns null if path is falsy or not found.
+ */
+function resolveAssetId(path: unknown, pathToAssetId: Map<string, string>): string | null {
+  if (typeof path !== "string" || !path) return null;
+  return pathToAssetId.get(path) ?? null;
+}
+
+/**
+ * Reconstruct a StoryBlock from an exported (serialized) block inside story.json.
+ * `pathToAssetId` maps each `assets/...` packagePath → the new local assetId.
+ */
+export function deserializeBlockFromExport(
+  raw: Record<string, unknown>,
+  pathToAssetId: Map<string, string>,
+): StoryBlock | null {
+  const type = raw.type as string | undefined;
+  if (!type) return null;
+
+  const base = {
+    id: (raw.id as string) ?? createId(type),
+    name: (raw.name as string) ?? "",
+    notes: (raw.notes as string) ?? "",
+    position: (raw.position as { x: number; y: number }) ?? { x: 0, y: 0 },
+    entryEffects: deserializeEffects(raw.entryEffects),
+  };
+
+  if (type === "title") {
+    return normalizeStoryBlock({
+      ...base,
+      type: "title",
+      storyTitle: (raw.storyTitle as string) ?? "",
+      subtitle: (raw.subtitle as string) ?? "",
+      backgroundAssetId: resolveAssetId(raw.backgroundPath, pathToAssetId),
+      buttonStyle: (raw.buttonStyle as TitleBlock["buttonStyle"]) ?? {
+        backgroundColor: "#2563eb",
+        textColor: "#f8fafc",
+        borderColor: "#1d4ed8",
+        radius: 14,
+        fontSize: 16,
+      },
+      nextBlockId: (raw.nextBlockId as string) ?? null,
+    });
+  }
+
+  if (type === "cinematic") {
+    return normalizeStoryBlock({
+      ...base,
+      type: "cinematic",
+      heading: (raw.heading as string) ?? "",
+      body: (raw.body as string) ?? "",
+      backgroundAssetId: resolveAssetId(raw.backgroundPath, pathToAssetId),
+      characterAssetId: resolveAssetId(raw.characterPath, pathToAssetId),
+      sceneLayout: raw.sceneLayout
+        ? (raw.sceneLayout as typeof DEFAULT_SCENE_LAYOUT)
+        : { ...DEFAULT_SCENE_LAYOUT },
+      videoAssetId: resolveAssetId(raw.videoPath, pathToAssetId),
+      voiceAssetId: resolveAssetId(raw.voicePath, pathToAssetId),
+      autoAdvanceSeconds:
+        typeof raw.autoAdvanceSeconds === "number" ? raw.autoAdvanceSeconds : null,
+      nextBlockId: (raw.nextBlockId as string) ?? null,
+    });
+  }
+
+  if (type === "dialogue") {
+    const rawLines = Array.isArray(raw.lines) ? raw.lines : [];
+    const lines: DialogueLine[] = rawLines.map((line: Record<string, unknown>) => ({
+      id: (line.id as string) ?? createId("dline"),
+      speaker: (line.speaker as string) ?? "Narrateur",
+      text: (line.text as string) ?? "",
+      voiceAssetId: resolveAssetId(line.voicePath, pathToAssetId),
+      conditions: Array.isArray(line.conditions) ? line.conditions as DialogueLine["conditions"] : [],
+      fallbackLineId: typeof line.fallbackLineId === "string" ? line.fallbackLineId : null,
+      responses: Array.isArray(line.responses)
+        ? (line.responses as Record<string, unknown>[]).map(
+            (resp): DialogueResponse => ({
+              id: (resp.id as string) ?? createId("resp"),
+              label: ((resp.label as string) ?? "A") as ChoiceLabel,
+              text: (resp.text as string) ?? "",
+              targetLineId: (resp.targetLineId as string) ?? null,
+              targetBlockId: (resp.targetBlockId as string) ?? null,
+              effects: deserializeEffects(resp.effects),
+              affinityEffects: Array.isArray(resp.affinityEffects) ? resp.affinityEffects as DialogueResponse["affinityEffects"] : [],
+            }),
+          )
+        : [],
+    }));
+
+    return normalizeStoryBlock({
+      ...base,
+      type: "dialogue",
+      backgroundAssetId: resolveAssetId(raw.backgroundPath, pathToAssetId),
+      characterAssetId: resolveAssetId(raw.characterPath, pathToAssetId),
+      npcProfileBlockId: (raw.npcProfileBlockId as string) ?? null,
+      npcImageAssetId: resolveAssetId(raw.npcImagePath, pathToAssetId),
+      sceneLayout: raw.sceneLayout
+        ? (raw.sceneLayout as typeof DEFAULT_SCENE_LAYOUT)
+        : { ...DEFAULT_SCENE_LAYOUT },
+      lines,
+      startLineId: (raw.startLineId as string) ?? (lines[0]?.id ?? ""),
+    });
+  }
+
+  if (type === "choice") {
+    const rawChoices = Array.isArray(raw.choices) ? raw.choices : [];
+    return normalizeStoryBlock({
+      ...base,
+      type: "choice",
+      prompt: (raw.prompt as string) ?? "",
+      backgroundAssetId: resolveAssetId(raw.backgroundPath, pathToAssetId),
+      voiceAssetId: resolveAssetId(raw.voicePath, pathToAssetId),
+      choices: rawChoices.map((option: Record<string, unknown>) => ({
+        id: (option.id as string) ?? createId("option"),
+        label: ((option.label as string) ?? "A") as ChoiceLabel,
+        text: (option.text as string) ?? "",
+        description: (option.description as string) ?? "",
+        imageAssetId: resolveAssetId(option.imagePath, pathToAssetId),
+        targetBlockId: (option.targetBlockId as string) ?? null,
+        effects: deserializeEffects(option.effects),
+      })),
+    });
+  }
+
+  if (type === "hero_profile") {
+    return normalizeStoryBlock({
+      ...base,
+      type: "hero_profile",
+      nextBlockId: (raw.nextBlockId as string) ?? null,
+    });
+  }
+
+  if (type === "npc_profile") {
+    const rawImages = Array.isArray(raw.images) ? raw.images : [];
+    const imageAssetIds = rawImages
+      .map((img: Record<string, unknown>) => resolveAssetId(img.path, pathToAssetId))
+      .filter((value): value is string => Boolean(value));
+    const defaultImageAssetId = resolveAssetId(raw.defaultImagePath, pathToAssetId);
+
+    return normalizeStoryBlock({
+      ...base,
+      type: "npc_profile",
+      npcName: (raw.npcName as string) ?? "",
+      npcLore: (raw.npcLore as string) ?? "",
+      imageAssetIds,
+      defaultImageAssetId: defaultImageAssetId && imageAssetIds.includes(defaultImageAssetId)
+        ? defaultImageAssetId
+        : imageAssetIds[0] ?? null,
+      initialAffinity: typeof raw.initialAffinity === "number" ? raw.initialAffinity : 50,
+      nextBlockId: (raw.nextBlockId as string) ?? null,
+    });
+  }
+
+  // Gameplay (point_and_click) — V3 objects with legacy fallback via normalizeStoryBlock
+  if (type === "gameplay") {
+    const rawObjects = Array.isArray(raw.objects) ? raw.objects : [];
+    const rawLinks = Array.isArray(raw.links) ? raw.links : [];
+    const rawOverlays = Array.isArray(raw.overlays) ? raw.overlays : [];
+    const rawHotspots = Array.isArray(raw.hotspots) ? raw.hotspots : [];
+
+    const objects = rawObjects.map((o: Record<string, unknown>) => ({
+      id: (o.id as string) ?? createId("gobj"),
+      name: (o.name as string) ?? "Objet",
+      assetId: resolveAssetId(o.imagePath, pathToAssetId),
+      x: typeof o.x === "number" ? o.x : 35,
+      y: typeof o.y === "number" ? o.y : 35,
+      width: typeof o.width === "number" ? o.width : 15,
+      height: typeof o.height === "number" ? o.height : 15,
+      zIndex: typeof o.zIndex === "number" ? o.zIndex : 2,
+      visibleByDefault: typeof o.visibleByDefault === "boolean" ? o.visibleByDefault : true,
+      // V3 fields
+      objectType: (o.objectType as string) ?? undefined,
+      grantItemId: (o.grantItemId as string) ?? null,
+      linkedKeyId: (o.linkedKeyId as string) ?? null,
+      unlockEffect: (o.unlockEffect as string) ?? undefined,
+      lockedMessage: (o.lockedMessage as string) ?? "",
+      successMessage: (o.successMessage as string) ?? "",
+      // V2 legacy fields (for migration by normalizeStoryBlock)
+      action: (o.action as string) ?? undefined,
+      soundAssetId: resolveAssetId(o.soundPath, pathToAssetId),
+      effects: deserializeEffects(o.effects),
+    }));
+
+    // Pass V2 links + V1 legacy data through for normalizeStoryBlock to handle migration
+    const legacyOverlays: GameplayOverlay[] = rawOverlays.map(
+      (o: Record<string, unknown>): GameplayOverlay => ({
+        id: (o.id as string) ?? createId("overlay"),
+        name: (o.name as string) ?? "Objet",
+        assetId: resolveAssetId(o.imagePath, pathToAssetId),
+        x: typeof o.x === "number" ? o.x : 35,
+        y: typeof o.y === "number" ? o.y : 35,
+        width: typeof o.width === "number" ? o.width : 20,
+        height: typeof o.height === "number" ? o.height : 20,
+        zIndex: typeof o.zIndex === "number" ? o.zIndex : 2,
+        visibleByDefault: typeof o.visibleByDefault === "boolean" ? o.visibleByDefault : true,
+        draggable: typeof o.draggable === "boolean" ? o.draggable : false,
+      }),
+    );
+    const legacyHotspots: GameplayHotspot[] = rawHotspots.map(
+      (h: Record<string, unknown>): GameplayHotspot => ({
+        id: (h.id as string) ?? createId("hotspot"),
+        name: (h.name as string) ?? "Zone",
+        x: typeof h.x === "number" ? h.x : 35,
+        y: typeof h.y === "number" ? h.y : 35,
+        width: typeof h.width === "number" ? h.width : 20,
+        height: typeof h.height === "number" ? h.height : 20,
+        required: typeof h.required === "boolean" ? h.required : true,
+        message: (h.message as string) ?? "",
+        toggleOverlayId: (h.toggleOverlayId as string) ?? null,
+        soundAssetId: resolveAssetId(h.soundPath, pathToAssetId),
+        effects: deserializeEffects(h.effects),
+        onClickActions: Array.isArray(h.onClickActions)
+          ? (h.onClickActions as Record<string, unknown>[]).map(deserializeHotspotAction)
+          : [],
+        requiredItemId: (h.requiredItemId as string) ?? null,
+        consumeRequiredItem: typeof h.consumeRequiredItem === "boolean" ? h.consumeRequiredItem : false,
+        lockedMessage: (h.lockedMessage as string) ?? "",
+        acceptOverlayId: (h.acceptOverlayId as string) ?? null,
+      }),
+    );
+
+    return normalizeStoryBlock({
+      ...base,
+      type: "gameplay",
+      mode: "point_and_click" as const,
+      objective: (raw.objective as string) ?? "",
+      backgroundAssetId: resolveAssetId(raw.backgroundPath, pathToAssetId),
+      voiceAssetId: resolveAssetId(raw.voicePath, pathToAssetId),
+      objects,
+      links: rawLinks,
+      completionEffects: deserializeEffects(raw.completionEffects),
+      nextBlockId: (raw.nextBlockId as string) ?? null,
+      overlays: legacyOverlays.length > 0 ? legacyOverlays : undefined,
+      hotspots: legacyHotspots.length > 0 ? legacyHotspots : undefined,
+    } as GameplayBlock);
+  }
+
+  return null;
+}
+
+function deserializeEffects(effects: unknown): { variableId: string; delta: number }[] {
+  if (!Array.isArray(effects)) return [];
+  return effects.map((e: Record<string, unknown>) => ({
+    variableId: (e.variableId as string) ?? "",
+    delta: typeof e.delta === "number" ? e.delta : 0,
+  }));
+}
+
+function deserializeHotspotAction(raw: Record<string, unknown>): GameplayHotspotClickAction {
+  const id = (raw.id as string) ?? createId("action");
+  const type = raw.type as GameplayHotspotClickActionType;
+
+  if (type === "add_item") {
+    return { id, type, itemId: (raw.itemId as string) ?? null, quantity: typeof raw.quantity === "number" ? raw.quantity : 1 };
+  }
+  if (type === "disable_hotspot") {
+    return { id, type, targetHotspotId: (raw.targetHotspotId as string) ?? null };
+  }
+  if (type === "go_to_block") {
+    return { id, type, targetBlockId: (raw.targetBlockId as string) ?? null };
+  }
+  return { id, type: "message", message: (raw.message as string) ?? "" };
 }
 
 export function isCloudPayload(value: unknown): value is CloudPayload {
