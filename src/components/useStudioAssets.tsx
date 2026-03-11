@@ -1,6 +1,6 @@
 "use client";
 
-import { ChangeEvent, useCallback, useState } from "react";
+import { ChangeEvent, useCallback, useEffect, useState } from "react";
 import JSZip from "jszip";
 import { SupabaseClient, User } from "@supabase/supabase-js";
 
@@ -12,10 +12,17 @@ import {
   collectProjectReferencedAssetIds,
   deserializeBlockFromExport,
   downloadBlob,
-  fileToDataUrl,
   rebuildEdgesFromNodes,
   serializeBlock,
 } from "@/components/author-studio-core";
+import {
+  putAssetBlob,
+  getAssetBlob,
+  getAssetObjectURL,
+  deleteAssetBlobs,
+  clearAllAssetBlobs,
+  revokeAllObjectURLs,
+} from "@/lib/assetStore";
 import {
   AssetRef,
   HeroProfile,
@@ -60,25 +67,26 @@ export function useStudioAssets({
   logAction,
 }: UseStudioAssetsParams) {
   const [assetRefs, setAssetRefs] = useState<Record<string, AssetRef>>({});
-  const [assetFiles, setAssetFiles] = useState<Record<string, File>>({});
   const [assetPreviewSrcById, setAssetPreviewSrcById] = useState<Record<string, string>>({});
+
+  // Revoke all Object URLs on unmount to avoid leaks
+  useEffect(() => revokeAllObjectURLs, []);
 
   const ensureAssetPreviewSrc = useCallback(
     async (assetId: string | null) => {
       if (!assetId) return null;
       if (assetPreviewSrcById[assetId]) return assetPreviewSrcById[assetId];
 
-      const localFile = assetFiles[assetId];
-      if (localFile) {
-        try {
-          const dataUrl = await fileToDataUrl(localFile);
-          setAssetPreviewSrcById((current) => ({ ...current, [assetId]: dataUrl }));
-          return dataUrl;
-        } catch {
-          return null;
+      // Try IndexedDB first — returns a lightweight Object URL (no base64 copy)
+      try {
+        const objectUrl = await getAssetObjectURL(assetId);
+        if (objectUrl) {
+          setAssetPreviewSrcById((current) => ({ ...current, [assetId]: objectUrl }));
+          return objectUrl;
         }
-      }
+      } catch { /* IndexedDB unavailable — fall through to cloud */ }
 
+      // Fallback: fetch from Supabase Storage via signed URL
       const ref = assetRefs[assetId];
       if (!ref?.storagePath || !supabase || !authUser) return null;
 
@@ -91,7 +99,7 @@ export function useStudioAssets({
       setAssetPreviewSrcById((current) => ({ ...current, [assetId]: data.signedUrl }));
       return data.signedUrl;
     },
-    [assetFiles, assetPreviewSrcById, assetRefs, authUser, supabase],
+    [assetPreviewSrcById, assetRefs, authUser, supabase],
   );
 
   const registerAsset = useCallback((file: File) => {
@@ -107,7 +115,8 @@ export function useStudioAssets({
       storagePath: null,
     };
     setAssetRefs((current) => ({ ...current, [assetId]: ref }));
-    setAssetFiles((current) => ({ ...current, [assetId]: file }));
+    // Store file in IndexedDB (fire-and-forget — non-blocking for the UI)
+    void putAssetBlob(assetId, file);
     return assetId;
   }, []);
 
@@ -136,14 +145,16 @@ export function useStudioAssets({
 
   const clearAllAssetState = useCallback(() => {
     setAssetRefs({});
-    setAssetFiles({});
     setAssetPreviewSrcById({});
+    void clearAllAssetBlobs();
   }, []);
 
   const hydrateAssetRefs = useCallback((nextRefs: Record<string, AssetRef>) => {
     setAssetRefs(nextRefs);
-    setAssetFiles({});
     setAssetPreviewSrcById({});
+    // Don't clear IndexedDB — cloud assets will be fetched on demand
+    // and locally cached blobs may still be valid.
+    revokeAllObjectURLs();
   }, []);
 
   const exportZip = useCallback(async () => {
@@ -175,6 +186,7 @@ export function useStudioAssets({
         synopsis: project.info.synopsis,
         startBlockId: project.info.startBlockId,
         updatedAt: project.info.updatedAt,
+        chapters: project.chapters,
       },
       variables: project.variables,
       itemsCatalog: project.items.map((item) => ({
@@ -224,25 +236,32 @@ export function useStudioAssets({
     const zip = new JSZip();
     zip.file("story.json", JSON.stringify(payload, null, 2));
 
-    // Sort assets: local files first (instant), cloud downloads after.
+    // Sort assets: local IndexedDB files first (fast), cloud downloads after.
     const localAssets: string[] = [];
     const cloudAssets: string[] = [];
     for (const assetId of referencedAssetIds) {
       const ref = assetRefs[assetId];
       if (!ref) continue;
-      if (assetFiles[assetId]) {
-        localAssets.push(assetId);
-      } else {
+      // We'll try IndexedDB first; if missing there, fall back to cloud
+      if (ref.storagePath) {
         cloudAssets.push(assetId);
+      } else {
+        localAssets.push(assetId);
       }
     }
 
-    // Pack local files immediately.
+    // Pack IndexedDB blobs
     for (const assetId of localAssets) {
-      zip.file(assetRefs[assetId].packagePath, assetFiles[assetId]);
+      const blob = await getAssetBlob(assetId);
+      if (blob) {
+        zip.file(assetRefs[assetId].packagePath, blob);
+      } else {
+        setStatusMessage(`Asset manquant en local (${assetRefs[assetId]?.fileName}). Reimporte-le.`);
+        return;
+      }
     }
 
-    // Download cloud assets in parallel batches.
+    // For cloud assets: try IndexedDB cache first, then download.
     if (cloudAssets.length > 0) {
       if (!supabase || !authUser) {
         setStatusMessage(
@@ -261,11 +280,17 @@ export function useStudioAssets({
 
         const results = await Promise.all(
           batch.map(async (assetId) => {
+            // Try IndexedDB cache first (asset may already be cached locally)
+            const cached = await getAssetBlob(assetId);
+            if (cached) return { assetId, data: cached } as const;
+
             const ref = assetRefs[assetId];
             if (!ref.storagePath) return { assetId, error: "storagePath manquant" } as const;
             const bucket = ref.storageBucket ?? SUPABASE_ASSET_BUCKET;
             const { data, error } = await supabase.storage.from(bucket).download(ref.storagePath);
             if (error || !data) return { assetId, error: error?.message ?? "unknown" } as const;
+            // Cache the downloaded blob in IndexedDB for future use
+            void putAssetBlob(assetId, data);
             return { assetId, data } as const;
           }),
         );
@@ -300,7 +325,6 @@ export function useStudioAssets({
     setStatusMessage(`Erreur export: ${msg}`);
    }
   }, [
-    assetFiles,
     assetRefs,
     authUser,
     blocks,
@@ -325,14 +349,6 @@ export function useStudioAssets({
       return next;
     });
 
-    setAssetFiles((current) => {
-      const next = { ...current };
-      for (const assetId of staleIds) {
-        delete next[assetId];
-      }
-      return next;
-    });
-
     setAssetPreviewSrcById((current) => {
       const next = { ...current };
       for (const assetId of staleIds) {
@@ -340,6 +356,8 @@ export function useStudioAssets({
       }
       return next;
     });
+
+    void deleteAssetBlobs(assetIds);
 
     return staleIds.size;
   }, []);
@@ -362,15 +380,14 @@ export function useStudioAssets({
 
   /**
    * Import a previously-exported ZIP bundle and reconstruct all studio state:
-   * project metadata, blocks/nodes/edges, asset refs + local files.
-   * Returns { nodes, edges, project, assetRefs, assetFiles } on success, or null.
+   * project metadata, blocks/nodes/edges, asset refs (files stored in IndexedDB).
+   * Returns { nodes, edges, project, assetRefs } on success, or null.
    */
   const importFromZip = useCallback(async (file: File): Promise<{
     nodes: EditorNode[];
     edges: EditorEdge[];
     project: ProjectMeta;
     assetRefs: Record<string, AssetRef>;
-    assetFiles: Record<string, File>;
   } | null> => {
     try {
       const zip = await JSZip.loadAsync(file);
@@ -387,11 +404,13 @@ export function useStudioAssets({
       // ── 2. Extract all asset files from ZIP & build path→assetId index ──
       const pathToAssetId = new Map<string, string>();
       const importedAssetRefs: Record<string, AssetRef> = {};
-      const importedAssetFiles: Record<string, File> = {};
 
       const assetEntries = Object.entries(zip.files).filter(
         ([name]) => name.startsWith("assets/") && !name.endsWith("/"),
       );
+
+      // Clear previous IndexedDB blobs before importing
+      await clearAllAssetBlobs();
 
       for (const [zipPath, zipEntry] of assetEntries) {
         const blob = await zipEntry.async("blob");
@@ -401,7 +420,6 @@ export function useStudioAssets({
         const assetId = assetIdMatch ? assetIdMatch[1] : createId("asset");
 
         const mimeType = guessMimeType(fileName);
-        const assetFile = new File([blob], fileName, { type: mimeType });
 
         const ref: AssetRef = {
           id: assetId,
@@ -415,7 +433,8 @@ export function useStudioAssets({
         };
 
         importedAssetRefs[assetId] = ref;
-        importedAssetFiles[assetId] = assetFile;
+        // Store blob in IndexedDB instead of memory
+        await putAssetBlob(assetId, new File([blob], fileName, { type: mimeType }));
         pathToAssetId.set(zipPath, assetId);
       }
 
@@ -510,6 +529,7 @@ export function useStudioAssets({
         variables,
         items,
         hero,
+        chapters: Array.isArray(projectData.chapters) ? projectData.chapters : [],
         members: [
           { id: createId("member"), name: "Auteur", role: "owner" },
         ],
@@ -531,8 +551,8 @@ export function useStudioAssets({
 
       // ── 6. Apply to local state ──
       setAssetRefs(importedAssetRefs);
-      setAssetFiles(importedAssetFiles);
       setAssetPreviewSrcById({});
+      revokeAllObjectURLs();
 
       setStatusMessage(
         `Import reussi: ${deserializedBlocks.length} bloc(s), ${assetEntries.length} asset(s) depuis ${file.name}.`,
@@ -544,7 +564,6 @@ export function useStudioAssets({
         edges: importedEdges,
         project: importedProject,
         assetRefs: importedAssetRefs,
-        assetFiles: importedAssetFiles,
       };
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err);
@@ -556,10 +575,8 @@ export function useStudioAssets({
 
   return {
     assetRefs,
-    assetFiles,
     assetPreviewSrcById,
     setAssetRefs,
-    setAssetFiles,
     setAssetPreviewSrcById,
     ensureAssetPreviewSrc,
     registerAsset,
@@ -570,6 +587,7 @@ export function useStudioAssets({
     exportZip,
     cleanupLocalOrphanAssetRefs,
     importFromZip,
+    getAssetBlob,
   };
 }
 

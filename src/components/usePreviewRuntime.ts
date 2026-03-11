@@ -78,24 +78,49 @@ export function usePreviewRuntime({
       npcAffinity: Record<string, number>,
       entryLineId?: string | null,
     ) => {
+      const buildEndedState = (endedVariables: Record<string, number>): PreviewRuntimeState => ({
+        currentBlockId: null,
+        currentDialogueLineId: null,
+        variables: endedVariables,
+        inventory,
+        npcAffinity,
+        ended: true,
+        gameplayInteractedObjectIds: [],
+        gameplayObjectVisibility: {},
+        gameplayMessage: null,
+      });
+
       if (!targetBlockId) {
-        return {
-          currentBlockId: null,
-          currentDialogueLineId: null,
-          variables,
-          inventory,
-          npcAffinity,
-          ended: true,
-          gameplayInteractedObjectIds: [],
-          gameplayObjectVisibility: {},
-          gameplayMessage: null,
-        } as PreviewRuntimeState;
+        return buildEndedState(variables);
       }
 
-      const block = blockById.get(targetBlockId) ?? null;
-      const nextVariables = block
-        ? applyEffects(variables, block.entryEffects ?? [])
-        : variables;
+      let resolvedBlockId: string | null = targetBlockId;
+      let resolvedBlock = resolvedBlockId ? blockById.get(resolvedBlockId) ?? null : null;
+      let nextVariables = variables;
+      const visitedChapterMarkers = new Set<string>();
+
+      while (
+        resolvedBlock &&
+        (resolvedBlock.type === "chapter_start" || resolvedBlock.type === "chapter_end")
+      ) {
+        if (visitedChapterMarkers.has(resolvedBlock.id)) {
+          setStatusMessage("Boucle detectee entre blocs chapitre en preview.");
+          return buildEndedState(nextVariables);
+        }
+        visitedChapterMarkers.add(resolvedBlock.id);
+
+        nextVariables = applyEffects(nextVariables, resolvedBlock.entryEffects ?? []);
+        resolvedBlockId = resolvedBlock.nextBlockId;
+        if (!resolvedBlockId) {
+          return buildEndedState(nextVariables);
+        }
+        resolvedBlock = blockById.get(resolvedBlockId) ?? null;
+      }
+
+      const block = resolvedBlock;
+      nextVariables = block
+        ? applyEffects(nextVariables, block.entryEffects ?? [])
+        : nextVariables;
 
       if (block && block.type === "dialogue") {
         let resolvedLineId = resolveDialogueLine(
@@ -114,7 +139,7 @@ export function usePreviewRuntime({
           }
         }
         return {
-          currentBlockId: targetBlockId,
+          currentBlockId: resolvedBlockId,
           currentDialogueLineId: resolvedLineId,
           variables: nextVariables,
           inventory,
@@ -128,7 +153,7 @@ export function usePreviewRuntime({
 
       if (!block || block.type !== "gameplay") {
         return {
-          currentBlockId: targetBlockId,
+          currentBlockId: resolvedBlockId,
           currentDialogueLineId: null,
           variables: nextVariables,
           inventory,
@@ -147,7 +172,7 @@ export function usePreviewRuntime({
       }
 
       return {
-        currentBlockId: targetBlockId,
+        currentBlockId: resolvedBlockId,
         currentDialogueLineId: null,
         variables: nextVariables,
         inventory,
@@ -158,7 +183,7 @@ export function usePreviewRuntime({
         gameplayMessage: null,
       } as PreviewRuntimeState;
     },
-    [blockById],
+    [blockById, setStatusMessage],
   );
 
   const startPreview = useCallback(() => {

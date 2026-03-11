@@ -35,7 +35,7 @@ interface UseCloudProjectActionsParams {
   edges: EditorEdge[];
   blocks: StoryBlock[];
   assetRefs: Record<string, AssetRef>;
-  assetFiles: Record<string, File>;
+  getAssetBlob: (assetId: string) => Promise<Blob | null>;
   cloudProjectId: string | null;
   cloudOwnerId: string | null;
   cloudCanWrite: boolean;
@@ -77,7 +77,7 @@ export function useCloudProjectActions({
   edges,
   blocks,
   assetRefs,
-  assetFiles,
+  getAssetBlob,
   cloudProjectId,
   cloudOwnerId,
   cloudCanWrite,
@@ -226,17 +226,17 @@ export function useCloudProjectActions({
         const ref = resolvedAssetRefs[assetId];
         if (!ref) continue;
 
-        const localFile = assetFiles[assetId];
+        const localBlob = await getAssetBlob(assetId);
         const storagePath =
           ref.storagePath ??
           `${SUPABASE_ASSET_PREFIX}/${targetProjectId}/${assetId}-${sanitizeFileName(ref.fileName)}`;
 
-        if (localFile) {
+        if (localBlob) {
           const { error: uploadError } = await supabase.storage
             .from(SUPABASE_ASSET_BUCKET)
-            .upload(storagePath, localFile, {
+            .upload(storagePath, localBlob, {
               upsert: true,
-              contentType: localFile.type || ref.mimeType || undefined,
+              contentType: ref.mimeType || undefined,
             });
 
           if (uploadError) {
@@ -354,6 +354,7 @@ export function useCloudProjectActions({
     authUser,
     blocks,
     assetRefs,
+    getAssetBlob,
     cloudProjectId,
     cloudCanWrite,
     cloudRevisionDrift,
@@ -372,7 +373,6 @@ export function useCloudProjectActions({
     setCloudLatestUpdatedAt,
     setCloudAccessLevel,
     setAssetRefs,
-    assetFiles,
     appendCloudLog,
     refreshCloudSideData,
     cloudOwnerId,

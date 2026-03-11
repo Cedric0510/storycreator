@@ -208,6 +208,12 @@ export function AuthorStudioProjectPanel({
           <button className="button-soft" onClick={() => onAddBlock("npc_profile")} disabled={!canEdit}>
             + Fiche PNJ
           </button>
+          <button className="button-soft" onClick={() => onAddBlock("chapter_start")} disabled={!canEdit}>
+            + Debut chapitre
+          </button>
+          <button className="button-soft" onClick={() => onAddBlock("chapter_end")} disabled={!canEdit}>
+            + Fin chapitre
+          </button>
         </div>
       </CollapsibleSection>
 

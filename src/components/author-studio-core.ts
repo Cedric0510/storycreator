@@ -218,6 +218,9 @@ export function collectAssetIds(block: StoryBlock) {
   if (block.type === "npc_profile") {
     return block.imageAssetIds.filter((value): value is string => Boolean(value));
   }
+  if (block.type === "chapter_start" || block.type === "chapter_end") {
+    return [];
+  }
   const objectAssetIds = block.objects
     .map((obj) => obj.assetId)
     .filter((value): value is string => Boolean(value));
@@ -405,6 +408,7 @@ export function buildInitialStudio(): InitialStudio {
     ],
     activeMemberId: ownerId,
     editingLockMemberId: ownerId,
+    chapters: [],
     logs: [
       {
         id: createId("log"),
@@ -578,6 +582,35 @@ export function serializeBlock(
   variableNameById: Map<string, string>,
   assetRefs: Record<string, AssetRef>,
 ) {
+  const chapterId = block.chapterId ?? null;
+
+  if (block.type === "chapter_start") {
+    return {
+      id: block.id,
+      type: block.type,
+      name: block.name,
+      position: block.position,
+      notes: block.notes,
+      chapterId,
+      entryEffects: serializeEffects(block.entryEffects ?? [], variableNameById),
+      chapterTitle: block.chapterTitle,
+      nextBlockId: block.nextBlockId,
+    };
+  }
+
+  if (block.type === "chapter_end") {
+    return {
+      id: block.id,
+      type: block.type,
+      name: block.name,
+      position: block.position,
+      notes: block.notes,
+      chapterId,
+      entryEffects: serializeEffects(block.entryEffects ?? [], variableNameById),
+      nextBlockId: block.nextBlockId,
+    };
+  }
+
   if (block.type === "title") {
     return {
       id: block.id,
@@ -585,6 +618,7 @@ export function serializeBlock(
       name: block.name,
       position: block.position,
       notes: block.notes,
+      chapterId,
       entryEffects: serializeEffects(block.entryEffects ?? [], variableNameById),
       storyTitle: block.storyTitle,
       subtitle: block.subtitle,
@@ -601,6 +635,7 @@ export function serializeBlock(
       name: block.name,
       position: block.position,
       notes: block.notes,
+      chapterId,
       entryEffects: serializeEffects(block.entryEffects ?? [], variableNameById),
       heading: block.heading,
       body: block.body,
@@ -621,6 +656,7 @@ export function serializeBlock(
       name: block.name,
       position: block.position,
       notes: block.notes,
+      chapterId,
       entryEffects: serializeEffects(block.entryEffects ?? [], variableNameById),
       backgroundPath: assetPath(block.backgroundAssetId, assetRefs),
       characterPath: assetPath(block.characterAssetId, assetRefs),
@@ -664,6 +700,7 @@ export function serializeBlock(
       name: block.name,
       position: block.position,
       notes: block.notes,
+      chapterId,
       entryEffects: serializeEffects(block.entryEffects ?? [], variableNameById),
       prompt: block.prompt,
       backgroundPath: assetPath(block.backgroundAssetId, assetRefs),
@@ -687,6 +724,7 @@ export function serializeBlock(
       name: block.name,
       position: block.position,
       notes: block.notes,
+      chapterId,
       entryEffects: serializeEffects(block.entryEffects ?? [], variableNameById),
     };
   }
@@ -698,6 +736,7 @@ export function serializeBlock(
       name: block.name,
       position: block.position,
       notes: block.notes,
+      chapterId,
       entryEffects: serializeEffects(block.entryEffects ?? [], variableNameById),
       npcName: block.npcName,
       npcLore: block.npcLore,
@@ -717,6 +756,7 @@ export function serializeBlock(
     name: block.name,
     position: block.position,
     notes: block.notes,
+    chapterId,
     entryEffects: serializeEffects(block.entryEffects ?? [], variableNameById),
     mode: "point_and_click",
     objective: block.objective,
@@ -773,7 +813,25 @@ export function deserializeBlockFromExport(
     notes: (raw.notes as string) ?? "",
     position: (raw.position as { x: number; y: number }) ?? { x: 0, y: 0 },
     entryEffects: deserializeEffects(raw.entryEffects),
+    chapterId: typeof raw.chapterId === "string" ? raw.chapterId : null,
   };
+
+  if (type === "chapter_start") {
+    return normalizeStoryBlock({
+      ...base,
+      type: "chapter_start",
+      chapterTitle: (raw.chapterTitle as string) ?? "Chapitre",
+      nextBlockId: (raw.nextBlockId as string) ?? null,
+    });
+  }
+
+  if (type === "chapter_end") {
+    return normalizeStoryBlock({
+      ...base,
+      type: "chapter_end",
+      nextBlockId: (raw.nextBlockId as string) ?? null,
+    });
+  }
 
   if (type === "title") {
     return normalizeStoryBlock({

@@ -27,7 +27,7 @@ import { AuthorStudioBlockEditorPanel } from "@/components/AuthorStudioBlockEdit
 import { AuthorStudioProjectPanel } from "@/components/AuthorStudioProjectPanel";
 import { HelpHint } from "@/components/HelpHint";
 import { PreviewOverlay } from "@/components/PreviewOverlay";
-import { StoryNode, StoryNodeData, DeletableEdge } from "@/components/StoryNode";
+import { StoryNode, StoryNodeData, DeletableEdge, ChapterFolderNode } from "@/components/StoryNode";
 import { useBlockEffectOperations } from "@/components/useBlockEffectOperations";
 import { useChoiceOperations } from "@/components/useChoiceOperations";
 import { useCloudProjectActions } from "@/components/useCloudProjectActions";
@@ -61,6 +61,7 @@ import {
 import {
   BLOCK_LABELS,
   BlockType,
+  Chapter,
   ProjectMeta,
   StoryBlock,
   ValidationIssue,
@@ -73,7 +74,7 @@ import {
 } from "@/lib/story";
 import { allowSelfSignup } from "@/lib/runtimeFlags";
 
-const nodeTypes: NodeTypes = { storyBlock: StoryNode };
+const nodeTypes: NodeTypes = { storyBlock: StoryNode, chapterFolder: ChapterFolderNode };
 const edgeTypes: EdgeTypes = { deletable: DeletableEdge };
 
 function normalizeProjectItems(
@@ -176,7 +177,7 @@ export function AuthorStudioApp() {
   );
   const rfInstanceRef = useRef<{ screenToFlowPosition: (pos: { x: number; y: number }) => { x: number; y: number } } | null>(null);
 
-  const blocks = useMemo(() => nodes.map((node) => blockFromNode(node)), [nodes]);
+  const blocks = useMemo(() => nodes.filter((n) => n.type !== "chapterFolder").map((node) => blockFromNode(node)), [nodes]);
   const blockById = useMemo(
     () => new Map(blocks.map((block) => [block.id, block])),
     [blocks],
@@ -311,9 +312,136 @@ export function AuthorStudioApp() {
             ? "Droit cloud insuffisant: il faut un acces write ou owner pour modifier ce projet."
             : null;
 
+  const deleteBlockRef = useRef<(blockId: string) => void>(() => {});
+  const stableDeleteBlock = useCallback((blockId: string) => {
+    deleteBlockRef.current(blockId);
+  }, []);
+
+  const collapsedChapterIds = useMemo(
+    () => new Set(project.chapters.filter((ch) => ch.collapsed).map((ch) => ch.id)),
+    [project.chapters],
+  );
+
+  /** Map chapterId → chapter_start node (used to position folder nodes) */
+  const chapterStartNodeMap = useMemo(() => {
+    const map = new Map<string, EditorNode>();
+    for (const node of nodes) {
+      if (node.data.block.type === "chapter_start" && node.data.block.chapterId) {
+        map.set(node.data.block.chapterId, node);
+      }
+    }
+    return map;
+  }, [nodes]);
+
+  /**
+   * For each chapter, BFS from its chapter_start through the graph to discover
+   * all blocks that belong to the chapter (stopping at chapter_end blocks which
+   * are included but whose outgoing edges are NOT followed).
+   * Returns Map<chapterId, Set<blockId>>.
+   */
+  const chapterBlockSets = useMemo(() => {
+    const result = new Map<string, Set<string>>();
+    for (const chapter of project.chapters) {
+      const startNode = chapterStartNodeMap.get(chapter.id);
+      if (!startNode) continue;
+
+      const memberIds = new Set<string>();
+      const queue = [startNode.id];
+
+      while (queue.length > 0) {
+        const blockId = queue.shift()!;
+        if (memberIds.has(blockId)) continue;
+        memberIds.add(blockId);
+
+        const block = blockById.get(blockId);
+        if (!block) continue;
+
+        // chapter_end is included but don't follow past it
+        if (block.type === "chapter_end") continue;
+
+        // Follow all outgoing edges
+        for (const edge of edges) {
+          if (edge.source !== blockId) continue;
+          if (memberIds.has(edge.target)) continue;
+          const targetBlock = blockById.get(edge.target);
+          // Don't cross into another chapter's start
+          if (
+            targetBlock?.type === "chapter_start" &&
+            targetBlock.chapterId !== chapter.id
+          ) continue;
+          queue.push(edge.target);
+        }
+      }
+
+      result.set(chapter.id, memberIds);
+    }
+    return result;
+  }, [blockById, chapterStartNodeMap, edges, project.chapters]);
+
+  /** Compute BFS-based block→chapter and build hidden set — both used below */
+  const computeChapterContext = useCallback((chapId: string) => {
+    const memberIds = chapterBlockSets.get(chapId);
+    return memberIds ?? new Set<string>();
+  }, [chapterBlockSets]);
+
+  const toggleChapterCollapsed = useCallback((chapterId: string) => {
+    const chapter = project.chapters.find((ch) => ch.id === chapterId);
+    if (!chapter) return;
+
+    const willCollapse = !chapter.collapsed;
+
+    setProject((current) => ({
+      ...current,
+      chapters: current.chapters.map((ch) =>
+        ch.id === chapterId ? { ...ch, collapsed: willCollapse } : ch,
+      ),
+    }));
+
+    if (willCollapse) {
+      // Insert a real folder node into the nodes array
+      const startNode = chapterStartNodeMap.get(chapterId);
+      const memberIds = computeChapterContext(chapterId);
+      const folderNode: EditorNode = {
+        id: `folder-${chapterId}`,
+        type: "chapterFolder",
+        position: startNode?.position ?? { x: 200, y: 200 },
+        data: {
+          block: { id: `folder-${chapterId}`, type: "chapter_start", name: chapter.name } as unknown as StoryBlock,
+          isStart: false,
+          hasError: false,
+          hasWarning: false,
+        },
+      };
+      setNodes((current) => [...current, folderNode]);
+      // Deselect if selection is inside this chapter
+      setSelectedBlockId((cur) => (cur && memberIds.has(cur) ? null : cur));
+    } else {
+      // Remove the folder node
+      setNodes((current) => current.filter((n) => n.id !== `folder-${chapterId}`));
+    }
+  }, [chapterStartNodeMap, computeChapterContext, project.chapters]);
+
+  /** Set of block IDs that belong to a currently collapsed chapter */
+  const hiddenBlockIds = useMemo(() => {
+    const set = new Set<string>();
+    if (collapsedChapterIds.size === 0) return set;
+    for (const [chapterId, memberIds] of chapterBlockSets) {
+      if (!collapsedChapterIds.has(chapterId)) continue;
+      for (const id of memberIds) {
+        set.add(id);
+      }
+    }
+    return set;
+  }, [chapterBlockSets, collapsedChapterIds]);
+
+  /** Validation skips blocks hidden inside collapsed chapters for perf */
   const liveIssues = useMemo(
-    () => validateStoryBlocks(blocks, project.info.startBlockId, project.items),
-    [blocks, project.info.startBlockId, project.items],
+    () => {
+      if (hiddenBlockIds.size === 0) return validateStoryBlocks(blocks, project.info.startBlockId, project.items);
+      const visible = blocks.filter((b) => !hiddenBlockIds.has(b.id));
+      return validateStoryBlocks(visible, project.info.startBlockId, project.items);
+    },
+    [blocks, hiddenBlockIds, project.info.startBlockId, project.items],
   );
 
   const issuesByBlock = useMemo(() => {
@@ -328,19 +456,42 @@ export function AuthorStudioApp() {
     return map;
   }, [liveIssues]);
 
-  const deleteBlockRef = useRef<(blockId: string) => void>(() => {});
-  const stableDeleteBlock = useCallback((blockId: string) => {
-    deleteBlockRef.current(blockId);
-  }, []);
-
   const displayNodes = useMemo(
-    () =>
-      nodes.map((node) => {
+    () => {
+      const visible: Array<EditorNode & { data: StoryNodeData }> = [];
+
+      for (const node of nodes) {
+        // Skip hidden chapter blocks
+        if (hiddenBlockIds.has(node.id)) continue;
+
+        // Folder nodes get special data
+        if (node.type === "chapterFolder") {
+          const cid = node.id.replace("folder-", "");
+          const chapter = project.chapters.find((ch) => ch.id === cid);
+          const memberIds = chapterBlockSets.get(cid);
+          if (!chapter?.collapsed) continue;
+
+          visible.push({
+            ...node,
+            data: {
+              block: node.data.block,
+              isStart: false,
+              hasError: false,
+              hasWarning: false,
+              chapterId: cid,
+              chapterName: chapter.name,
+              blockCount: memberIds?.size ?? 0,
+              onExpand: toggleChapterCollapsed,
+            } as unknown as StoryNodeData,
+          });
+          continue;
+        }
+
         const flags = issuesByBlock.get(node.id) ?? {
           hasError: false,
           hasWarning: false,
         };
-        return {
+        visible.push({
           ...node,
           data: {
             ...node.data,
@@ -349,10 +500,14 @@ export function AuthorStudioApp() {
             hasWarning: flags.hasWarning,
             canEdit,
             onDeleteBlock: stableDeleteBlock,
+            onToggleChapterCollapse: toggleChapterCollapsed,
           },
-        };
-      }),
-    [canEdit, issuesByBlock, nodes, project.info.startBlockId, stableDeleteBlock],
+        });
+      }
+
+      return visible;
+    },
+    [canEdit, chapterBlockSets, hiddenBlockIds, issuesByBlock, nodes, project.chapters, project.info.startBlockId, stableDeleteBlock, toggleChapterCollapsed],
   );
 
   const selectedNode = useMemo(
@@ -386,7 +541,6 @@ export function AuthorStudioApp() {
 
   const {
     assetRefs,
-    assetFiles,
     assetPreviewSrcById,
     setAssetRefs,
     ensureAssetPreviewSrc,
@@ -398,6 +552,7 @@ export function AuthorStudioApp() {
     exportZip,
     cleanupLocalOrphanAssetRefs,
     importFromZip,
+    getAssetBlob,
   } = useStudioAssets({
     blocks,
     project,
@@ -799,10 +954,24 @@ export function AuthorStudioApp() {
 
       const block = createBlock(type, position);
 
-      setNodes((current) => [...current, blockToNode(block)]);
-      setSelectedBlockId(block.id);
-
-      if (!project.info.startBlockId) {
+      // When adding a chapter_start block, also create a Chapter entry
+      if (type === "chapter_start") {
+        const chapterId = createId("chapter");
+        (block as import("@/lib/story").ChapterStartBlock).chapterId = chapterId;
+        (block as import("@/lib/story").ChapterStartBlock).chapterTitle = "Nouveau chapitre";
+        setProject((current) => ({
+          ...current,
+          chapters: [
+            ...current.chapters,
+            { id: chapterId, name: "Nouveau chapitre", collapsed: false } satisfies Chapter,
+          ],
+          info: {
+            ...current.info,
+            startBlockId: current.info.startBlockId || block.id,
+            updatedAt: new Date().toISOString(),
+          },
+        }));
+      } else if (!project.info.startBlockId) {
         setProject((current) => ({
           ...current,
           info: {
@@ -812,6 +981,9 @@ export function AuthorStudioApp() {
           },
         }));
       }
+
+      setNodes((current) => [...current, blockToNode(block)]);
+      setSelectedBlockId(block.id);
 
       logAction("add_block", `${BLOCK_LABELS[type]} (${block.id})`);
       setStatusMessage(`${BLOCK_LABELS[type]} ajoute.`);
@@ -825,16 +997,23 @@ export function AuthorStudioApp() {
     const deleted = blockById.get(blockId);
     if (!deleted) return;
 
+    // If deleting a chapter_start, remove the chapter and unassign all blocks
+    const deletedChapterId = deleted.type === "chapter_start" ? deleted.chapterId : null;
+
     setNodes((current) =>
       current
         .filter((node) => node.id !== blockId)
-        .map((node) => ({
-          ...node,
-          data: {
-            ...node.data,
-            block: removeNodeReferences(node.data.block, blockId),
-          },
-        })),
+        .map((node) => {
+          let block = removeNodeReferences(node.data.block, blockId);
+          // Unassign blocks that belonged to the deleted chapter
+          if (deletedChapterId && block.chapterId === deletedChapterId) {
+            block = { ...block, chapterId: null };
+          }
+          return {
+            ...node,
+            data: { ...node.data, block },
+          };
+        }),
     );
     setEdges((current) =>
       current.filter(
@@ -844,6 +1023,9 @@ export function AuthorStudioApp() {
 
     setProject((current) => ({
       ...current,
+      chapters: deletedChapterId
+        ? current.chapters.filter((ch) => ch.id !== deletedChapterId)
+        : current.chapters,
       info: {
         ...current.info,
         startBlockId:
@@ -973,16 +1155,79 @@ export function AuthorStudioApp() {
     [blockById, canEdit, edges, logAction, setConnection, unlinkNpcProfileFromDialogue],
   );
 
+  /** Map blockId → chapterId — uses BFS-discovered sets, not just stored chapterId */
+  const blockChapterMap = useMemo(() => {
+    const map = new Map<string, string>();
+    for (const [chapterId, memberIds] of chapterBlockSets) {
+      for (const blockId of memberIds) {
+        map.set(blockId, chapterId);
+      }
+    }
+    return map;
+  }, [chapterBlockSets]);
+
   const displayEdges = useMemo(
-    () =>
-      edges.map((edge) => ({
-        ...edge,
-        data: {
-          ...edge.data,
-          onDeleteEdge: canEdit ? deleteEdge : undefined,
-        },
-      })),
-    [canEdit, deleteEdge, edges],
+    () => {
+      if (collapsedChapterIds.size === 0) {
+        return edges.map((edge) => ({
+          ...edge,
+          data: { ...edge.data, onDeleteEdge: canEdit ? deleteEdge : undefined },
+        }));
+      }
+
+      const result: Array<EditorEdge & { data?: { onDeleteEdge?: typeof deleteEdge } }> = [];
+      const seenFolderEdges = new Set<string>();
+
+      for (const edge of edges) {
+        const srcHidden = hiddenBlockIds.has(edge.source);
+        const tgtHidden = hiddenBlockIds.has(edge.target);
+
+        // Both hidden: skip entirely
+        if (srcHidden && tgtHidden) continue;
+
+        // Source hidden, target visible → redirect source to folder node
+        if (srcHidden) {
+          const srcChapterId = blockChapterMap.get(edge.source);
+          if (!srcChapterId) continue;
+          const key = `folder-${srcChapterId}->>${edge.target}`;
+          if (seenFolderEdges.has(key)) continue;
+          seenFolderEdges.add(key);
+          result.push({
+            ...edge,
+            id: `folder-edge-${srcChapterId}-${edge.target}`,
+            source: `folder-${srcChapterId}`,
+            sourceHandle: "next",
+            data: { ...edge.data, onDeleteEdge: undefined },
+          });
+          continue;
+        }
+
+        // Target hidden, source visible → redirect target to folder node
+        if (tgtHidden) {
+          const tgtChapterId = blockChapterMap.get(edge.target);
+          if (!tgtChapterId) continue;
+          const key = `${edge.source}->>folder-${tgtChapterId}`;
+          if (seenFolderEdges.has(key)) continue;
+          seenFolderEdges.add(key);
+          result.push({
+            ...edge,
+            id: `folder-edge-${edge.source}-${tgtChapterId}`,
+            target: `folder-${tgtChapterId}`,
+            data: { ...edge.data, onDeleteEdge: undefined },
+          });
+          continue;
+        }
+
+        // Both visible: keep as-is
+        result.push({
+          ...edge,
+          data: { ...edge.data, onDeleteEdge: canEdit ? deleteEdge : undefined },
+        });
+      }
+
+      return result;
+    },
+    [blockChapterMap, canEdit, collapsedChapterIds.size, deleteEdge, edges, hiddenBlockIds],
   );
 
   const onConnect = useCallback(
@@ -1040,7 +1285,19 @@ export function AuthorStudioApp() {
   }, [canEdit, selectedBlockId, updateBlock]);
 
   const setSelectedDynamicField = useCallback((key: string, value: unknown) => {
-    updateSelectedBlock((block) => ({ ...block, [key]: value } as StoryBlock));
+    updateSelectedBlock((block) => {
+      const updated = { ...block, [key]: value } as StoryBlock;
+      // Sync chapter name when chapterTitle changes on chapter_start
+      if (key === "chapterTitle" && block.type === "chapter_start" && block.chapterId && typeof value === "string") {
+        setProject((current) => ({
+          ...current,
+          chapters: current.chapters.map((ch) =>
+            ch.id === block.chapterId ? { ...ch, name: value } : ch,
+          ),
+        }));
+      }
+      return updated;
+    });
   }, [updateSelectedBlock]);
 
   const onAssetInput = useCallback(
@@ -1202,6 +1459,7 @@ export function AuthorStudioApp() {
     const normalizedProject: ProjectMeta = {
       ...payload.project,
       items: normalizeProjectItems((payload.project as ProjectMeta & { items?: unknown }).items),
+      chapters: Array.isArray(payload.project.chapters) ? payload.project.chapters : [],
     };
     normalizedProject.hero = normalizeProjectHero(
       (payload.project as ProjectMeta & { hero?: unknown }).hero,
@@ -1506,7 +1764,7 @@ export function AuthorStudioApp() {
     edges,
     blocks,
     assetRefs,
-    assetFiles,
+    getAssetBlob,
     cloudProjectId,
     cloudOwnerId,
     cloudCanWrite,
@@ -1945,7 +2203,11 @@ export function AuthorStudioApp() {
                 onEdgesChange={onEdgesChange}
                 onConnect={onConnect}
                 onInit={(instance) => { rfInstanceRef.current = instance as typeof rfInstanceRef.current; }}
-                onNodeClick={(_, node) => setSelectedBlockId(node.id)}
+                onNodeClick={(_, node) => {
+                  // Folder nodes are virtual: don't select them as blocks
+                  if (node.type === "chapterFolder") return;
+                  setSelectedBlockId(node.id);
+                }}
                 nodesDraggable={canEdit}
                 nodesConnectable={canEdit}
                 elementsSelectable
@@ -1957,7 +2219,10 @@ export function AuthorStudioApp() {
                   pannable
                   zoomable
                   nodeStrokeWidth={3}
-                  nodeColor={(node) => blockTypeColor((node.data as StoryNodeData).block.type)}
+                  nodeColor={(node) => {
+                    const block = (node.data as StoryNodeData).block;
+                    return block ? blockTypeColor(block.type) : "#059669";
+                  }}
                 />
                 <Controls />
               </ReactFlow>

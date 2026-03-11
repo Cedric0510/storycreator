@@ -6,6 +6,8 @@ import { HelpHint } from "@/components/HelpHint";
 import {
   BLOCK_LABELS,
   CharacterLayer,
+  ChapterStartBlock,
+  ChapterEndBlock,
   ChoiceBlock,
   CinematicBlock,
   DEFAULT_CHARACTER_LAYOUT,
@@ -2523,6 +2525,114 @@ function NpcProfileEditorSection({
   );
 }
 
+/* ═══════════════════════════════════════════════
+   ChapterStartEditorSection
+   ═══════════════════════════════════════════════ */
+
+function ChapterStartEditorSection({
+  block,
+  canEdit,
+  blocks,
+  project,
+  onSetSelectedDynamicField,
+  onSetConnection,
+}: {
+  block: ChapterStartBlock;
+  canEdit: boolean;
+  blocks: StoryBlock[];
+  project: ProjectMeta;
+  onSetSelectedDynamicField: (key: string, value: unknown) => void;
+  onSetConnection: (sourceId: string, sourceHandle: string, targetId: string | null) => void;
+}) {
+  const chapter = project.chapters.find((ch) => ch.id === block.chapterId);
+  return (
+    <>
+      <label>
+        Titre du chapitre
+        <input
+          value={block.chapterTitle}
+          onChange={(event) => onSetSelectedDynamicField("chapterTitle", event.target.value)}
+          disabled={!canEdit}
+        />
+      </label>
+      {chapter && (
+        <p className="form-hint">Chapitre: {chapter.name}</p>
+      )}
+      <NextBlockSelect
+        selectedBlockId={block.id}
+        nextBlockId={block.nextBlockId}
+        blocks={blocks}
+        canEdit={canEdit}
+        onChange={(targetId) => onSetConnection(block.id, "next", targetId)}
+      />
+    </>
+  );
+}
+
+/* ═══════════════════════════════════════════════
+   ChapterEndEditorSection
+   ═══════════════════════════════════════════════ */
+
+function ChapterEndEditorSection({
+  block,
+  canEdit,
+  blocks,
+  onSetConnection,
+}: {
+  block: ChapterEndBlock;
+  canEdit: boolean;
+  blocks: StoryBlock[];
+  onSetConnection: (sourceId: string, sourceHandle: string, targetId: string | null) => void;
+}) {
+  return (
+    <NextBlockSelect
+      selectedBlockId={block.id}
+      nextBlockId={block.nextBlockId}
+      blocks={blocks}
+      canEdit={canEdit}
+      onChange={(targetId) => onSetConnection(block.id, "next", targetId)}
+    />
+  );
+}
+
+/* ═══════════════════════════════════════════════
+   ChapterAssignmentSelect — assign a block to a chapter
+   ═══════════════════════════════════════════════ */
+
+function ChapterAssignmentSelect({
+  block,
+  project,
+  canEdit,
+  onSetSelectedDynamicField,
+}: {
+  block: StoryBlock;
+  project: ProjectMeta;
+  canEdit: boolean;
+  onSetSelectedDynamicField: (key: string, value: unknown) => void;
+}) {
+  // chapter_start blocks auto-manage their chapterId — don't allow manual reassignment
+  if (block.type === "chapter_start") return null;
+  if (project.chapters.length === 0) return null;
+
+  return (
+    <label>
+      Chapitre
+      <select
+        value={block.chapterId ?? ""}
+        onChange={(event) => onSetSelectedDynamicField("chapterId", event.target.value || null)}
+        disabled={!canEdit}
+      >
+        <option value="">Aucun chapitre</option>
+        {project.chapters.map((ch) => (
+          <option key={ch.id} value={ch.id}>
+            {ch.name}
+          </option>
+        ))}
+      </select>
+    </label>
+  );
+}
+
 export function AuthorStudioBlockEditorPanel({
   selectedBlock,
   canEdit,
@@ -2642,6 +2752,13 @@ export function AuthorStudioBlockEditorPanel({
                 disabled={!canEdit}
               />
             </label>
+
+            <ChapterAssignmentSelect
+              block={selectedBlock}
+              project={project}
+              canEdit={canEdit}
+              onSetSelectedDynamicField={onSetSelectedDynamicField}
+            />
 
             <div className="row-inline">
               <button
@@ -2843,6 +2960,26 @@ export function AuthorStudioBlockEditorPanel({
                 onRegisterAsset={onRegisterAsset}
                 onEnsureAssetPreviewSrc={onEnsureAssetPreviewSrc}
                 onStatusMessage={onStatusMessage}
+              />
+            )}
+
+            {selectedBlock.type === "chapter_start" && (
+              <ChapterStartEditorSection
+                block={selectedBlock}
+                canEdit={canEdit}
+                blocks={blocks}
+                project={project}
+                onSetSelectedDynamicField={onSetSelectedDynamicField}
+                onSetConnection={onSetConnection}
+              />
+            )}
+
+            {selectedBlock.type === "chapter_end" && (
+              <ChapterEndEditorSection
+                block={selectedBlock}
+                canEdit={canEdit}
+                blocks={blocks}
+                onSetConnection={onSetConnection}
               />
             )}
           </div>

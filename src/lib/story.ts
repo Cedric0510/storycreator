@@ -7,7 +7,9 @@ export type BlockType =
   | "choice"
   | "gameplay"
   | "hero_profile"
-  | "npc_profile";
+  | "npc_profile"
+  | "chapter_start"
+  | "chapter_end";
 export type ChoiceLabel = "A" | "B" | "C" | "D";
 export type GameplayMode = "point_and_click" | "map_move" | "static_scene";
 export type MemberRole = "owner" | "editor" | "viewer";
@@ -241,6 +243,8 @@ interface BaseBlock {
   notes: string;
   position: XYPosition;
   entryEffects: VariableEffect[];
+  /** Which chapter this block belongs to (null = default / no chapter) */
+  chapterId: string | null;
 }
 
 export interface TitleBlock extends BaseBlock {
@@ -375,6 +379,20 @@ export interface NpcProfileBlock extends BaseBlock {
   nextBlockId: string | null;
 }
 
+/** Marks the beginning of a chapter. One per chapter. */
+export interface ChapterStartBlock extends BaseBlock {
+  type: "chapter_start";
+  /** Display name of the chapter */
+  chapterTitle: string;
+  nextBlockId: string | null;
+}
+
+/** Marks an exit point of a chapter. Multiple allowed per chapter. */
+export interface ChapterEndBlock extends BaseBlock {
+  type: "chapter_end";
+  nextBlockId: string | null;
+}
+
 export interface ChoiceOption {
   id: string;
   label: ChoiceLabel;
@@ -400,7 +418,9 @@ export type StoryBlock =
   | ChoiceBlock
   | GameplayBlock
   | HeroProfileBlock
-  | NpcProfileBlock;
+  | NpcProfileBlock
+  | ChapterStartBlock
+  | ChapterEndBlock;
 
 export interface Member {
   id: string;
@@ -426,6 +446,13 @@ export interface ProjectInfo {
   updatedAt: string;
 }
 
+export interface Chapter {
+  id: string;
+  name: string;
+  /** Whether this chapter is collapsed on the whiteboard */
+  collapsed: boolean;
+}
+
 export interface ProjectMeta {
   info: ProjectInfo;
   variables: VariableDefinition[];
@@ -435,6 +462,7 @@ export interface ProjectMeta {
   activeMemberId: string;
   editingLockMemberId: string | null;
   logs: AuditLogEntry[];
+  chapters: Chapter[];
 }
 
 export interface ValidationIssue {
@@ -451,6 +479,8 @@ export const BLOCK_LABELS: Record<BlockType, string> = {
   gameplay: "Gameplay",
   hero_profile: "Fiche Hero",
   npc_profile: "Fiche PNJ",
+  chapter_start: "Debut chapitre",
+  chapter_end: "Fin chapitre",
 };
 
 export const CHOICE_LABELS: ChoiceLabel[] = ["A", "B", "C", "D"];
@@ -813,15 +843,32 @@ function migrateCharacterLayers(
 
 export function createBlock(type: BlockType, position: XYPosition): StoryBlock {
   const id = createId(type);
+  const base = { id, notes: "", position, entryEffects: [] as VariableEffect[], chapterId: null as string | null };
+
+  if (type === "chapter_start") {
+    return {
+      ...base,
+      type,
+      name: "Debut chapitre",
+      chapterTitle: "Nouveau chapitre",
+      nextBlockId: null,
+    };
+  }
+
+  if (type === "chapter_end") {
+    return {
+      ...base,
+      type,
+      name: "Fin chapitre",
+      nextBlockId: null,
+    };
+  }
 
   if (type === "title") {
     return {
-      id,
+      ...base,
       type,
       name: "Ecran titre",
-      notes: "",
-      position,
-      entryEffects: [],
       storyTitle: "Titre de l'histoire",
       subtitle: "",
       backgroundAssetId: null,
@@ -838,12 +885,9 @@ export function createBlock(type: BlockType, position: XYPosition): StoryBlock {
 
   if (type === "cinematic") {
     return {
-      id,
+      ...base,
       type,
       name: "Intro",
-      notes: "",
-      position,
-      entryEffects: [],
       heading: "Cinematique",
       body: "",
       backgroundAssetId: null,
@@ -859,12 +903,9 @@ export function createBlock(type: BlockType, position: XYPosition): StoryBlock {
   if (type === "dialogue") {
     const firstLine = createDefaultLine();
     return {
-      id,
+      ...base,
       type,
       name: "Dialogue",
-      notes: "",
-      position,
-      entryEffects: [],
       backgroundAssetId: null,
       characterAssetId: null,
       npcProfileBlockId: null,
@@ -878,12 +919,9 @@ export function createBlock(type: BlockType, position: XYPosition): StoryBlock {
 
   if (type === "choice") {
     return {
-      id,
+      ...base,
       type,
       name: "Choix",
-      notes: "",
-      position,
-      entryEffects: [],
       prompt: "Que fais-tu ?",
       backgroundAssetId: null,
       voiceAssetId: null,
@@ -893,24 +931,18 @@ export function createBlock(type: BlockType, position: XYPosition): StoryBlock {
 
   if (type === "hero_profile") {
     return {
-      id,
+      ...base,
       type,
       name: "Fiche Hero",
-      notes: "",
-      position,
-      entryEffects: [],
       nextBlockId: null,
     };
   }
 
   if (type === "npc_profile") {
     return {
-      id,
+      ...base,
       type,
       name: "Fiche PNJ",
-      notes: "",
-      position,
-      entryEffects: [],
       npcName: "PNJ",
       npcLore: "",
       imageAssetIds: [],
@@ -921,13 +953,10 @@ export function createBlock(type: BlockType, position: XYPosition): StoryBlock {
   }
 
   return {
-    id,
-    type,
+    ...base,
+    type: type as "gameplay",
     name: "Gameplay",
-    notes: "",
-    position,
-    entryEffects: [],
-    mode: "point_and_click",
+    mode: "point_and_click" as const,
     objective: "",
     backgroundAssetId: null,
     sceneLayout: { ...DEFAULT_SCENE_LAYOUT },
@@ -1107,6 +1136,31 @@ export function normalizeGameplayBlock(block: GameplayBlock): GameplayBlock {
 }
 
 export function normalizeStoryBlock(block: StoryBlock): StoryBlock {
+  // Ensure chapterId exists on all blocks (migration from older projects)
+  const raw = block as unknown as Record<string, unknown>;
+  if (typeof raw.chapterId !== "string") {
+    (block as unknown as Record<string, unknown>).chapterId = null;
+  }
+
+  if (block.type === "chapter_start") {
+    return {
+      ...block,
+      chapterId: block.chapterId ?? null,
+      entryEffects: normalizeVariableEffects((block as { entryEffects?: unknown }).entryEffects),
+      chapterTitle: block.chapterTitle ?? "Chapitre",
+      nextBlockId: block.nextBlockId ?? null,
+    };
+  }
+
+  if (block.type === "chapter_end") {
+    return {
+      ...block,
+      chapterId: block.chapterId ?? null,
+      entryEffects: normalizeVariableEffects((block as { entryEffects?: unknown }).entryEffects),
+      nextBlockId: block.nextBlockId ?? null,
+    };
+  }
+
   if (block.type === "gameplay") {
     return normalizeGameplayBlock(block);
   }
@@ -1284,6 +1338,10 @@ export function getBlockOutgoingTargets(block: StoryBlock) {
       .filter((targetId): targetId is string => Boolean(targetId));
   }
 
+  if (block.type === "chapter_start" || block.type === "chapter_end") {
+    return block.nextBlockId ? [block.nextBlockId] : [];
+  }
+
   if (block.type === "gameplay") {
     return block.nextBlockId ? [block.nextBlockId] : [];
   }
@@ -1308,6 +1366,8 @@ export function blockTypeColor(type: BlockType) {
   if (type === "choice") return "#a855f7";
   if (type === "hero_profile") return "#f59e0b";
   if (type === "npc_profile") return "#0ea5e9";
+  if (type === "chapter_start") return "#059669";
+  if (type === "chapter_end") return "#dc2626";
   return "#7c3aed";
 }
 
