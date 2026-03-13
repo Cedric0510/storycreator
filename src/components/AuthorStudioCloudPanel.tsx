@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { useState } from "react";
 import { User } from "@supabase/supabase-js";
 
@@ -14,6 +15,7 @@ import { CollapsibleSection } from "@/components/CollapsibleSection";
 import { HelpHint } from "@/components/HelpHint";
 
 interface AuthorStudioCloudPanelProps {
+  studioMode?: boolean;
   supabaseEnabled: boolean;
   allowSelfSignup: boolean;
   authLoading: boolean;
@@ -34,11 +36,13 @@ interface AuthorStudioCloudPanelProps {
   onOwnPasswordConfirmInputChange: (value: string) => void;
   onChangeOwnPassword: () => void;
   onRefreshProjects: () => void;
+  onRequestNewProject: () => void;
   onSaveProject: () => void;
   onAcquireLock: () => void;
   onReleaseLock: () => void;
   onForceTakeoverLock: () => void;
   cloudBusy: boolean;
+  canUseAuthorTools: boolean;
   cloudCanWrite: boolean;
   cloudProjectId: string | null;
   cloudAccessLevel: CloudAccessLevel | null;
@@ -76,6 +80,7 @@ interface AuthorStudioCloudPanelProps {
 }
 
 export function AuthorStudioCloudPanel({
+  studioMode = false,
   supabaseEnabled,
   allowSelfSignup,
   authLoading,
@@ -96,11 +101,13 @@ export function AuthorStudioCloudPanel({
   onOwnPasswordConfirmInputChange,
   onChangeOwnPassword,
   onRefreshProjects,
+  onRequestNewProject,
   onSaveProject,
   onAcquireLock,
   onReleaseLock,
   onForceTakeoverLock,
   cloudBusy,
+  canUseAuthorTools,
   cloudCanWrite,
   cloudProjectId,
   cloudAccessLevel,
@@ -179,39 +186,52 @@ export function AuthorStudioCloudPanel({
 
             {!authLoading && !authUser && (
               <div className="subsection">
-                <label>
-                  Email
-                  <input
-                    type="email"
-                    placeholder="auteur@studio.com"
-                    value={authEmailInput ?? ""}
-                    onChange={(event) => onAuthEmailInputChange(event.target.value)}
-                  />
-                </label>
-                <label>
-                  Mot de passe
-                  <input
-                    type="password"
-                    placeholder="********"
-                    value={authPasswordInput ?? ""}
-                    onChange={(event) => onAuthPasswordInputChange(event.target.value)}
-                  />
-                </label>
-                <div className="row-inline">
-                  <button className="button-secondary" onClick={onSignIn} disabled={cloudBusy}>
-                    Se connecter
-                  </button>
-                  {allowSelfSignup && (
-                    <button className="button-secondary" onClick={onSignUp} disabled={cloudBusy}>
-                      Creer un compte
-                    </button>
-                  )}
-                </div>
-                <small>
-                  {allowSelfSignup
-                    ? "`Se connecter` n'ouvre que les comptes existants. `Creer un compte` enregistre un nouveau compte (role lecteur par defaut)."
-                    : "Inscription desactivee sur cette instance: demande a un admin de creer/activer ton compte, puis utilise `Se connecter`."}
-                </small>
+                {studioMode ? (
+                  <>
+                    <p className="empty-placeholder">
+                      Connecte-toi depuis la page d&apos;accueil pour acceder au cloud.
+                    </p>
+                    <Link className="button-secondary" href="/">
+                      Aller a la connexion
+                    </Link>
+                  </>
+                ) : (
+                  <>
+                    <label>
+                      Email
+                      <input
+                        type="email"
+                        placeholder="auteur@studio.com"
+                        value={authEmailInput ?? ""}
+                        onChange={(event) => onAuthEmailInputChange(event.target.value)}
+                      />
+                    </label>
+                    <label>
+                      Mot de passe
+                      <input
+                        type="password"
+                        placeholder="********"
+                        value={authPasswordInput ?? ""}
+                        onChange={(event) => onAuthPasswordInputChange(event.target.value)}
+                      />
+                    </label>
+                    <div className="row-inline">
+                      <button className="button-secondary" onClick={onSignIn} disabled={cloudBusy}>
+                        Se connecter
+                      </button>
+                      {allowSelfSignup && (
+                        <button className="button-secondary" onClick={onSignUp} disabled={cloudBusy}>
+                          Creer un compte
+                        </button>
+                      )}
+                    </div>
+                    <small>
+                      {allowSelfSignup
+                        ? "`Se connecter` n'ouvre que les comptes existants. `Creer un compte` enregistre un nouveau compte (role lecteur par defaut)."
+                        : "Inscription desactivee sur cette instance: demande a un admin de creer/activer ton compte, puis utilise `Se connecter`."}
+                    </small>
+                  </>
+                )}
               </div>
             )}
 
@@ -223,9 +243,11 @@ export function AuthorStudioCloudPanel({
                 </p>
                 <div className="cloud-auth-actions">
                   <div className="cloud-auth-top-row">
-                    <button className="button-secondary" onClick={onSignOut} disabled={cloudBusy}>
-                      Se deconnecter
-                    </button>
+                    {!studioMode && (
+                      <button className="button-secondary" onClick={onSignOut} disabled={cloudBusy}>
+                        Se deconnecter
+                      </button>
+                    )}
                     <button
                       className="button-secondary"
                       onClick={onRefreshProjects}
@@ -292,68 +314,72 @@ export function AuthorStudioCloudPanel({
                     {cloudEditingLockUserId && <> - lock {cloudLockHolderName}</>}
                   </small>
                 )}
-                <div className="subsection">
-                  <div className="title-with-help">
-                    <strong>Securite compte</strong>
-                    <HelpHint title="Mot de passe utilisateur">
-                      Change ton mot de passe ici. Pour un compte cree par un admin, fais ce
-                      changement des la premiere connexion.
-                    </HelpHint>
+                {!studioMode && (
+                  <div className="subsection">
+                    <div className="title-with-help">
+                      <strong>Securite compte</strong>
+                      <HelpHint title="Mot de passe utilisateur">
+                        Change ton mot de passe ici. Pour un compte cree par un admin, fais ce
+                        changement des la premiere connexion.
+                      </HelpHint>
+                    </div>
+                    {accountMustChangePassword && (
+                      <p className="empty-placeholder">
+                        Action requise: change ton mot de passe provisoire.
+                      </p>
+                    )}
+                    <label>
+                      Nouveau mot de passe
+                      <input
+                        type="password"
+                        placeholder="Minimum 8 caracteres"
+                        value={ownPasswordInput ?? ""}
+                        onChange={(event) => onOwnPasswordInputChange(event.target.value)}
+                      />
+                    </label>
+                    <label>
+                      Confirmation mot de passe
+                      <input
+                        type="password"
+                        placeholder="Retape le mot de passe"
+                        value={ownPasswordConfirmInput ?? ""}
+                        onChange={(event) => onOwnPasswordConfirmInputChange(event.target.value)}
+                      />
+                    </label>
+                    <button
+                      className="button-secondary"
+                      onClick={onChangeOwnPassword}
+                      disabled={cloudBusy}
+                    >
+                      Changer mon mot de passe
+                    </button>
                   </div>
-                  {accountMustChangePassword && (
-                    <p className="empty-placeholder">
-                      Action requise: change ton mot de passe provisoire.
-                    </p>
-                  )}
-                  <label>
-                    Nouveau mot de passe
-                    <input
-                      type="password"
-                      placeholder="Minimum 8 caracteres"
-                      value={ownPasswordInput ?? ""}
-                      onChange={(event) => onOwnPasswordInputChange(event.target.value)}
-                    />
-                  </label>
-                  <label>
-                    Confirmation mot de passe
-                    <input
-                      type="password"
-                      placeholder="Retape le mot de passe"
-                      value={ownPasswordConfirmInput ?? ""}
-                      onChange={(event) => onOwnPasswordConfirmInputChange(event.target.value)}
-                    />
-                  </label>
-                  <button
-                    className="button-secondary"
-                    onClick={onChangeOwnPassword}
-                    disabled={cloudBusy}
-                  >
-                    Changer mon mot de passe
-                  </button>
-                </div>
+                )}
               </div>
             )}
           </>
         )}
       </CollapsibleSection>
 
-      <CollapsibleSection
-        storageKey="cloud-username"
-        title="User name (mail)"
-        headerExtra={
-          <HelpHint title="Compte actif">
-            Affiche le compte actuellement connecte dans le studio. Si rien n&apos;apparait, aucun
-            utilisateur n&apos;est connecte.
-          </HelpHint>
-        }
-      >
-        <p className="empty-placeholder">{displayEmail(authUser?.email ?? null) ?? "Aucun utilisateur connecte."}</p>
-      </CollapsibleSection>
+      {!studioMode && (
+        <CollapsibleSection
+          storageKey="cloud-username"
+          title="User name (mail)"
+          headerExtra={
+            <HelpHint title="Compte actif">
+              Affiche le compte actuellement connecte dans le studio. Si rien n&apos;apparait, aucun
+              utilisateur n&apos;est connecte.
+            </HelpHint>
+          }
+        >
+          <p className="empty-placeholder">{displayEmail(authUser?.email ?? null) ?? "Aucun utilisateur connecte."}</p>
+        </CollapsibleSection>
+      )}
 
       {authUser && (
         <CollapsibleSection
           storageKey="cloud-projects"
-          title="Mes projets cloud"
+          title="Mes projets"
           headerExtra={
             <HelpHint title="Liste projets">
               Clique &laquo;&nbsp;Ouvrir&nbsp;&raquo; pour charger un projet directement dans
@@ -362,7 +388,15 @@ export function AuthorStudioCloudPanel({
             </HelpHint>
           }
         >
-          <small>Clique Ouvrir pour charger un projet. Les images se chargent automatiquement depuis le cloud.</small>
+          <div className="row-inline cloud-projects-toolbar">
+            <button
+              className="button-primary button-brand-blue"
+              onClick={onRequestNewProject}
+              disabled={cloudBusy || !canUseAuthorTools}
+            >
+              Nouveau projet
+            </button>
+          </div>
           {cloudProjects.length === 0 ? (
             <p className="empty-placeholder">
               Aucun projet visible. Clique sur Creer + sauvegarder puis sur Refresh liste.
@@ -383,7 +417,7 @@ export function AuthorStudioCloudPanel({
                         <span className="chip chip-active">Actif</span>
                       ) : (
                         <button
-                          className="button-primary"
+                          className="button-primary cloud-open-button"
                           onClick={() => onOpenProject(item.id)}
                           disabled={cloudBusy}
                         >
@@ -417,7 +451,7 @@ export function AuthorStudioCloudPanel({
         </CollapsibleSection>
       )}
 
-      {authUser && isPlatformAdmin && (
+      {authUser && isPlatformAdmin && !studioMode && (
         <CollapsibleSection
           storageKey="cloud-admin"
           title="Administration plateforme"
@@ -476,7 +510,7 @@ export function AuthorStudioCloudPanel({
                 <option value="admin">admin</option>
               </select>
             </label>
-            <button className="button-primary" onClick={onAdminCreateUser} disabled={cloudBusy}>
+            <button className="button-primary button-brand-blue" onClick={onAdminCreateUser} disabled={cloudBusy}>
               Creer compte
             </button>
           </div>
@@ -536,7 +570,7 @@ export function AuthorStudioCloudPanel({
         </CollapsibleSection>
       )}
 
-      {isPlatformAdmin && (
+      {isPlatformAdmin && !studioMode && (
         <CollapsibleSection
           storageKey="cloud-maintenance"
           title="Maintenance assets"
@@ -642,7 +676,7 @@ export function AuthorStudioCloudPanel({
         </CollapsibleSection>
       )}
 
-      {cloudProjectId && cloudLogs.length > 0 && (
+      {cloudProjectId && cloudLogs.length > 0 && !studioMode && (
         <CollapsibleSection
           storageKey="cloud-logs"
           title="Logs cloud"

@@ -7,6 +7,7 @@ import {
   useRef,
   useState,
 } from "react";
+import { useRouter } from "next/navigation";
 import {
   Background,
   BackgroundVariant,
@@ -161,6 +162,7 @@ function withCollapsedChapterFolders(
 }
 
 export function AuthorStudioApp() {
+  const router = useRouter();
   const MAX_TOASTS = 8;
   const [seed] = useState<InitialStudio>(() => buildInitialStudio());
   const [nodes, setNodes] = useState<EditorNode[]>(seed.nodes);
@@ -178,6 +180,11 @@ export function AuthorStudioApp() {
   const importZipInputRef = useRef<HTMLInputElement | null>(null);
   const [isImportingZip, setIsImportingZip] = useState(false);
   const [rightPanelHidden, setRightPanelHidden] = useState(false);
+  const [accountModalOpen, setAccountModalOpen] = useState(false);
+  const [accountModalMessage, setAccountModalMessage] = useState("");
+  const [accountDeleteConfirmationInput, setAccountDeleteConfirmationInput] = useState("");
+  const [adminModalOpen, setAdminModalOpen] = useState(false);
+  const [adminModalMessage, setAdminModalMessage] = useState("");
   const [newVariableName, setNewVariableName] = useState("");
   const [ownPasswordInput, setOwnPasswordInput] = useState("");
   const [ownPasswordConfirmInput, setOwnPasswordConfirmInput] = useState("");
@@ -297,6 +304,8 @@ export function AuthorStudioApp() {
     Boolean(cloudLatestUpdatedAt) &&
     cloudProjectUpdatedAt !== cloudLatestUpdatedAt;
   const canEdit = canUseAuthorTools && localCanEdit && cloudCanWrite && !cloudLockHeldByOther;
+  const authInitial = (authUser?.email?.trim().charAt(0) ?? "?").toUpperCase();
+  const adminCount = platformProfiles.filter((profile) => profile.platform_role === "admin").length;
 
   useEffect(() => {
     if (!authUser) return;
@@ -321,6 +330,38 @@ export function AuthorStudioApp() {
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
   }, [authUser]);
+
+  useEffect(() => {
+    if (!accountModalOpen && !adminModalOpen) return;
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        if (!cloudBusy) {
+          setAccountModalOpen(false);
+          setAdminModalOpen(false);
+        }
+      }
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [accountModalOpen, adminModalOpen, cloudBusy]);
+
+  useEffect(() => {
+    if (!authUser) {
+      setAccountModalOpen(false);
+      setAccountModalMessage("");
+      setAccountDeleteConfirmationInput("");
+      setAdminModalOpen(false);
+      setAdminModalMessage("");
+    }
+  }, [authUser]);
+
+  useEffect(() => {
+    if (!isPlatformAdmin) {
+      setAdminModalOpen(false);
+      setAdminModalMessage("");
+    }
+  }, [isPlatformAdmin]);
 
   // ── Safety net: auto-reset cloudBusy if stuck for more than 120 s ──
   useEffect(() => {
@@ -1942,6 +1983,286 @@ export function AuthorStudioApp() {
     }
   };
 
+  const openAccountModal = () => {
+    setAdminModalOpen(false);
+    setAccountModalMessage("");
+    setOwnPasswordInput("");
+    setOwnPasswordConfirmInput("");
+    setAccountDeleteConfirmationInput("");
+    setAccountModalOpen(true);
+  };
+
+  const closeAccountModal = () => {
+    if (cloudBusy) return;
+    setAccountModalOpen(false);
+  };
+
+  const changeOwnPasswordFromModal = async () => {
+    if (!supabase || !authUser) {
+      setAccountModalMessage("Connecte-toi pour changer ton mot de passe.");
+      return;
+    }
+    if (ownPasswordInput.length < 8) {
+      setAccountModalMessage("Le nouveau mot de passe doit contenir au moins 8 caracteres.");
+      return;
+    }
+    if (ownPasswordInput !== ownPasswordConfirmInput) {
+      setAccountModalMessage("La confirmation du mot de passe ne correspond pas.");
+      return;
+    }
+
+    setCloudBusy(true);
+    try {
+      const { error } = await supabase.auth.updateUser({
+        password: ownPasswordInput,
+        data: { must_change_password: false },
+      });
+      if (error) {
+        setAccountModalMessage(`Erreur changement mot de passe: ${error.message}`);
+        return;
+      }
+      setOwnPasswordInput("");
+      setOwnPasswordConfirmInput("");
+      setAccountModalMessage("Mot de passe mis a jour.");
+      setStatusMessage("Mot de passe mis a jour.");
+    } finally {
+      setCloudBusy(false);
+    }
+  };
+
+  const logoutFromAccountModal = async () => {
+    if (!authUser) {
+      setAccountModalOpen(false);
+      return;
+    }
+
+    setCloudBusy(true);
+    try {
+      await signOutSupabase();
+      setAccountModalOpen(false);
+      router.push("/");
+    } finally {
+      setCloudBusy(false);
+    }
+  };
+
+  const deleteOwnAccountFromModal = async () => {
+    if (!supabase || !authUser) {
+      setAccountModalMessage("Connecte-toi pour supprimer ton compte.");
+      return;
+    }
+    if (accountDeleteConfirmationInput.trim().toUpperCase() !== "SUPPRIMER") {
+      setAccountModalMessage('Saisis exactement "SUPPRIMER" pour confirmer.');
+      return;
+    }
+
+    setCloudBusy(true);
+    try {
+      const {
+        data: { session },
+        error: sessionError,
+      } = await supabase.auth.refreshSession();
+      if (sessionError || !session?.access_token) {
+        setAccountModalMessage(`Session invalide: ${sessionError?.message ?? "reconnecte-toi"}`);
+        return;
+      }
+
+      const response = await fetch("/api/account/delete", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "x-supabase-access-token": session.access_token,
+        },
+      });
+      const payload = (await response.json().catch(() => ({}))) as { error?: string };
+      if (!response.ok) {
+        setAccountModalMessage(`Erreur suppression compte: ${payload.error ?? "unknown"}`);
+        return;
+      }
+
+      await signOutSupabase();
+      setAccountModalOpen(false);
+      router.push("/");
+    } finally {
+      setCloudBusy(false);
+    }
+  };
+
+  const openAdminModal = () => {
+    if (!isPlatformAdmin) return;
+    setAccountModalOpen(false);
+    setAdminModalMessage("");
+    setAdminModalOpen(true);
+    void refreshPlatformProfiles();
+    void refreshCloudProjects();
+  };
+
+  const closeAdminModal = () => {
+    if (cloudBusy) return;
+    setAdminModalOpen(false);
+  };
+
+  const createUserFromAdminModal = async () => {
+    if (!supabase || !authUser || !isPlatformAdmin) {
+      setAdminModalMessage("Action reservee aux admins connectes.");
+      return;
+    }
+
+    const email = adminCreateUserEmailInput.trim().toLowerCase();
+    if (!email) {
+      setAdminModalMessage("Saisis un email utilisateur.");
+      return;
+    }
+    if (adminCreateUserPasswordInput.length < 8) {
+      setAdminModalMessage("Le mot de passe provisoire doit contenir au moins 8 caracteres.");
+      return;
+    }
+
+    setCloudBusy(true);
+    try {
+      const {
+        data: { session },
+        error: sessionError,
+      } = await supabase.auth.refreshSession();
+      if (sessionError || !session?.access_token) {
+        setAdminModalMessage(
+          `Session admin expiree: ${sessionError?.message ?? "reconnecte-toi puis reessaie"}`,
+        );
+        return;
+      }
+
+      const response = await fetch("/api/admin/create-user", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "x-supabase-access-token": session.access_token,
+        },
+        body: JSON.stringify({
+          email,
+          password: adminCreateUserPasswordInput,
+          role: adminCreateUserRole,
+        }),
+      });
+
+      const payload = (await response.json().catch(() => ({}))) as {
+        error?: string;
+        email?: string;
+        role?: string;
+      };
+      if (!response.ok) {
+        setAdminModalMessage(`Erreur creation compte: ${payload.error ?? "unknown"}`);
+        return;
+      }
+
+      setAdminCreateUserEmailInput("");
+      setAdminCreateUserPasswordInput("");
+      setAdminCreateUserRole("reader");
+      await refreshPlatformProfiles();
+      const feedback = `Compte cree: ${payload.email ?? email} (${payload.role ?? adminCreateUserRole}).`;
+      setAdminModalMessage(feedback);
+      setStatusMessage(feedback);
+    } finally {
+      setCloudBusy(false);
+    }
+  };
+
+  const deleteUserFromAdminModal = async (targetUserId: string) => {
+    if (!supabase || !authUser || !isPlatformAdmin) {
+      setAdminModalMessage("Action reservee aux admins connectes.");
+      return;
+    }
+
+    setCloudBusy(true);
+    try {
+      const {
+        data: { session },
+        error: sessionError,
+      } = await supabase.auth.refreshSession();
+      if (sessionError || !session?.access_token) {
+        setAdminModalMessage(`Session invalide: ${sessionError?.message ?? "reconnecte-toi"}`);
+        return;
+      }
+
+      const response = await fetch("/api/admin/delete-user", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "x-supabase-access-token": session.access_token,
+        },
+        body: JSON.stringify({ userId: targetUserId }),
+      });
+      const payload = (await response.json().catch(() => ({}))) as { error?: string };
+      if (!response.ok) {
+        setAdminModalMessage(`Erreur suppression utilisateur: ${payload.error ?? "unknown"}`);
+        return;
+      }
+
+      await refreshPlatformProfiles();
+      await refreshCloudProjects();
+      setAdminModalMessage("Utilisateur supprime.");
+      setStatusMessage("Utilisateur supprime.");
+    } finally {
+      setCloudBusy(false);
+    }
+  };
+
+  const deleteProjectFromAdminModal = async (projectId: string) => {
+    if (!supabase || !authUser || !isPlatformAdmin) {
+      setAdminModalMessage("Action reservee aux admins connectes.");
+      return;
+    }
+
+    setCloudBusy(true);
+    try {
+      const {
+        data: { session },
+        error: sessionError,
+      } = await supabase.auth.refreshSession();
+      if (sessionError || !session?.access_token) {
+        setAdminModalMessage(`Session invalide: ${sessionError?.message ?? "reconnecte-toi"}`);
+        return;
+      }
+
+      const response = await fetch("/api/admin/delete-project", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "x-supabase-access-token": session.access_token,
+        },
+        body: JSON.stringify({ projectId }),
+      });
+      const payload = (await response.json().catch(() => ({}))) as { error?: string };
+      if (!response.ok) {
+        setAdminModalMessage(`Erreur suppression projet: ${payload.error ?? "unknown"}`);
+        return;
+      }
+
+      if (cloudProjectId === projectId) {
+        setCloudProjectId(null);
+        setCloudOwnerId(null);
+        setCloudEditingLockUserId(null);
+        setCloudProjectUpdatedAt(null);
+        setCloudLatestUpdatedAt(null);
+        setCloudAccessLevel(null);
+      }
+
+      await refreshCloudProjects();
+      setAdminModalMessage("Projet supprime.");
+      setStatusMessage("Projet supprime.");
+    } finally {
+      setCloudBusy(false);
+    }
+  };
+
+  const setRoleFromAdminModal = async (targetUserId: string, role: PlatformRole) => {
+    const updated = await setPlatformProfileRole(targetUserId, role);
+    if (updated) {
+      setAdminModalMessage(`Role mis a jour: ${role}.`);
+    } else {
+      setAdminModalMessage("Echec mise a jour role. Verifie les droits et reessaie.");
+    }
+  };
+
   const createUserFromAdminPanel = async () => {
     if (!supabase || !authUser || !isPlatformAdmin) {
       setStatusMessage("Action reservee aux admins connectes.");
@@ -2101,44 +2422,34 @@ export function AuthorStudioApp() {
               </span>
             )}
           </div>
-
-          <a
-            className="button-secondary nav-action-button nav-action-guide"
-            href="/guide-premier-projet"
-            target="_blank"
-            rel="noreferrer"
+          <span
+            className={`nav-user-avatar${authUser ? " nav-user-avatar-active" : ""}`}
+            title={authUser?.email ?? "Aucun compte connecte"}
           >
-            Guide 1er projet
-          </a>
-          <button
-            className="button-secondary nav-action-button nav-action-new"
-            onClick={requestNewProject}
-            disabled={!authUser || !canUseAuthorTools}
-          >
-            Nouveau projet
-          </button>
-          <button
-            className="button-secondary nav-action-button nav-action-validate"
-            onClick={runValidation}
-            disabled={!authUser}
-          >
-            Valider
-          </button>
+            {authInitial}
+          </span>
+          {authUser && (
+            <button
+              className="button-secondary nav-action-button nav-action-account"
+              onClick={openAccountModal}
+            >
+              Compte
+            </button>
+          )}
+          {isPlatformAdmin && (
+            <button
+              className="button-secondary nav-action-button nav-action-admin"
+              onClick={openAdminModal}
+            >
+              Admin
+            </button>
+          )}
           <button
             className="button-secondary nav-action-button nav-action-preview"
             onClick={startPreview}
             disabled={!authUser || isImportingZip}
           >
             Preview
-          </button>
-          <button
-            className="button-secondary nav-action-button nav-action-layout"
-            onClick={() => setRightPanelHidden((current) => !current)}
-            disabled={!authUser}
-            title="Raccourci: Ctrl+B"
-            aria-keyshortcuts="Control+B Meta+B"
-          >
-            {rightPanelHidden ? "Afficher panneau droit" : "Masquer panneau droit"}
           </button>
           <button
             className="button-primary nav-action-button nav-action-export"
@@ -2200,6 +2511,7 @@ export function AuthorStudioApp() {
       <div className={`studio-grid${rightPanelHidden ? " studio-grid-right-hidden" : ""}`}>
         <div className="panel-left-stack">
           <AuthorStudioCloudPanel
+            studioMode
             supabaseEnabled={Boolean(supabase)}
             allowSelfSignup={allowSelfSignup}
             authLoading={authLoading}
@@ -2230,6 +2542,7 @@ export function AuthorStudioApp() {
             onRefreshProjects={() => {
               void refreshCloudProjects();
             }}
+            onRequestNewProject={requestNewProject}
             onSaveProject={() => {
               void saveCloudProject();
             }}
@@ -2243,6 +2556,7 @@ export function AuthorStudioApp() {
               void acquireCloudLock({ forceTakeover: true });
             }}
             cloudBusy={cloudBusy}
+            canUseAuthorTools={canUseAuthorTools}
             cloudCanWrite={cloudCanWrite}
             cloudProjectId={cloudProjectId}
             cloudAccessLevel={cloudAccessLevel}
@@ -2364,70 +2678,80 @@ export function AuthorStudioApp() {
             </main>
 
             {!rightPanelHidden && (
-              <AuthorStudioBlockEditorPanel
-                selectedBlock={selectedBlock}
-                canEdit={canEdit}
-                project={project}
-                blocks={blocks}
-                visibleIssues={visibleIssues}
-                onDeleteSelectedBlock={deleteSelectedBlock}
-                onDuplicateSelectedBlock={duplicateSelectedBlock}
-                onRunValidation={runValidation}
-                onSetStartBlock={setStartBlock}
-                onSetSelectedDynamicField={setSelectedDynamicField}
-                onUpdateSelectedBlock={updateSelectedBlock}
-                onSetConnection={setConnection}
-                onAssetInput={onAssetInput}
-                renderAssetAttachment={renderAssetAttachment}
-                renderAssetAttachmentWithRemove={renderAssetAttachmentWithRemove}
-                onAddDialogueLine={addDialogueLine}
-                onRemoveDialogueLine={removeDialogueLine}
-                onUpdateDialogueLineField={updateDialogueLineField}
-                onDialogueLineVoiceInput={onDialogueLineVoiceInput}
-                renderLineVoiceAttachment={renderLineVoiceAttachment}
-                onAddDialogueLineResponse={addDialogueLineResponse}
-                onRemoveDialogueLineResponse={removeDialogueLineResponse}
-                onUpdateDialogueResponseField={updateDialogueResponseField}
-                onUpdateChoiceField={updateChoiceField}
-                onUnlinkDialogueNpcProfile={unlinkNpcProfileFromDialogue}
-                onAddChoiceOption={addChoiceOption}
-                onRemoveChoiceOption={removeChoiceOption}
-                onUpdateChoiceOptionDescription={updateChoiceOptionDescription}
-                onSetChoiceOptionImage={setChoiceOptionImage}
-                onClearChoiceOptionImage={clearChoiceOptionImage}
-                onAddBlockEntryEffect={addBlockEntryEffect}
-                onUpdateBlockEntryEffect={updateBlockEntryEffect}
-                onRemoveBlockEntryEffect={removeBlockEntryEffect}
-                onAddResponseEffect={addResponseEffect}
-                onUpdateResponseEffect={updateResponseEffect}
-                onRemoveResponseEffect={removeResponseEffect}
-                onAddChoiceEffect={addChoiceEffect}
-                onUpdateChoiceEffect={updateChoiceEffect}
-                onRemoveChoiceEffect={removeChoiceEffect}
-                onAddGameplayObject={addGameplayObject}
-                onRemoveGameplayObject={removeGameplayObject}
-                onUpdateGameplayObjectField={updateGameplayObjectField}
-                onUpdateGameplayObjectRect={updateGameplayObjectRect}
-                onClearGameplayObjectAsset={clearGameplayObjectAsset}
-                onClearGameplayObjectSound={clearGameplayObjectSound}
-                onAddGameplayObjectEffect={addGameplayObjectEffect}
-                onUpdateGameplayObjectEffect={updateGameplayObjectEffect}
-                onRemoveGameplayObjectEffect={removeGameplayObjectEffect}
-                onAddGameplayCompletionEffect={addGameplayCompletionEffect}
-                onUpdateGameplayCompletionEffect={updateGameplayCompletionEffect}
-                onRemoveGameplayCompletionEffect={removeGameplayCompletionEffect}
-                gameplayPlacementTarget={gameplayPlacementTarget}
-                onSetGameplayPlacementTarget={setGameplayPlacementTarget}
-                onStartGameplayObjectDrag={startGameplayObjectDrag}
-                onStartGameplayObjectResize={startGameplayObjectResize}
-                onGameplaySceneClick={onGameplaySceneClick}
-                onGameplayScenePointerMove={onGameplayScenePointerMove}
-                onGameplayScenePointerEnd={onGameplayScenePointerEnd}
-                assetPreviewSrcById={assetPreviewSrcById}
-                onRegisterAsset={registerAsset}
-                onEnsureAssetPreviewSrc={ensureAssetPreviewSrc}
-                onStatusMessage={setStatusMessage}
-              />
+              <div className="panel-right-shell">
+                <button
+                  className="panel-right-edge-toggle panel-right-edge-toggle-close"
+                  onClick={() => setRightPanelHidden(true)}
+                  title="Masquer panneau droit (Ctrl+B)"
+                  aria-label="Masquer panneau droit"
+                >
+                  {">"}
+                </button>
+                <AuthorStudioBlockEditorPanel
+                  selectedBlock={selectedBlock}
+                  canEdit={canEdit}
+                  project={project}
+                  blocks={blocks}
+                  visibleIssues={visibleIssues}
+                  onDeleteSelectedBlock={deleteSelectedBlock}
+                  onDuplicateSelectedBlock={duplicateSelectedBlock}
+                  onRunValidation={runValidation}
+                  onSetStartBlock={setStartBlock}
+                  onSetSelectedDynamicField={setSelectedDynamicField}
+                  onUpdateSelectedBlock={updateSelectedBlock}
+                  onSetConnection={setConnection}
+                  onAssetInput={onAssetInput}
+                  renderAssetAttachment={renderAssetAttachment}
+                  renderAssetAttachmentWithRemove={renderAssetAttachmentWithRemove}
+                  onAddDialogueLine={addDialogueLine}
+                  onRemoveDialogueLine={removeDialogueLine}
+                  onUpdateDialogueLineField={updateDialogueLineField}
+                  onDialogueLineVoiceInput={onDialogueLineVoiceInput}
+                  renderLineVoiceAttachment={renderLineVoiceAttachment}
+                  onAddDialogueLineResponse={addDialogueLineResponse}
+                  onRemoveDialogueLineResponse={removeDialogueLineResponse}
+                  onUpdateDialogueResponseField={updateDialogueResponseField}
+                  onUpdateChoiceField={updateChoiceField}
+                  onUnlinkDialogueNpcProfile={unlinkNpcProfileFromDialogue}
+                  onAddChoiceOption={addChoiceOption}
+                  onRemoveChoiceOption={removeChoiceOption}
+                  onUpdateChoiceOptionDescription={updateChoiceOptionDescription}
+                  onSetChoiceOptionImage={setChoiceOptionImage}
+                  onClearChoiceOptionImage={clearChoiceOptionImage}
+                  onAddBlockEntryEffect={addBlockEntryEffect}
+                  onUpdateBlockEntryEffect={updateBlockEntryEffect}
+                  onRemoveBlockEntryEffect={removeBlockEntryEffect}
+                  onAddResponseEffect={addResponseEffect}
+                  onUpdateResponseEffect={updateResponseEffect}
+                  onRemoveResponseEffect={removeResponseEffect}
+                  onAddChoiceEffect={addChoiceEffect}
+                  onUpdateChoiceEffect={updateChoiceEffect}
+                  onRemoveChoiceEffect={removeChoiceEffect}
+                  onAddGameplayObject={addGameplayObject}
+                  onRemoveGameplayObject={removeGameplayObject}
+                  onUpdateGameplayObjectField={updateGameplayObjectField}
+                  onUpdateGameplayObjectRect={updateGameplayObjectRect}
+                  onClearGameplayObjectAsset={clearGameplayObjectAsset}
+                  onClearGameplayObjectSound={clearGameplayObjectSound}
+                  onAddGameplayObjectEffect={addGameplayObjectEffect}
+                  onUpdateGameplayObjectEffect={updateGameplayObjectEffect}
+                  onRemoveGameplayObjectEffect={removeGameplayObjectEffect}
+                  onAddGameplayCompletionEffect={addGameplayCompletionEffect}
+                  onUpdateGameplayCompletionEffect={updateGameplayCompletionEffect}
+                  onRemoveGameplayCompletionEffect={removeGameplayCompletionEffect}
+                  gameplayPlacementTarget={gameplayPlacementTarget}
+                  onSetGameplayPlacementTarget={setGameplayPlacementTarget}
+                  onStartGameplayObjectDrag={startGameplayObjectDrag}
+                  onStartGameplayObjectResize={startGameplayObjectResize}
+                  onGameplaySceneClick={onGameplaySceneClick}
+                  onGameplayScenePointerMove={onGameplayScenePointerMove}
+                  onGameplayScenePointerEnd={onGameplayScenePointerEnd}
+                  assetPreviewSrcById={assetPreviewSrcById}
+                  onRegisterAsset={registerAsset}
+                  onEnsureAssetPreviewSrc={ensureAssetPreviewSrc}
+                  onStatusMessage={setStatusMessage}
+                />
+              </div>
             )}
           </>
         ) : (
@@ -2442,8 +2766,283 @@ export function AuthorStudioApp() {
           </main>
         )}
       </div>
+      {authUser && rightPanelHidden && (
+        <button
+          className="panel-right-edge-toggle panel-right-edge-toggle-open"
+          onClick={() => setRightPanelHidden(false)}
+          title="Afficher panneau droit (Ctrl+B)"
+          aria-label="Afficher panneau droit"
+          aria-keyshortcuts="Control+B Meta+B"
+        >
+          {"<"}
+        </button>
+      )}
+
+      {accountModalOpen && authUser && (
+        <div className="account-modal-overlay">
+          <section className="account-modal-card" role="dialog" aria-modal="true" aria-label="Mon compte">
+            <div className="account-modal-head">
+              <h2>Mon compte</h2>
+              <button className="button-secondary" onClick={closeAccountModal} disabled={cloudBusy}>
+                Fermer
+              </button>
+            </div>
+            <p className="account-modal-subtitle">
+              Gere ton compte sans quitter la page de travail.
+            </p>
+            <p>
+              Connecte: <strong>{authUser.email ?? authUser.id}</strong>{" "}
+              <span className="chip chip-start">{platformRole}</span>
+            </p>
+
+            <div className="portal-divider" />
+
+            <h3>Changer le mot de passe</h3>
+            <label>
+              Nouveau mot de passe
+              <input
+                type="password"
+                placeholder="Minimum 8 caracteres"
+                value={ownPasswordInput}
+                onChange={(event) => setOwnPasswordInput(event.target.value)}
+              />
+            </label>
+            <label>
+              Confirmation mot de passe
+              <input
+                type="password"
+                placeholder="Retape le mot de passe"
+                value={ownPasswordConfirmInput}
+                onChange={(event) => setOwnPasswordConfirmInput(event.target.value)}
+              />
+            </label>
+            <div className="row-inline">
+              <button
+                className="button-secondary"
+                onClick={() => {
+                  void changeOwnPasswordFromModal();
+                }}
+                disabled={cloudBusy}
+              >
+                Changer mon mot de passe
+              </button>
+              <button
+                className="button-secondary"
+                onClick={() => {
+                  void logoutFromAccountModal();
+                }}
+                disabled={cloudBusy}
+              >
+                Se deconnecter
+              </button>
+            </div>
+
+            <div className="portal-divider" />
+
+            <h3>Supprimer le compte</h3>
+            <p className="portal-warning">
+              Action irreversible. Saisis <strong>SUPPRIMER</strong> pour confirmer.
+            </p>
+            <label>
+              Confirmation
+              <input
+                placeholder="SUPPRIMER"
+                value={accountDeleteConfirmationInput}
+                onChange={(event) => setAccountDeleteConfirmationInput(event.target.value)}
+              />
+            </label>
+            <button
+              className="button-danger"
+              onClick={() => {
+                void deleteOwnAccountFromModal();
+              }}
+              disabled={cloudBusy}
+            >
+              Supprimer mon compte
+            </button>
+
+            {accountModalMessage && <p className="portal-message">{accountModalMessage}</p>}
+          </section>
+        </div>
+      )}
+
+      {adminModalOpen && authUser && isPlatformAdmin && (
+        <div className="account-modal-overlay">
+          <section className="account-modal-card admin-modal-card" role="dialog" aria-modal="true" aria-label="Administration">
+            <div className="account-modal-head">
+              <h2>Administration</h2>
+              <div className="row-inline">
+                <button
+                  className="button-secondary"
+                  onClick={() => {
+                    void refreshPlatformProfiles();
+                    void refreshCloudProjects();
+                  }}
+                  disabled={cloudBusy}
+                >
+                  Refresh
+                </button>
+                <button className="button-secondary" onClick={closeAdminModal} disabled={cloudBusy}>
+                  Fermer
+                </button>
+              </div>
+            </div>
+            <p className="account-modal-subtitle">
+              Gere les comptes, roles et projets sans quitter la page de travail.
+            </p>
+
+            <div className="portal-divider" />
+
+            <h3>Creer un utilisateur</h3>
+            <label>
+              Email
+              <input
+                type="email"
+                placeholder="utilisateur@studio.com"
+                value={adminCreateUserEmailInput}
+                onChange={(event) => setAdminCreateUserEmailInput(event.target.value)}
+              />
+            </label>
+            <label>
+              Mot de passe provisoire
+              <input
+                type="password"
+                placeholder="Minimum 8 caracteres"
+                value={adminCreateUserPasswordInput}
+                onChange={(event) => setAdminCreateUserPasswordInput(event.target.value)}
+              />
+            </label>
+            <label>
+              Role
+              <select
+                value={adminCreateUserRole}
+                onChange={(event) => setAdminCreateUserRole(event.target.value as PlatformRole)}
+              >
+                <option value="reader">reader</option>
+                <option value="author">author</option>
+                <option value="admin">admin</option>
+              </select>
+            </label>
+            <button
+              className="button-primary button-brand-blue"
+              onClick={() => {
+                void createUserFromAdminModal();
+              }}
+              disabled={cloudBusy}
+            >
+              Creer utilisateur
+            </button>
+
+            <div className="portal-divider" />
+
+            <h3>Utilisateurs</h3>
+            {platformProfiles.length === 0 ? (
+              <p className="empty-placeholder">Aucun utilisateur charge.</p>
+            ) : (
+              <ul className="list-compact admin-modal-list">
+                {platformProfiles.map((profile) => {
+                  const isSelf = profile.user_id === authUser.id;
+                  const isAdminProfile = profile.platform_role === "admin";
+                  return (
+                    <li key={profile.user_id} className="cloud-project-row">
+                      <div>
+                        <strong>{profile.display_name}</strong>
+                        <small>{profile.email ?? profile.user_id}</small>
+                      </div>
+                      <div className="row-inline">
+                        <span className="chip chip-start">{profile.platform_role}</span>
+                        <button
+                          className="button-secondary button-small"
+                          onClick={() => {
+                            void setRoleFromAdminModal(profile.user_id, "reader");
+                          }}
+                          disabled={
+                            cloudBusy ||
+                            profile.platform_role === "reader" ||
+                            (isAdminProfile && adminCount <= 1)
+                          }
+                        >
+                          reader
+                        </button>
+                        <button
+                          className="button-secondary button-small"
+                          onClick={() => {
+                            void setRoleFromAdminModal(profile.user_id, "author");
+                          }}
+                          disabled={
+                            cloudBusy ||
+                            profile.platform_role === "author" ||
+                            (isAdminProfile && adminCount <= 1)
+                          }
+                        >
+                          author
+                        </button>
+                        <button
+                          className="button-secondary button-small"
+                          onClick={() => {
+                            void setRoleFromAdminModal(profile.user_id, "admin");
+                          }}
+                          disabled={cloudBusy || profile.platform_role === "admin"}
+                        >
+                          admin
+                        </button>
+                        <button
+                          className="button-danger button-small"
+                          onClick={() => {
+                            void deleteUserFromAdminModal(profile.user_id);
+                          }}
+                          disabled={cloudBusy || isSelf}
+                          title={isSelf ? "Utilise la modale Compte pour ton propre compte" : "Supprimer utilisateur"}
+                        >
+                          Supprimer
+                        </button>
+                      </div>
+                    </li>
+                  );
+                })}
+              </ul>
+            )}
+
+            <div className="portal-divider" />
+
+            <h3>Projets</h3>
+            {cloudProjects.length === 0 ? (
+              <p className="empty-placeholder">Aucun projet charge.</p>
+            ) : (
+              <ul className="list-compact admin-modal-list">
+                {cloudProjects.map((projectRow) => (
+                  <li key={projectRow.id} className="cloud-project-row">
+                    <div>
+                      <strong>{projectRow.title}</strong>
+                      <small>{projectRow.id}</small>
+                      <small>{new Date(projectRow.updated_at).toLocaleString("fr-FR")}</small>
+                    </div>
+                    <div className="row-inline">
+                      <button
+                        className="button-danger button-small"
+                        onClick={() => {
+                          void deleteProjectFromAdminModal(projectRow.id);
+                        }}
+                        disabled={cloudBusy}
+                      >
+                        Supprimer
+                      </button>
+                    </div>
+                  </li>
+                ))}
+              </ul>
+            )}
+
+            {adminModalMessage && <p className="portal-message">{adminModalMessage}</p>}
+          </section>
+        </div>
+      )}
 
       <footer className="studio-footer">
+        <a className="studio-footer-link" href="/guide-premier-projet" target="_blank" rel="noreferrer">
+          Guide 1er projet
+        </a>
+        <span className="studio-footer-separator">·</span>
         <a className="studio-footer-link" href="/confidentialite" target="_blank" rel="noreferrer">
           Confidentialite
         </a>
