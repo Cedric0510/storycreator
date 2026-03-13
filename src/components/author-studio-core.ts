@@ -3,10 +3,8 @@ import { Edge, MarkerType, Node } from "@xyflow/react";
 import { StoryNodeData } from "@/components/StoryNode";
 import {
   AssetRef,
-  BlockType,
   CharacterLayer,
   ChoiceLabel,
-  ChoiceBlock,
   DEFAULT_CHARACTER_LAYOUT,
   DEFAULT_SCENE_LAYOUT,
   DialogueBlock,
@@ -16,8 +14,6 @@ import {
   GameplayHotspotClickAction,
   GameplayHotspotClickActionType,
   GameplayHotspot,
-  GameplayLink,
-  GameplayObject,
   GameplayOverlay,
   ProjectMeta,
   STORY_SCHEMA_VERSION,

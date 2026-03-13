@@ -90,7 +90,7 @@ export function useCloudProjectSession({
           index[profile.user_id] = profile;
         }
         setCloudProfiles(index);
-      } catch (err: unknown) {
+      } catch {
         // Swallow — profile fetch failure is non-critical.
       }
     },
@@ -196,7 +196,7 @@ export function useCloudProjectSession({
         if (error) {
           setStatusMessage(`Erreur log cloud: ${error.message}`);
         }
-      } catch (err: unknown) {
+      } catch {
         // Swallow — log failure should not block the main operation.
       }
     },
@@ -442,9 +442,6 @@ export function useCloudProjectSession({
     setCloudLatestUpdatedAt(currentProject.updated_at);
   }, [cloudProjectId, cloudProjects, setCloudLatestUpdatedAt]);
 
-  // eslint-disable-next-line react-hooks/exhaustive-deps -- we intentionally
-  // depend on authUser?.id (stable string) instead of the authUser object
-  // reference which changes on every TOKEN_REFRESHED event.
   const authUserId = authUser?.id ?? null;
   useEffect(() => {
     if (!cloudProjectId || !authUserId) return;

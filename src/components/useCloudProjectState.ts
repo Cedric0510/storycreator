@@ -14,15 +14,6 @@ import { getSupabaseBrowserClient } from "@/lib/supabaseClient";
 
 export function useCloudProjectState(setStatusMessage: (message: string) => void) {
   const supabase = useMemo(() => getSupabaseBrowserClient(), []);
-  const supabaseProjectRef = useMemo(() => {
-    const rawUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
-    if (!rawUrl) return "n/a";
-    try {
-      return new URL(rawUrl).hostname.split(".")[0];
-    } catch {
-      return rawUrl;
-    }
-  }, []);
 
   const [authLoading, setAuthLoading] = useState(Boolean(supabase));
   const [authUser, setAuthUser] = useState<User | null>(null);
@@ -195,7 +186,6 @@ export function useCloudProjectState(setStatusMessage: (message: string) => void
 
   return {
     supabase,
-    supabaseProjectRef,
     authLoading,
     authUser,
     authEmailInput,

@@ -1,6 +1,5 @@
 "use client";
 
-import { useCallback } from "react";
 import {
   BaseEdge,
   EdgeLabelRenderer,
@@ -10,7 +9,6 @@ import {
   Node,
   NodeProps,
   Position,
-  useReactFlow,
 } from "@xyflow/react";
 
 import { HelpHint } from "@/components/HelpHint";
@@ -32,7 +30,7 @@ type StoryEditorNode = Node<StoryNodeData>;
 function DialogueOutputs({ block }: { block: DialogueBlock }) {
   return (
     <div className="story-node-dialogue-outputs">
-      {block.lines.map((line, lineIndex) => (
+      {block.lines.map((line) => (
         <div key={line.id} className="story-node-dialogue-line-group">
           <div className="story-node-dialogue-line-header">
             <Handle

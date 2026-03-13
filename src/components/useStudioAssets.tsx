@@ -1,6 +1,6 @@
 "use client";
 
-import { ChangeEvent, useCallback, useEffect, useState } from "react";
+import { ChangeEvent, useCallback, useEffect, useRef, useState } from "react";
 import JSZip from "jszip";
 import { SupabaseClient, User } from "@supabase/supabase-js";
 
@@ -19,6 +19,7 @@ import {
   putAssetBlob,
   getAssetBlob,
   getAssetObjectURL,
+  isCachedAssetObjectURL,
   deleteAssetBlobs,
   clearAllAssetBlobs,
   revokeAllObjectURLs,
@@ -68,38 +69,106 @@ export function useStudioAssets({
 }: UseStudioAssetsParams) {
   const [assetRefs, setAssetRefs] = useState<Record<string, AssetRef>>({});
   const [assetPreviewSrcById, setAssetPreviewSrcById] = useState<Record<string, string>>({});
+  const isMountedRef = useRef(true);
+  const assetRefsRef = useRef(assetRefs);
+  const assetPreviewSrcByIdRef = useRef(assetPreviewSrcById);
+  const inFlightPreviewByIdRef = useRef(new Map<string, Promise<string | null>>());
 
-  // Revoke all Object URLs on unmount to avoid leaks
-  useEffect(() => revokeAllObjectURLs, []);
+  useEffect(() => {
+    assetRefsRef.current = assetRefs;
+  }, [assetRefs]);
+
+  useEffect(() => {
+    assetPreviewSrcByIdRef.current = assetPreviewSrcById;
+  }, [assetPreviewSrcById]);
+
+  // Revoke all Object URLs on unmount to avoid leaks.
+  // In React Strict Mode (dev), effects mount/cleanup twice: re-arm mounted flag on mount.
+  useEffect(() => {
+    isMountedRef.current = true;
+    const inFlightMap = inFlightPreviewByIdRef.current;
+    return () => {
+      isMountedRef.current = false;
+      inFlightMap.clear();
+      revokeAllObjectURLs();
+    };
+  }, []);
 
   const ensureAssetPreviewSrc = useCallback(
     async (assetId: string | null) => {
       if (!assetId) return null;
-      if (assetPreviewSrcById[assetId]) return assetPreviewSrcById[assetId];
 
-      // Try IndexedDB first — returns a lightweight Object URL (no base64 copy)
-      try {
-        const objectUrl = await getAssetObjectURL(assetId);
-        if (objectUrl) {
-          setAssetPreviewSrcById((current) => ({ ...current, [assetId]: objectUrl }));
-          return objectUrl;
+      const cachedPreviewSrc = assetPreviewSrcByIdRef.current[assetId];
+      if (cachedPreviewSrc) {
+        const isBlobUrl = cachedPreviewSrc.startsWith("blob:");
+        if (!isBlobUrl || isCachedAssetObjectURL(assetId, cachedPreviewSrc)) {
+          return cachedPreviewSrc;
         }
-      } catch { /* IndexedDB unavailable — fall through to cloud */ }
 
-      // Fallback: fetch from Supabase Storage via signed URL
-      const ref = assetRefs[assetId];
-      if (!ref?.storagePath || !supabase || !authUser) return null;
+        // URL was evicted/revoked by LRU: drop stale entry, then reload a fresh URL below.
+        if (isMountedRef.current) {
+          setAssetPreviewSrcById((current) => {
+            if (current[assetId] !== cachedPreviewSrc) return current;
+            const next = { ...current };
+            delete next[assetId];
+            assetPreviewSrcByIdRef.current = next;
+            return next;
+          });
+        }
+      }
 
-      const bucket = ref.storageBucket ?? SUPABASE_ASSET_BUCKET;
-      const { data, error } = await supabase.storage
-        .from(bucket)
-        .createSignedUrl(ref.storagePath, 60 * 60);
-      if (error || !data?.signedUrl) return null;
+      const inFlight = inFlightPreviewByIdRef.current.get(assetId);
+      if (inFlight) return inFlight;
 
-      setAssetPreviewSrcById((current) => ({ ...current, [assetId]: data.signedUrl }));
-      return data.signedUrl;
+      const loadPreviewPromise = (async () => {
+        // Try IndexedDB first - returns a lightweight Object URL (no base64 copy).
+        try {
+          const objectUrl = await getAssetObjectURL(assetId);
+          if (objectUrl) {
+            if (isMountedRef.current) {
+              setAssetPreviewSrcById((current) => {
+                if (current[assetId] === objectUrl) return current;
+                const next = { ...current, [assetId]: objectUrl };
+                assetPreviewSrcByIdRef.current = next;
+                return next;
+              });
+            }
+            return objectUrl;
+          }
+        } catch {
+          // IndexedDB unavailable - fall through to cloud.
+        }
+
+        // Fallback: fetch from Supabase Storage via signed URL.
+        const ref = assetRefsRef.current[assetId];
+        if (!ref?.storagePath || !supabase || !authUser) return null;
+
+        const bucket = ref.storageBucket ?? SUPABASE_ASSET_BUCKET;
+        const { data, error } = await supabase.storage
+          .from(bucket)
+          .createSignedUrl(ref.storagePath, 60 * 60);
+        if (error || !data?.signedUrl) return null;
+
+        if (isMountedRef.current) {
+          setAssetPreviewSrcById((current) => {
+            if (current[assetId] === data.signedUrl) return current;
+            const next = { ...current, [assetId]: data.signedUrl };
+            assetPreviewSrcByIdRef.current = next;
+            return next;
+          });
+        }
+        return data.signedUrl;
+      })().catch(() => null);
+
+      inFlightPreviewByIdRef.current.set(assetId, loadPreviewPromise);
+      loadPreviewPromise.finally(() => {
+        if (inFlightPreviewByIdRef.current.get(assetId) === loadPreviewPromise) {
+          inFlightPreviewByIdRef.current.delete(assetId);
+        }
+      });
+      return loadPreviewPromise;
     },
-    [assetPreviewSrcById, assetRefs, authUser, supabase],
+    [authUser, supabase],
   );
 
   const registerAsset = useCallback((file: File) => {
@@ -114,7 +183,11 @@ export function useStudioAssets({
       storageBucket: null,
       storagePath: null,
     };
-    setAssetRefs((current) => ({ ...current, [assetId]: ref }));
+    setAssetRefs((current) => {
+      const next = { ...current, [assetId]: ref };
+      assetRefsRef.current = next;
+      return next;
+    });
     // Store file in IndexedDB (fire-and-forget — non-blocking for the UI)
     void putAssetBlob(assetId, file);
     return assetId;
@@ -144,15 +217,22 @@ export function useStudioAssets({
   );
 
   const clearAllAssetState = useCallback(() => {
+    assetRefsRef.current = {};
+    assetPreviewSrcByIdRef.current = {};
+    inFlightPreviewByIdRef.current.clear();
     setAssetRefs({});
     setAssetPreviewSrcById({});
+    revokeAllObjectURLs();
     void clearAllAssetBlobs();
   }, []);
 
   const hydrateAssetRefs = useCallback((nextRefs: Record<string, AssetRef>) => {
+    assetRefsRef.current = nextRefs;
+    assetPreviewSrcByIdRef.current = {};
+    inFlightPreviewByIdRef.current.clear();
     setAssetRefs(nextRefs);
     setAssetPreviewSrcById({});
-    // Don't clear IndexedDB — cloud assets will be fetched on demand
+    // Don't clear IndexedDB - cloud assets will be fetched on demand
     // and locally cached blobs may still be valid.
     revokeAllObjectURLs();
   }, []);
@@ -346,6 +426,7 @@ export function useStudioAssets({
       for (const assetId of staleIds) {
         delete next[assetId];
       }
+      assetRefsRef.current = next;
       return next;
     });
 
@@ -353,7 +434,9 @@ export function useStudioAssets({
       const next = { ...current };
       for (const assetId of staleIds) {
         delete next[assetId];
+        inFlightPreviewByIdRef.current.delete(assetId);
       }
+      assetPreviewSrcByIdRef.current = next;
       return next;
     });
 
@@ -549,7 +632,14 @@ export function useStudioAssets({
       importedProject.activeMemberId = importedProject.members[0].id;
       importedProject.logs[0].memberId = importedProject.members[0].id;
 
-      // ── 6. Apply to local state ──
+      if (!isMountedRef.current) {
+        return null;
+      }
+
+      // 6. Apply to local state.
+      assetRefsRef.current = importedAssetRefs;
+      assetPreviewSrcByIdRef.current = {};
+      inFlightPreviewByIdRef.current.clear();
       setAssetRefs(importedAssetRefs);
       setAssetPreviewSrcById({});
       revokeAllObjectURLs();

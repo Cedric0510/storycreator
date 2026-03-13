@@ -35,7 +35,7 @@ type BlobRecord = {
   refCount: number;
 };
 
-const MAX_URLS = 40;
+const MAX_URLS = 200;
 const urlCache = new Map<string, string>(); // assetId -> objectURL (insertion order)
 const pendingWriteByAssetId = new Map<string, Promise<void>>();
 let migrationPromise: Promise<void> | null = null;
@@ -444,6 +444,11 @@ export async function getAssetObjectURL(assetId: string): Promise<string | null>
   urlCache.set(assetId, objectUrl);
   evictLRU();
   return objectUrl;
+}
+
+/** True when the given object URL is still alive in the in-memory LRU cache. */
+export function isCachedAssetObjectURL(assetId: string, objectUrl: string): boolean {
+  return urlCache.get(assetId) === objectUrl;
 }
 
 /** Revoke all Object URLs (call on unmount / full state reset). */

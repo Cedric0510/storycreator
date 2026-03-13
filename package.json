@@ -8,7 +8,10 @@
     "start": "next start",
     "lint": "eslint",
     "test": "vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "test:load": "playwright test -c playwright.load.config.ts",
+    "test:load:headed": "playwright test -c playwright.load.config.ts --headed",
+    "test:load:install": "playwright install chromium"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.97.0",
@@ -19,6 +22,7 @@
     "react-dom": "19.2.3"
   },
   "devDependencies": {
+    "@playwright/test": "^1.58.2",
     "@tailwindcss/postcss": "^4",
     "@types/node": "^20",
     "@types/react": "^19",

@@ -42,7 +42,6 @@ interface UseGameplayOperationsParams {
   canEdit: boolean;
   selectedBlock: StoryBlock | null;
   updateSelectedBlock: (updater: (block: StoryBlock) => StoryBlock) => void;
-  setStatusMessage: (message: string) => void;
 }
 
 /* ------------------------------------------------------------------ */
@@ -53,7 +52,6 @@ export function useGameplayOperations({
   canEdit,
   selectedBlock,
   updateSelectedBlock,
-  setStatusMessage,
 }: UseGameplayOperationsParams) {
 
   const [gameplayPlacementTarget, setGameplayPlacementTarget] =
@@ -369,7 +367,6 @@ export function useGameplayOperations({
     // Objects
     addGameplayObject,
     removeGameplayObject,
-    updateGameplayObject,
     updateGameplayObjectField,
     updateGameplayObjectRect,
     clearGameplayObjectAsset,

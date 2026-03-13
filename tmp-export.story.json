@@ -1,0 +1,169 @@
+{
+  "schemaVersion": "1.4.0",
+  "exportedAt": "2026-03-11T09:43:29.242Z",
+  "project": {
+    "id": "project_7ade6e2f",
+    "title": "Untitled Story",
+    "slug": "untitled-story",
+    "synopsis": "Prototype light novel data-driven.",
+    "startBlockId": "title_02d3e2e8",
+    "updatedAt": "2026-03-11T09:43:28.087Z",
+    "chapters": []
+  },
+  "variables": [
+    {
+      "id": "var_e284df63",
+      "name": "energie",
+      "initialValue": 0
+    },
+    {
+      "id": "var_83698da0",
+      "name": "relation_ami",
+      "initialValue": 0
+    }
+  ],
+  "itemsCatalog": [],
+  "hero": {
+    "name": "Hero",
+    "lore": "",
+    "baseStats": [],
+    "npcs": [],
+    "startingInventory": []
+  },
+  "blocks": [
+    {
+      "id": "title_02d3e2e8",
+      "type": "title",
+      "name": "Accueil histoire",
+      "position": {
+        "x": 70,
+        "y": 120
+      },
+      "notes": "",
+      "chapterId": null,
+      "entryEffects": [],
+      "storyTitle": "Nouvelle histoire",
+      "subtitle": "Un moteur de light novel",
+      "backgroundPath": null,
+      "buttonStyle": {
+        "backgroundColor": "#2563eb",
+        "textColor": "#f8fafc",
+        "borderColor": "#1d4ed8",
+        "radius": 14,
+        "fontSize": 16
+      },
+      "nextBlockId": "cinematic_fc121779"
+    },
+    {
+      "id": "cinematic_fc121779",
+      "type": "cinematic",
+      "name": "Scene intro",
+      "position": {
+        "x": 410,
+        "y": 120
+      },
+      "notes": "",
+      "chapterId": null,
+      "entryEffects": [],
+      "heading": "Prologue",
+      "body": "L'aube se leve sur la ville. Le joueur rejoint son equipe.",
+      "backgroundPath": null,
+      "characterPath": null,
+      "sceneLayout": {
+        "background": {
+          "x": 0,
+          "y": 0,
+          "width": 100,
+          "height": 100
+        },
+        "character": {
+          "x": 25,
+          "y": 10,
+          "width": 50,
+          "height": 80
+        }
+      },
+      "videoPath": null,
+      "voicePath": null,
+      "autoAdvanceSeconds": null,
+      "nextBlockId": "dialogue_ada90442"
+    },
+    {
+      "id": "dialogue_ada90442",
+      "type": "dialogue",
+      "name": "Premier choix",
+      "position": {
+        "x": 760,
+        "y": 280
+      },
+      "notes": "",
+      "chapterId": null,
+      "entryEffects": [],
+      "backgroundPath": null,
+      "characterPath": null,
+      "sceneLayout": {
+        "background": {
+          "x": 0,
+          "y": 0,
+          "width": 100,
+          "height": 100
+        },
+        "character": {
+          "x": 25,
+          "y": 10,
+          "width": 50,
+          "height": 80
+        }
+      },
+      "npcProfileBlockId": null,
+      "npcImageAssetId": null,
+      "npcImagePath": null,
+      "characterLayers": [],
+      "startLineId": "dline_8c28a45b",
+      "lines": [
+        {
+          "id": "dline_8c28a45b",
+          "speaker": "Ami",
+          "text": "As-tu bien dormi ?",
+          "voicePath": null,
+          "conditions": [],
+          "fallbackLineId": null,
+          "responses": [
+            {
+              "id": "resp_7f69faae",
+              "label": "A",
+              "text": "Oui",
+              "targetLineId": null,
+              "targetBlockId": null,
+              "effects": [],
+              "affinityEffects": []
+            },
+            {
+              "id": "resp_dc2f634d",
+              "label": "B",
+              "text": "Non",
+              "targetLineId": null,
+              "targetBlockId": null,
+              "effects": [],
+              "affinityEffects": []
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "graph": {
+    "edges": [
+      {
+        "source": "title_02d3e2e8",
+        "sourceHandle": "next",
+        "target": "cinematic_fc121779"
+      },
+      {
+        "source": "cinematic_fc121779",
+        "sourceHandle": "next",
+        "target": "dialogue_ada90442"
+      }
+    ]
+  }
+}

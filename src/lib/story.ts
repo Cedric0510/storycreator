@@ -586,21 +586,6 @@ function createDefaultChoiceOption(label: ChoiceLabel): ChoiceOption {
   };
 }
 
-function defaultGameplayOverlay(): GameplayOverlay {
-  return {
-    id: createId("overlay"),
-    name: "Objet",
-    assetId: null,
-    x: 35,
-    y: 35,
-    width: 20,
-    height: 20,
-    zIndex: 2,
-    visibleByDefault: true,
-    draggable: false,
-  };
-}
-
 export function defaultGameplayObject(): GameplayObject {
   return {
     id: createId("gobj"),
@@ -642,27 +627,6 @@ export function defaultGameplayLink(
   };
 }
 
-function defaultGameplayHotspot(): GameplayHotspot {
-  return {
-    id: createId("hotspot"),
-    name: "Zone cliquable",
-    required: true,
-    message: "",
-    toggleOverlayId: null,
-    soundAssetId: null,
-    effects: [],
-    onClickActions: [],
-    requiredItemId: null,
-    consumeRequiredItem: false,
-    lockedMessage: "",
-    acceptOverlayId: null,
-    x: 35,
-    y: 35,
-    width: 20,
-    height: 20,
-  };
-}
-
 export function createGameplayHotspotClickAction(
   type: GameplayHotspotClickActionType = "message",
 ): GameplayHotspotClickAction {
@@ -696,58 +660,6 @@ export function createGameplayHotspotClickAction(
     type: "message",
     message: "",
   };
-}
-
-function normalizeHotspotAction(action: unknown): GameplayHotspotClickAction | null {
-  if (!action || typeof action !== "object") return null;
-  const candidate = action as Partial<GameplayHotspotClickAction>;
-  const id = typeof candidate.id === "string" && candidate.id ? candidate.id : createId("action");
-
-  if (candidate.type === "message") {
-    return {
-      id,
-      type: "message",
-      message: typeof candidate.message === "string" ? candidate.message : "",
-    };
-  }
-
-  if (candidate.type === "add_item") {
-    const rawQuantity = candidate.quantity;
-    const quantity =
-      typeof rawQuantity === "number" && Number.isFinite(rawQuantity) && rawQuantity > 0
-        ? Math.floor(rawQuantity)
-        : 1;
-    return {
-      id,
-      type: "add_item",
-      itemId: typeof candidate.itemId === "string" && candidate.itemId ? candidate.itemId : null,
-      quantity,
-    };
-  }
-
-  if (candidate.type === "disable_hotspot") {
-    return {
-      id,
-      type: "disable_hotspot",
-      targetHotspotId:
-        typeof candidate.targetHotspotId === "string" && candidate.targetHotspotId
-          ? candidate.targetHotspotId
-          : null,
-    };
-  }
-
-  if (candidate.type === "go_to_block") {
-    return {
-      id,
-      type: "go_to_block",
-      targetBlockId:
-        typeof candidate.targetBlockId === "string" && candidate.targetBlockId
-          ? candidate.targetBlockId
-          : null,
-    };
-  }
-
-  return null;
 }
 
 function normalizeVariableEffects(effects: unknown): VariableEffect[] {

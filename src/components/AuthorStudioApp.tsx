@@ -112,7 +112,56 @@ function normalizeProjectHero(
   };
 }
 
+function withCollapsedChapterFolders(
+  nodes: EditorNode[],
+  chapters: Chapter[],
+): EditorNode[] {
+  const baseNodes = nodes.filter((node) => node.type !== "chapterFolder");
+  const collapsedChapters = chapters.filter((chapter) => chapter.collapsed);
+  if (collapsedChapters.length === 0) return baseNodes;
+
+  const chapterStartById = new Map<string, EditorNode>();
+  for (const node of baseNodes) {
+    const block = node.data.block as StoryBlock;
+    if (block.type === "chapter_start" && block.chapterId) {
+      chapterStartById.set(block.chapterId, node);
+    }
+  }
+
+  const existingFolders = new Map(
+    nodes
+      .filter((node) => node.type === "chapterFolder")
+      .map((node) => [node.id, node] as const),
+  );
+
+  const folderNodes: EditorNode[] = collapsedChapters.map((chapter) => {
+    const folderId = `folder-${chapter.id}`;
+    const existing = existingFolders.get(folderId);
+    if (existing) return existing;
+
+    const chapterStartNode = chapterStartById.get(chapter.id);
+    return {
+      id: folderId,
+      type: "chapterFolder",
+      position: chapterStartNode?.position ?? { x: 200, y: 200 },
+      data: {
+        block: {
+          id: folderId,
+          type: "chapter_start",
+          name: chapter.name,
+        } as unknown as StoryBlock,
+        isStart: false,
+        hasError: false,
+        hasWarning: false,
+      },
+    };
+  });
+
+  return [...baseNodes, ...folderNodes];
+}
+
 export function AuthorStudioApp() {
+  const MAX_TOASTS = 8;
   const [seed] = useState<InitialStudio>(() => buildInitialStudio());
   const [nodes, setNodes] = useState<EditorNode[]>(seed.nodes);
   const [edges, setEdges] = useState<EditorEdge[]>(seed.edges);
@@ -124,7 +173,11 @@ export function AuthorStudioApp() {
   const [statusMessage, setStatusMessage] = useState<string>("");
   const [toasts, setToasts] = useState<Array<{ id: number; text: string; level: "info" | "warn" | "error"; exiting: boolean }>>([]);
   const toastIdRef = useRef(0);
+  const toastTimersRef = useRef(new Map<number, { exitTimer: number; removeTimer: number }>());
+  const toastsRef = useRef<typeof toasts>([]);
   const importZipInputRef = useRef<HTMLInputElement | null>(null);
+  const [isImportingZip, setIsImportingZip] = useState(false);
+  const [rightPanelHidden, setRightPanelHidden] = useState(false);
   const [newVariableName, setNewVariableName] = useState("");
   const [ownPasswordInput, setOwnPasswordInput] = useState("");
   const [ownPasswordConfirmInput, setOwnPasswordConfirmInput] = useState("");
@@ -133,7 +186,6 @@ export function AuthorStudioApp() {
   const [adminCreateUserRole, setAdminCreateUserRole] = useState<PlatformRole>("reader");
   const {
     supabase,
-    supabaseProjectRef,
     authLoading,
     authUser,
     authEmailInput,
@@ -210,10 +262,6 @@ export function AuthorStudioApp() {
     return project.items.filter((item) => (previewState.inventory[item.id] ?? 0) > 0);
   }, [previewState, project.items]);
 
-  const activeMember = useMemo(
-    () => project.members.find((member) => member.id === project.activeMemberId) ?? null,
-    [project.activeMemberId, project.members],
-  );
   const lockHolder = useMemo(
     () =>
       project.members.find((member) => member.id === project.editingLockMemberId) ?? null,
@@ -249,6 +297,30 @@ export function AuthorStudioApp() {
     Boolean(cloudLatestUpdatedAt) &&
     cloudProjectUpdatedAt !== cloudLatestUpdatedAt;
   const canEdit = canUseAuthorTools && localCanEdit && cloudCanWrite && !cloudLockHeldByOther;
+
+  useEffect(() => {
+    if (!authUser) return;
+
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (!(event.ctrlKey || event.metaKey) || event.altKey) return;
+      if (event.key.toLowerCase() !== "b") return;
+
+      const target = event.target as HTMLElement | null;
+      const tagName = target?.tagName?.toLowerCase();
+      const isTypingTarget =
+        Boolean(target?.isContentEditable) ||
+        tagName === "input" ||
+        tagName === "textarea" ||
+        tagName === "select";
+      if (isTypingTarget) return;
+
+      event.preventDefault();
+      setRightPanelHidden((current) => !current);
+    };
+
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [authUser]);
 
   // ── Safety net: auto-reset cloudBusy if stuck for more than 120 s ──
   useEffect(() => {
@@ -571,7 +643,32 @@ export function AuthorStudioApp() {
   );
   const hasUnsavedChanges = currentFingerprint !== lastSavedFingerprint;
 
-  // ── Toast system: push statusMessage changes as auto-fading toasts ──
+  useEffect(() => {
+    toastsRef.current = toasts;
+  }, [toasts]);
+
+  const clearToastTimers = useCallback((toastId: number) => {
+    const timers = toastTimersRef.current.get(toastId);
+    if (!timers) return;
+    window.clearTimeout(timers.exitTimer);
+    window.clearTimeout(timers.removeTimer);
+    toastTimersRef.current.delete(toastId);
+  }, []);
+
+  const dismissToast = useCallback((toastId: number) => {
+    clearToastTimers(toastId);
+    setToasts((prev) => prev.filter((toast) => toast.id !== toastId));
+  }, [clearToastTimers]);
+
+  useEffect(() => () => {
+    for (const timers of toastTimersRef.current.values()) {
+      window.clearTimeout(timers.exitTimer);
+      window.clearTimeout(timers.removeTimer);
+    }
+    toastTimersRef.current.clear();
+  }, []);
+
+  // Toast system: push statusMessage changes as auto-fading toasts.
   const prevStatusRef = useRef("");
   useEffect(() => {
     if (!statusMessage || statusMessage === prevStatusRef.current) return;
@@ -586,18 +683,34 @@ export function AuthorStudioApp() {
         : "info";
 
     const id = ++toastIdRef.current;
-    setToasts((prev) => [...prev, { id, text: statusMessage, level, exiting: false }]);
+    setToasts((prev) => {
+      const next = [...prev, { id, text: statusMessage, level, exiting: false }];
+      if (next.length <= MAX_TOASTS) return next;
 
-    // Each toast manages its own independent timers — not tied to useEffect cleanup
-    // so that a new statusMessage never cancels a previous toast's removal.
-    window.setTimeout(() => {
-      setToasts((prev) => prev.map((t) => (t.id === id ? { ...t, exiting: true } : t)));
+      const overflow = next.length - MAX_TOASTS;
+      const evicted = next.slice(0, overflow);
+      for (const toast of evicted) {
+        clearToastTimers(toast.id);
+      }
+      return next.slice(overflow);
+    });
+
+    const exitTimer = window.setTimeout(() => {
+      if (!toastsRef.current.some((toast) => toast.id === id)) {
+        clearToastTimers(id);
+        return;
+      }
+      setToasts((prev) =>
+        prev.map((toast) => (toast.id === id ? { ...toast, exiting: true } : toast)),
+      );
     }, 4200);
 
-    window.setTimeout(() => {
-      setToasts((prev) => prev.filter((t) => t.id !== id));
+    const removeTimer = window.setTimeout(() => {
+      dismissToast(id);
     }, 4600);
-  }, [statusMessage]);
+
+    toastTimersRef.current.set(id, { exitTimer, removeTimer });
+  }, [MAX_TOASTS, clearToastTimers, dismissToast, statusMessage]);
 
   const markStudioClean = useCallback(
     (fingerprint?: string) => {
@@ -1409,7 +1522,6 @@ export function AuthorStudioApp() {
     resetGameplayState,
     addGameplayObject,
     removeGameplayObject,
-    updateGameplayObject,
     updateGameplayObjectField,
     updateGameplayObjectRect,
     clearGameplayObjectAsset,
@@ -1429,7 +1541,6 @@ export function AuthorStudioApp() {
     canEdit,
     selectedBlock,
     updateSelectedBlock,
-    setStatusMessage,
   });
 
   const {
@@ -1467,9 +1578,12 @@ export function AuthorStudioApp() {
       normalizedProject.items,
     );
 
+    const hydratedNodes = withCollapsedChapterFolders(normalizedNodes, normalizedProject.chapters);
+    const hydratedEdges = rebuildEdgesFromNodes(normalizedNodes);
+
     setProject(normalizedProject);
-    setNodes(normalizedNodes);
-    setEdges(rebuildEdgesFromNodes(normalizedNodes));
+    setNodes(hydratedNodes);
+    setEdges(hydratedEdges);
     hydrateAssetRefs(payload.assetRefs ?? {});
     resetGameplayState();
     setCloudEditingLockUserId(null);
@@ -1481,8 +1595,8 @@ export function AuthorStudioApp() {
     markStudioClean(
       buildStudioChangeFingerprint(
         normalizedProject,
-        normalizedNodes,
-        rebuildEdgesFromNodes(normalizedNodes),
+        hydratedNodes,
+        hydratedEdges,
         payload.assetRefs ?? {},
       ),
     );
@@ -1914,29 +2028,41 @@ export function AuthorStudioApp() {
     if (!file) return;
     event.target.value = "";
 
-    const result = await importFromZip(file);
-    if (!result) return;
+    if (isImportingZip) {
+      setStatusMessage("Import ZIP deja en cours.");
+      return;
+    }
 
-    setProject(result.project);
-    setNodes(result.nodes);
-    setEdges(result.edges);
-    resetGameplayState();
-    setSelectedBlockId(result.project.info.startBlockId ?? null);
-    setLastValidation([]);
-    resetPreview();
-    setCloudProjectId(null);
-    setCloudOwnerId(null);
-    setCloudEditingLockUserId(null);
-    setCloudProjectUpdatedAt(null);
-    setCloudLatestUpdatedAt(null);
-    setCloudAccessLevel(null);
-    setCloudAccessRows([]);
-    setCloudLogs([]);
-    setCloudProfiles({});
-    setShareEmailInput("");
-    markStudioClean(
-      buildStudioChangeFingerprint(result.project, result.nodes, result.edges, result.assetRefs),
-    );
+    setIsImportingZip(true);
+    try {
+      const result = await importFromZip(file);
+      if (!result) return;
+
+      const importedNodes = withCollapsedChapterFolders(result.nodes, result.project.chapters);
+
+      setProject(result.project);
+      setNodes(importedNodes);
+      setEdges(result.edges);
+      resetGameplayState();
+      setSelectedBlockId(result.project.info.startBlockId ?? null);
+      setLastValidation([]);
+      resetPreview();
+      setCloudProjectId(null);
+      setCloudOwnerId(null);
+      setCloudEditingLockUserId(null);
+      setCloudProjectUpdatedAt(null);
+      setCloudLatestUpdatedAt(null);
+      setCloudAccessLevel(null);
+      setCloudAccessRows([]);
+      setCloudLogs([]);
+      setCloudProfiles({});
+      setShareEmailInput("");
+      markStudioClean(
+        buildStudioChangeFingerprint(result.project, importedNodes, result.edges, result.assetRefs),
+      );
+    } finally {
+      setIsImportingZip(false);
+    }
   };
 
   return (
@@ -2001,9 +2127,18 @@ export function AuthorStudioApp() {
           <button
             className="button-secondary nav-action-button nav-action-preview"
             onClick={startPreview}
-            disabled={!authUser}
+            disabled={!authUser || isImportingZip}
           >
             Preview
+          </button>
+          <button
+            className="button-secondary nav-action-button nav-action-layout"
+            onClick={() => setRightPanelHidden((current) => !current)}
+            disabled={!authUser}
+            title="Raccourci: Ctrl+B"
+            aria-keyshortcuts="Control+B Meta+B"
+          >
+            {rightPanelHidden ? "Afficher panneau droit" : "Masquer panneau droit"}
           </button>
           <button
             className="button-primary nav-action-button nav-action-export"
@@ -2015,9 +2150,9 @@ export function AuthorStudioApp() {
           <button
             className="button-secondary nav-action-button nav-action-import"
             onClick={() => importZipInputRef.current?.click()}
-            disabled={!authUser || !canUseAuthorTools}
+            disabled={!authUser || !canUseAuthorTools || isImportingZip}
           >
-            Import ZIP
+            {isImportingZip ? "Import en cours..." : "Import ZIP"}
           </button>
           <input
             ref={importZipInputRef}
@@ -2054,7 +2189,7 @@ export function AuthorStudioApp() {
               <span className="toast-message">{toast.text}</span>
               <button
                 className="toast-close"
-                onClick={() => setToasts((prev) => prev.filter((t) => t.id !== toast.id))}
+                onClick={() => dismissToast(toast.id)}
                 title="Fermer"
               >×</button>
             </div>
@@ -2062,7 +2197,7 @@ export function AuthorStudioApp() {
         </div>
       )}
 
-      <div className="studio-grid">
+      <div className={`studio-grid${rightPanelHidden ? " studio-grid-right-hidden" : ""}`}>
         <div className="panel-left-stack">
           <AuthorStudioCloudPanel
             supabaseEnabled={Boolean(supabase)}
@@ -2228,70 +2363,72 @@ export function AuthorStudioApp() {
               </ReactFlow>
             </main>
 
-            <AuthorStudioBlockEditorPanel
-              selectedBlock={selectedBlock}
-              canEdit={canEdit}
-              project={project}
-              blocks={blocks}
-              visibleIssues={visibleIssues}
-              onDeleteSelectedBlock={deleteSelectedBlock}
-              onDuplicateSelectedBlock={duplicateSelectedBlock}
-              onRunValidation={runValidation}
-              onSetStartBlock={setStartBlock}
-              onSetSelectedDynamicField={setSelectedDynamicField}
-              onUpdateSelectedBlock={updateSelectedBlock}
-              onSetConnection={setConnection}
-              onAssetInput={onAssetInput}
-              renderAssetAttachment={renderAssetAttachment}
-              renderAssetAttachmentWithRemove={renderAssetAttachmentWithRemove}
-              onAddDialogueLine={addDialogueLine}
-              onRemoveDialogueLine={removeDialogueLine}
-              onUpdateDialogueLineField={updateDialogueLineField}
-              onDialogueLineVoiceInput={onDialogueLineVoiceInput}
-              renderLineVoiceAttachment={renderLineVoiceAttachment}
-              onAddDialogueLineResponse={addDialogueLineResponse}
-              onRemoveDialogueLineResponse={removeDialogueLineResponse}
-              onUpdateDialogueResponseField={updateDialogueResponseField}
-              onUpdateChoiceField={updateChoiceField}
-              onUnlinkDialogueNpcProfile={unlinkNpcProfileFromDialogue}
-              onAddChoiceOption={addChoiceOption}
-              onRemoveChoiceOption={removeChoiceOption}
-              onUpdateChoiceOptionDescription={updateChoiceOptionDescription}
-              onSetChoiceOptionImage={setChoiceOptionImage}
-              onClearChoiceOptionImage={clearChoiceOptionImage}
-              onAddBlockEntryEffect={addBlockEntryEffect}
-              onUpdateBlockEntryEffect={updateBlockEntryEffect}
-              onRemoveBlockEntryEffect={removeBlockEntryEffect}
-              onAddResponseEffect={addResponseEffect}
-              onUpdateResponseEffect={updateResponseEffect}
-              onRemoveResponseEffect={removeResponseEffect}
-              onAddChoiceEffect={addChoiceEffect}
-              onUpdateChoiceEffect={updateChoiceEffect}
-              onRemoveChoiceEffect={removeChoiceEffect}
-              onAddGameplayObject={addGameplayObject}
-              onRemoveGameplayObject={removeGameplayObject}
-              onUpdateGameplayObjectField={updateGameplayObjectField}
-              onUpdateGameplayObjectRect={updateGameplayObjectRect}
-              onClearGameplayObjectAsset={clearGameplayObjectAsset}
-              onClearGameplayObjectSound={clearGameplayObjectSound}
-              onAddGameplayObjectEffect={addGameplayObjectEffect}
-              onUpdateGameplayObjectEffect={updateGameplayObjectEffect}
-              onRemoveGameplayObjectEffect={removeGameplayObjectEffect}
-              onAddGameplayCompletionEffect={addGameplayCompletionEffect}
-              onUpdateGameplayCompletionEffect={updateGameplayCompletionEffect}
-              onRemoveGameplayCompletionEffect={removeGameplayCompletionEffect}
-              gameplayPlacementTarget={gameplayPlacementTarget}
-              onSetGameplayPlacementTarget={setGameplayPlacementTarget}
-              onStartGameplayObjectDrag={startGameplayObjectDrag}
-              onStartGameplayObjectResize={startGameplayObjectResize}
-              onGameplaySceneClick={onGameplaySceneClick}
-              onGameplayScenePointerMove={onGameplayScenePointerMove}
-              onGameplayScenePointerEnd={onGameplayScenePointerEnd}
-              assetPreviewSrcById={assetPreviewSrcById}
-              onRegisterAsset={registerAsset}
-              onEnsureAssetPreviewSrc={ensureAssetPreviewSrc}
-              onStatusMessage={setStatusMessage}
-            />
+            {!rightPanelHidden && (
+              <AuthorStudioBlockEditorPanel
+                selectedBlock={selectedBlock}
+                canEdit={canEdit}
+                project={project}
+                blocks={blocks}
+                visibleIssues={visibleIssues}
+                onDeleteSelectedBlock={deleteSelectedBlock}
+                onDuplicateSelectedBlock={duplicateSelectedBlock}
+                onRunValidation={runValidation}
+                onSetStartBlock={setStartBlock}
+                onSetSelectedDynamicField={setSelectedDynamicField}
+                onUpdateSelectedBlock={updateSelectedBlock}
+                onSetConnection={setConnection}
+                onAssetInput={onAssetInput}
+                renderAssetAttachment={renderAssetAttachment}
+                renderAssetAttachmentWithRemove={renderAssetAttachmentWithRemove}
+                onAddDialogueLine={addDialogueLine}
+                onRemoveDialogueLine={removeDialogueLine}
+                onUpdateDialogueLineField={updateDialogueLineField}
+                onDialogueLineVoiceInput={onDialogueLineVoiceInput}
+                renderLineVoiceAttachment={renderLineVoiceAttachment}
+                onAddDialogueLineResponse={addDialogueLineResponse}
+                onRemoveDialogueLineResponse={removeDialogueLineResponse}
+                onUpdateDialogueResponseField={updateDialogueResponseField}
+                onUpdateChoiceField={updateChoiceField}
+                onUnlinkDialogueNpcProfile={unlinkNpcProfileFromDialogue}
+                onAddChoiceOption={addChoiceOption}
+                onRemoveChoiceOption={removeChoiceOption}
+                onUpdateChoiceOptionDescription={updateChoiceOptionDescription}
+                onSetChoiceOptionImage={setChoiceOptionImage}
+                onClearChoiceOptionImage={clearChoiceOptionImage}
+                onAddBlockEntryEffect={addBlockEntryEffect}
+                onUpdateBlockEntryEffect={updateBlockEntryEffect}
+                onRemoveBlockEntryEffect={removeBlockEntryEffect}
+                onAddResponseEffect={addResponseEffect}
+                onUpdateResponseEffect={updateResponseEffect}
+                onRemoveResponseEffect={removeResponseEffect}
+                onAddChoiceEffect={addChoiceEffect}
+                onUpdateChoiceEffect={updateChoiceEffect}
+                onRemoveChoiceEffect={removeChoiceEffect}
+                onAddGameplayObject={addGameplayObject}
+                onRemoveGameplayObject={removeGameplayObject}
+                onUpdateGameplayObjectField={updateGameplayObjectField}
+                onUpdateGameplayObjectRect={updateGameplayObjectRect}
+                onClearGameplayObjectAsset={clearGameplayObjectAsset}
+                onClearGameplayObjectSound={clearGameplayObjectSound}
+                onAddGameplayObjectEffect={addGameplayObjectEffect}
+                onUpdateGameplayObjectEffect={updateGameplayObjectEffect}
+                onRemoveGameplayObjectEffect={removeGameplayObjectEffect}
+                onAddGameplayCompletionEffect={addGameplayCompletionEffect}
+                onUpdateGameplayCompletionEffect={updateGameplayCompletionEffect}
+                onRemoveGameplayCompletionEffect={removeGameplayCompletionEffect}
+                gameplayPlacementTarget={gameplayPlacementTarget}
+                onSetGameplayPlacementTarget={setGameplayPlacementTarget}
+                onStartGameplayObjectDrag={startGameplayObjectDrag}
+                onStartGameplayObjectResize={startGameplayObjectResize}
+                onGameplaySceneClick={onGameplaySceneClick}
+                onGameplayScenePointerMove={onGameplayScenePointerMove}
+                onGameplayScenePointerEnd={onGameplayScenePointerEnd}
+                assetPreviewSrcById={assetPreviewSrcById}
+                onRegisterAsset={registerAsset}
+                onEnsureAssetPreviewSrc={ensureAssetPreviewSrc}
+                onStatusMessage={setStatusMessage}
+              />
+            )}
           </>
         ) : (
           <main className="panel panel-canvas">
@@ -2377,4 +2514,3 @@ export function AuthorStudioApp() {
     </div>
   );
 }
-
