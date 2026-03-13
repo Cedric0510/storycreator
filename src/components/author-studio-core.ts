@@ -592,11 +592,19 @@ export function removeItemReferences(block: StoryBlock, removedItemId: string): 
 
   return {
     ...block,
-    objects: block.objects.map((obj) =>
-      obj.grantItemId === removedItemId
-        ? { ...obj, grantItemId: null }
-        : obj,
-    ),
+    objects: block.objects.map((obj) => {
+      const clearGrantItem = obj.grantItemId === removedItemId;
+      const clearLockRequiredItem =
+        obj.objectType === "lock" && obj.requiredItemId === removedItemId;
+      if (!clearGrantItem && !clearLockRequiredItem) {
+        return obj;
+      }
+      return {
+        ...obj,
+        grantItemId: clearGrantItem ? null : obj.grantItemId,
+        requiredItemId: clearLockRequiredItem ? null : obj.requiredItemId,
+      };
+    }),
   };
 }
 
@@ -834,6 +842,9 @@ export function serializeBlock(
       objectType: obj.objectType,
       grantItemId: obj.grantItemId,
       linkedKeyId: obj.linkedKeyId,
+      lockInputMode: obj.lockInputMode,
+      requiredItemId: obj.requiredItemId,
+      consumeRequiredItem: obj.consumeRequiredItem,
       targetBlockId: obj.targetBlockId,
       unlockEffect: obj.unlockEffect,
       lockedMessage: obj.lockedMessage,
@@ -1054,6 +1065,9 @@ export function deserializeBlockFromExport(
       objectType: (o.objectType as string) ?? undefined,
       grantItemId: (o.grantItemId as string) ?? null,
       linkedKeyId: (o.linkedKeyId as string) ?? null,
+      lockInputMode: (o.lockInputMode as string) ?? undefined,
+      requiredItemId: (o.requiredItemId as string) ?? null,
+      consumeRequiredItem: typeof o.consumeRequiredItem === "boolean" ? o.consumeRequiredItem : false,
       targetBlockId: (o.targetBlockId as string) ?? null,
       unlockEffect: (o.unlockEffect as string) ?? undefined,
       lockedMessage: (o.lockedMessage as string) ?? "",

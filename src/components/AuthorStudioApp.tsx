@@ -257,6 +257,8 @@ export function AuthorStudioApp() {
     pickPreviewChoice,
     pickPreviewObject,
     dropKeyOnLock,
+    dropInventoryItemOnLock,
+    equipPreviewInventoryItem,
     resetPreview,
   } = usePreviewRuntime({
     project,
@@ -267,10 +269,53 @@ export function AuthorStudioApp() {
     () => new Map(project.variables.map((variable) => [variable.id, variable.name])),
     [project.variables],
   );
+  const previewInventoryCatalog = useMemo(() => {
+    const catalog = new Map<string, { id: string; name: string; iconAssetId: string | null }>();
+    for (const item of project.items) {
+      catalog.set(item.id, {
+        id: item.id,
+        name: item.name,
+        iconAssetId: item.iconAssetId,
+      });
+    }
+    for (const candidateBlock of blocks) {
+      if (candidateBlock.type !== "gameplay") continue;
+      for (const obj of candidateBlock.objects) {
+        if (obj.objectType !== "collectible") continue;
+        const inventoryItemId = obj.grantItemId ?? obj.id;
+        const existing = catalog.get(inventoryItemId);
+        const blockName = candidateBlock.name.trim();
+        const fallbackName =
+          obj.name.trim() || (blockName ? `Objet (${blockName})` : "Objet collectible");
+        if (!existing) {
+          catalog.set(inventoryItemId, {
+            id: inventoryItemId,
+            name: fallbackName,
+            iconAssetId: obj.assetId ?? null,
+          });
+          continue;
+        }
+        if (!existing.iconAssetId && obj.assetId) {
+          catalog.set(inventoryItemId, {
+            ...existing,
+            iconAssetId: obj.assetId,
+          });
+        }
+      }
+    }
+    return Array.from(catalog.values());
+  }, [blocks, project.items]);
   const previewInventoryItems = useMemo(() => {
     if (!previewState) return [];
-    return project.items.filter((item) => (previewState.inventory[item.id] ?? 0) > 0);
-  }, [previewState, project.items]);
+    return previewInventoryCatalog
+      .map((item) => ({
+        id: item.id,
+        name: item.name,
+        iconAssetId: item.iconAssetId,
+        quantity: previewState.inventory[item.id] ?? 0,
+      }))
+      .filter((item) => item.quantity > 0);
+  }, [previewInventoryCatalog, previewState]);
 
   const lockHolder = useMemo(
     () =>
@@ -876,7 +921,7 @@ export function AuthorStudioApp() {
 
   useEffect(() => {
     const timer = window.setTimeout(() => {
-      for (const item of project.items) {
+      for (const item of previewInventoryCatalog) {
         if (item.iconAssetId) {
           void ensureAssetPreviewSrc(item.iconAssetId);
         }
@@ -886,7 +931,7 @@ export function AuthorStudioApp() {
     return () => {
       window.clearTimeout(timer);
     };
-  }, [ensureAssetPreviewSrc, project.items]);
+  }, [ensureAssetPreviewSrc, previewInventoryCatalog]);
 
   const touchProject = useCallback(() => {
     setProject((current) => ({
@@ -3221,6 +3266,7 @@ export function AuthorStudioApp() {
           previewGameplayCompleted={previewGameplayCompleted}
           previewGameplayProgressLabel={previewGameplayProgressLabel}
           previewInventoryItems={previewInventoryItems}
+          equippedInventoryItemId={previewState?.equippedInventoryItemId ?? null}
           projectVariables={project.variables}
           assetPreviewSrcById={assetPreviewSrcById}
           blockById={blockById}
@@ -3230,6 +3276,8 @@ export function AuthorStudioApp() {
           onPickChoice={pickPreviewChoice}
           onPickObject={pickPreviewObject}
           onDropKeyOnLock={dropKeyOnLock}
+          onDropInventoryItemOnLock={dropInventoryItemOnLock}
+          onEquipInventoryItem={equipPreviewInventoryItem}
         />
       )}
     </div>

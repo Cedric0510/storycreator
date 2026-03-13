@@ -1,4 +1,4 @@
-import { ChangeEvent, MouseEvent, PointerEvent as ReactPointerEvent, ReactNode, useCallback, useEffect, useRef, useState } from "react";
+import { ChangeEvent, MouseEvent, PointerEvent as ReactPointerEvent, ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import {
   GAMEPLAY_BUTTON_SEQUENCE_FAILURE_HANDLE,
@@ -18,6 +18,7 @@ import {
   DEFAULT_SCENE_LAYOUT,
   DialogueBlock,
   GameplayBlock,
+  GameplayLockInputMode,
   GameplayObject,
   GameplayObjectType,
   GameplayUnlockEffect,
@@ -1952,6 +1953,10 @@ function GameplayEditorSection({
     disappear: "Disparait de la scene",
     modify_stats: "Modifie les stats",
   };
+  const lockInputModeLabels: Record<GameplayLockInputMode, string> = {
+    scene_key: "Cle dans la scene",
+    inventory_item: "Item inventaire",
+  };
 
   const linkableBlocks = blocks.filter(
     (candidate) =>
@@ -1963,12 +1968,31 @@ function GameplayEditorSection({
 
   // Build keyÃƒÂ¢Ã¢â‚¬Â Ã¢â‚¬â„¢lock arrow pairs for the scene overlay
   const keyLockPairs = block.objects
-    .filter((o) => o.objectType === "lock" && o.linkedKeyId)
+    .filter((o) => o.objectType === "lock" && o.lockInputMode !== "inventory_item" && o.linkedKeyId)
     .map((lock) => {
       const key = block.objects.find((o) => o.id === lock.linkedKeyId);
       return key ? { key, lock } : null;
     })
     .filter(Boolean) as { key: GameplayObject; lock: GameplayObject }[];
+  const inventoryItemOptions = useMemo(() => {
+    const optionsById = new Map<string, { id: string; name: string }>();
+    for (const item of project.items) {
+      optionsById.set(item.id, { id: item.id, name: item.name });
+    }
+    for (const candidate of blocks) {
+      if (candidate.type !== "gameplay") continue;
+      for (const candidateObject of candidate.objects) {
+        if (candidateObject.objectType !== "collectible") continue;
+        const inventoryItemId = candidateObject.grantItemId ?? candidateObject.id;
+        if (optionsById.has(inventoryItemId)) continue;
+        const objectName = candidateObject.name.trim();
+        const blockName = candidate.name.trim();
+        const name = objectName || (blockName ? `Objet de ${blockName}` : "Objet collectible");
+        optionsById.set(inventoryItemId, { id: inventoryItemId, name });
+      }
+    }
+    return Array.from(optionsById.values());
+  }, [blocks, project.items]);
 
   return (
     <div className="subsection">
@@ -2178,7 +2202,14 @@ function GameplayEditorSection({
                     const nextObject: GameplayObject = { ...o, objectType: nextType };
                     if (nextType !== "lock") {
                       nextObject.linkedKeyId = null;
+                      nextObject.lockInputMode = "scene_key";
+                      nextObject.requiredItemId = null;
+                      nextObject.consumeRequiredItem = false;
                       nextObject.targetBlockId = null;
+                    } else if (o.objectType !== "lock") {
+                      nextObject.lockInputMode = "scene_key";
+                      nextObject.requiredItemId = null;
+                      nextObject.consumeRequiredItem = false;
                     }
                     if (nextType !== "collectible") {
                       nextObject.grantItemId = null;
@@ -2289,6 +2320,43 @@ function GameplayEditorSection({
           {obj.objectType === "lock" && (
             <>
               <label>
+                Source deverrouillage
+                <select
+                  value={obj.lockInputMode}
+                  onChange={(event) => {
+                    const nextMode = event.target.value as GameplayLockInputMode;
+                    onUpdateSelectedBlock((candidate) => {
+                      if (candidate.type !== "gameplay") return candidate;
+                      return {
+                        ...candidate,
+                        objects: candidate.objects.map((candidateObject) => {
+                          if (candidateObject.id !== obj.id) return candidateObject;
+                          if (nextMode === "inventory_item") {
+                            return {
+                              ...candidateObject,
+                              lockInputMode: nextMode,
+                              linkedKeyId: null,
+                            };
+                          }
+                          return {
+                            ...candidateObject,
+                            lockInputMode: nextMode,
+                            requiredItemId: null,
+                            consumeRequiredItem: false,
+                          };
+                        }),
+                      };
+                    });
+                  }}
+                  disabled={!canEdit}
+                >
+                  {(Object.keys(lockInputModeLabels) as GameplayLockInputMode[]).map((key) => (
+                    <option key={key} value={key}>{lockInputModeLabels[key]}</option>
+                  ))}
+                </select>
+              </label>
+              {obj.lockInputMode === "scene_key" && (
+              <label>
                 Cle associee
                 <select
                   value={obj.linkedKeyId ?? ""}
@@ -2303,6 +2371,35 @@ function GameplayEditorSection({
                     ))}
                 </select>
               </label>
+              )}
+              {obj.lockInputMode === "inventory_item" && (
+                <>
+                  <label>
+                    Item requis
+                    <select
+                      value={obj.requiredItemId ?? ""}
+                      onChange={(event) => onUpdateGameplayObjectField(obj.id, "requiredItemId", event.target.value || null)}
+                      disabled={!canEdit}
+                    >
+                      <option value="">Aucun</option>
+                      {inventoryItemOptions.map((item) => (
+                        <option key={item.id} value={item.id}>{item.name}</option>
+                      ))}
+                    </select>
+                  </label>
+                  <label>
+                    Consommer item
+                    <select
+                      value={obj.consumeRequiredItem ? "yes" : "no"}
+                      onChange={(event) => onUpdateGameplayObjectField(obj.id, "consumeRequiredItem", event.target.value === "yes")}
+                      disabled={!canEdit}
+                    >
+                      <option value="no">non</option>
+                      <option value="yes">oui</option>
+                    </select>
+                  </label>
+                </>
+              )}
               <label>
                 Effet au deverrouillage
                 <select

@@ -1,4 +1,4 @@
-export const STORY_SCHEMA_VERSION = "1.6.0";
+export const STORY_SCHEMA_VERSION = "1.7.0";
 
 export type BlockType =
   | "title"
@@ -14,13 +14,13 @@ export type ChoiceLabel = "A" | "B" | "C" | "D";
 export type GameplayMode = "point_and_click" | "map_move" | "static_scene";
 export type MemberRole = "owner" | "editor" | "viewer";
 
-/* ── V3 gameplay: ultra-simplified 4-type object model ───────── */
+/* â”€â”€ V3 gameplay: ultra-simplified 4-type object model â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
 
 /** What kind of object is this? */
 export type GameplayObjectType =
-  | "decoration"    // Not interactive — just visual
+  | "decoration"    // Not interactive â€” just visual
   | "collectible"   // Goes to inventory on click
-  | "key"           // Draggable — must be dropped on its linked lock
+  | "key"           // Draggable â€” must be dropped on its linked lock
   | "lock"          // Waits for its linked key, then triggers unlock effect
   | "button";       // Clickable button used in an ordered sequence
 
@@ -29,6 +29,8 @@ export type GameplayUnlockEffect =
   | "go_to_next"    // Advance to the next block
   | "disappear"     // Lock (and key) disappear
   | "modify_stats"; // Apply variable effects (future)
+
+export type GameplayLockInputMode = "scene_key" | "inventory_item";
 
 export interface GameplayObject {
   id: string;
@@ -45,6 +47,12 @@ export interface GameplayObject {
   grantItemId: string | null;
   /** For lock: which "key" object unlocks this lock */
   linkedKeyId: string | null;
+  /** For lock: where the unlock requirement comes from (scene key or inventory item). */
+  lockInputMode: GameplayLockInputMode;
+  /** For lock with inventory_item mode: required inventory item id. */
+  requiredItemId: string | null;
+  /** For lock with inventory_item mode: consume one item when unlocked. */
+  consumeRequiredItem: boolean;
   /** Optional branch target when this lock unlocks (null = end of story). */
   targetBlockId: string | null;
   /** For lock: what happens on unlock */
@@ -59,7 +67,7 @@ export interface GameplayObject {
   effects: VariableEffect[];
 }
 
-/* ── Legacy V2 link types (kept for migration only) ──────────── */
+/* â”€â”€ Legacy V2 link types (kept for migration only) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
 
 export type GameplayObjectAction =
   | "pick_up" | "inspect" | "push" | "go_to_block" | "none";
@@ -84,7 +92,7 @@ export interface GameplayLink {
   consumeSource: boolean;
 }
 
-/* ── Legacy V1 gameplay types (kept for migration) ────────────── */
+/* â”€â”€ Legacy V1 gameplay types (kept for migration) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
 export type GameplayHotspotClickActionType =
   | "message"
   | "add_item"
@@ -363,7 +371,7 @@ export interface GameplayBlock extends BaseBlock {
   buttonSequenceFailureBlockId: string | null;
   completionEffects: VariableEffect[];
   nextBlockId: string | null;
-  /* ── Legacy fields (kept for migration, not used in V3 UI) ── */
+  /* â”€â”€ Legacy fields (kept for migration, not used in V3 UI) â”€â”€ */
   links?: GameplayLink[];
   completionMode?: "all_interactive" | "manual_count";
   completionCount?: number;
@@ -610,6 +618,9 @@ export function defaultGameplayObject(): GameplayObject {
     objectType: "decoration",
     grantItemId: null,
     linkedKeyId: null,
+    lockInputMode: "scene_key",
+    requiredItemId: null,
+    consumeRequiredItem: false,
     targetBlockId: null,
     unlockEffect: "go_to_next",
     lockedMessage: "",
@@ -619,7 +630,7 @@ export function defaultGameplayObject(): GameplayObject {
   };
 }
 
-/** @deprecated Legacy — only used for migration */
+/** @deprecated Legacy â€” only used for migration */
 export function defaultGameplayLink(
   sourceObjectId: string,
   targetObjectId: string,
@@ -896,7 +907,7 @@ export function createBlock(type: BlockType, position: XYPosition): StoryBlock {
 export function normalizeGameplayBlock(block: GameplayBlock): GameplayBlock {
   const raw = block as unknown as Record<string, unknown>;
 
-  // ── Detect data generation ──
+  // â”€â”€ Detect data generation â”€â”€
   const hasV1 =
     (Array.isArray(raw.overlays) && (raw.overlays as unknown[]).length > 0) ||
     (Array.isArray(raw.hotspots) && (raw.hotspots as unknown[]).length > 0);
@@ -904,8 +915,23 @@ export function normalizeGameplayBlock(block: GameplayBlock): GameplayBlock {
   // V3 objects have "objectType"; V2 had "action"
   const isV3 = hasObjects && (raw.objects as Record<string, unknown>[])[0]?.objectType != null;
 
-  // ── Helper: normalize a single V3 object ──
+  // â”€â”€ Helper: normalize a single V3 object â”€â”€
   function normObj(obj: Record<string, unknown>): GameplayObject {
+    const objectType = (["decoration", "collectible", "key", "lock", "button"] as string[]).includes(obj.objectType as string)
+      ? (obj.objectType as GameplayObjectType)
+      : "decoration";
+    const lockInputModeRaw = typeof obj.lockInputMode === "string" ? obj.lockInputMode : "";
+    const inferredLockInputMode: GameplayLockInputMode =
+      typeof obj.requiredItemId === "string" && obj.requiredItemId ? "inventory_item" : "scene_key";
+    const lockInputMode: GameplayLockInputMode =
+      lockInputModeRaw === "inventory_item" || lockInputModeRaw === "scene_key"
+        ? (lockInputModeRaw as GameplayLockInputMode)
+        : inferredLockInputMode;
+    const requiredItemId =
+      typeof obj.requiredItemId === "string" && obj.requiredItemId ? obj.requiredItemId : null;
+    const consumeRequiredItem =
+      typeof obj.consumeRequiredItem === "boolean" ? obj.consumeRequiredItem : false;
+
     return {
       id: (obj.id as string) ?? createId("gobj"),
       name: typeof obj.name === "string" ? obj.name : "Objet",
@@ -916,11 +942,12 @@ export function normalizeGameplayBlock(block: GameplayBlock): GameplayBlock {
       height: Number.isFinite(obj.height) ? (obj.height as number) : 15,
       zIndex: Number.isFinite(obj.zIndex) ? (obj.zIndex as number) : 2,
       visibleByDefault: typeof obj.visibleByDefault === "boolean" ? obj.visibleByDefault : true,
-      objectType: (["decoration", "collectible", "key", "lock", "button"] as string[]).includes(obj.objectType as string)
-        ? (obj.objectType as GameplayObjectType)
-        : "decoration",
+      objectType,
       grantItemId: typeof obj.grantItemId === "string" && obj.grantItemId ? obj.grantItemId : null,
       linkedKeyId: typeof obj.linkedKeyId === "string" && obj.linkedKeyId ? obj.linkedKeyId : null,
+      lockInputMode: objectType === "lock" ? lockInputMode : "scene_key",
+      requiredItemId: objectType === "lock" ? requiredItemId : null,
+      consumeRequiredItem: objectType === "lock" ? consumeRequiredItem : false,
       targetBlockId: typeof obj.targetBlockId === "string" && obj.targetBlockId ? obj.targetBlockId : null,
       unlockEffect: (["go_to_next", "disappear", "modify_stats"] as string[]).includes(obj.unlockEffect as string)
         ? (obj.unlockEffect as GameplayUnlockEffect)
@@ -935,14 +962,14 @@ export function normalizeGameplayBlock(block: GameplayBlock): GameplayBlock {
   let objects: GameplayObject[] = [];
 
   if (isV3) {
-    // ── Already V3: just normalize field values ──
+    // â”€â”€ Already V3: just normalize field values â”€â”€
     objects = (raw.objects as Record<string, unknown>[]).map(normObj);
   } else if (hasObjects) {
-    // ── V2 → V3 migration: convert action + links to 4-type model ──
+    // â”€â”€ V2 â†’ V3 migration: convert action + links to 4-type model â”€â”€
     const v2Objs = raw.objects as Record<string, unknown>[];
     const v2Links = Array.isArray(raw.links) ? (raw.links as Record<string, unknown>[]) : [];
 
-    // Map V2 action → V3 objectType
+    // Map V2 action â†’ V3 objectType
     const actionToType: Record<string, GameplayObjectType> = {
       pick_up: "collectible",
       push: "key",
@@ -968,6 +995,9 @@ export function normalizeGameplayBlock(block: GameplayBlock): GameplayBlock {
         objectType: actionToType[action] ?? "decoration",
         grantItemId: typeof v2.grantItemId === "string" && v2.grantItemId ? v2.grantItemId : null,
         linkedKeyId: null,
+        lockInputMode: "scene_key",
+        requiredItemId: null,
+        consumeRequiredItem: false,
         targetBlockId: null,
         unlockEffect: "go_to_next",
         lockedMessage: "",
@@ -988,6 +1018,7 @@ export function normalizeGameplayBlock(block: GameplayBlock): GameplayBlock {
         source.objectType = "key";
         target.objectType = "lock";
         target.linkedKeyId = sourceId;
+        target.lockInputMode = "scene_key";
         target.lockedMessage = typeof link.lockedMessage === "string" ? link.lockedMessage : "";
         target.successMessage = typeof link.successMessage === "string" ? link.successMessage : "";
         target.unlockEffect = link.result === "go_to_block" ? "go_to_next" : "disappear";
@@ -1000,7 +1031,7 @@ export function normalizeGameplayBlock(block: GameplayBlock): GameplayBlock {
 
     objects = Array.from(objMap.values());
   } else if (hasV1) {
-    // ── V1 → V3 migration: convert overlays+hotspots directly ──
+    // â”€â”€ V1 â†’ V3 migration: convert overlays+hotspots directly â”€â”€
     const legacyOverlays = Array.isArray(raw.overlays) ? (raw.overlays as GameplayOverlay[]) : [];
     const legacyHotspots = Array.isArray(raw.hotspots) ? (raw.hotspots as GameplayHotspot[]) : [];
 
@@ -1013,7 +1044,7 @@ export function normalizeGameplayBlock(block: GameplayBlock): GameplayBlock {
         zIndex: ov.zIndex,
         visibleByDefault: ov.visibleByDefault,
         objectType: "decoration",
-        grantItemId: null, linkedKeyId: null, targetBlockId: null,
+        grantItemId: null, linkedKeyId: null, lockInputMode: "scene_key", requiredItemId: null, consumeRequiredItem: false, targetBlockId: null,
         unlockEffect: "go_to_next", lockedMessage: "", successMessage: "",
         soundAssetId: null,
         effects: [],
@@ -1039,6 +1070,9 @@ export function normalizeGameplayBlock(block: GameplayBlock): GameplayBlock {
         objectType,
         grantItemId,
         linkedKeyId: null,
+        lockInputMode: "scene_key",
+        requiredItemId: null,
+        consumeRequiredItem: false,
         targetBlockId: null,
         unlockEffect: "go_to_next", lockedMessage: hs.lockedMessage || "", successMessage: "",
         soundAssetId: hs.soundAssetId,
@@ -1377,6 +1411,15 @@ export function validateStoryBlocks(
   const issues: ValidationIssue[] = [];
   const blockById = new Map(blocks.map((block) => [block.id, block]));
   const itemIds = new Set(items.map((item) => item.id));
+  const collectibleInventoryIds = new Set<string>();
+  for (const block of blocks) {
+    if (block.type !== "gameplay") continue;
+    for (const obj of block.objects) {
+      if (obj.objectType !== "collectible") continue;
+      collectibleInventoryIds.add(obj.grantItemId ?? obj.id);
+    }
+  }
+  const inventoryItemIds = new Set([...itemIds, ...collectibleInventoryIds]);
   const titleCount = blocks.filter((block) => block.type === "title").length;
 
   if (titleCount === 0) {
@@ -1659,19 +1702,38 @@ export function validateStoryBlocks(
             blockId: block.id,
           });
         }
-        if (obj.objectType === "lock" && obj.linkedKeyId && !objectIds.has(obj.linkedKeyId)) {
-          issues.push({
-            level: "error",
-            message: `La serrure "${obj.name}" pointe vers une cle introuvable.`,
-            blockId: block.id,
-          });
-        }
-        if (obj.objectType === "lock" && !obj.linkedKeyId) {
-          issues.push({
-            level: "warning",
-            message: `La serrure "${obj.name}" n'a aucune cle associee.`,
-            blockId: block.id,
-          });
+        if (obj.objectType === "lock") {
+          if (obj.lockInputMode === "inventory_item") {
+            if (obj.requiredItemId && !inventoryItemIds.has(obj.requiredItemId)) {
+              issues.push({
+                level: "error",
+                message: `La serrure "${obj.name}" exige un item introuvable.`,
+                blockId: block.id,
+              });
+            }
+            if (!obj.requiredItemId) {
+              issues.push({
+                level: "warning",
+                message: `La serrure "${obj.name}" n'a aucun item d'inventaire associe.`,
+                blockId: block.id,
+              });
+            }
+          } else {
+            if (obj.linkedKeyId && !objectIds.has(obj.linkedKeyId)) {
+              issues.push({
+                level: "error",
+                message: `La serrure "${obj.name}" pointe vers une cle introuvable.`,
+                blockId: block.id,
+              });
+            }
+            if (!obj.linkedKeyId) {
+              issues.push({
+                level: "warning",
+                message: `La serrure "${obj.name}" n'a aucune cle associee.`,
+                blockId: block.id,
+              });
+            }
+          }
         }
         if (obj.objectType === "lock" && obj.targetBlockId && !blockById.has(obj.targetBlockId)) {
           issues.push({
@@ -1682,7 +1744,7 @@ export function validateStoryBlocks(
         }
         if (obj.objectType === "key") {
           const hasLock = block.objects.some(
-            (o) => o.objectType === "lock" && o.linkedKeyId === obj.id,
+            (o) => o.objectType === "lock" && o.lockInputMode !== "inventory_item" && o.linkedKeyId === obj.id,
           );
           if (!hasLock) {
             issues.push({
@@ -1729,3 +1791,4 @@ export function validateStoryBlocks(
 
   return issues;
 }
+

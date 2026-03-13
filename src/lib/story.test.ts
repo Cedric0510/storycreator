@@ -54,6 +54,9 @@ describe("story gameplay schema", () => {
         objectType: "button",
         grantItemId: null,
         linkedKeyId: null,
+        lockInputMode: "scene_key",
+        requiredItemId: null,
+        consumeRequiredItem: false,
         targetBlockId: null,
         unlockEffect: "go_to_next",
         lockedMessage: "",
@@ -74,6 +77,9 @@ describe("story gameplay schema", () => {
         objectType: "button",
         grantItemId: null,
         linkedKeyId: null,
+        lockInputMode: "scene_key",
+        requiredItemId: null,
+        consumeRequiredItem: false,
         targetBlockId: null,
         unlockEffect: "go_to_next",
         lockedMessage: "",
@@ -94,6 +100,9 @@ describe("story gameplay schema", () => {
         objectType: "button",
         grantItemId: null,
         linkedKeyId: null,
+        lockInputMode: "scene_key",
+        requiredItemId: null,
+        consumeRequiredItem: false,
         targetBlockId: null,
         unlockEffect: "go_to_next",
         lockedMessage: "",
@@ -142,6 +151,9 @@ describe("story gameplay schema", () => {
         objectType: "lock",
         grantItemId: null,
         linkedKeyId: "key_missing",
+        lockInputMode: "scene_key",
+        requiredItemId: null,
+        consumeRequiredItem: false,
         targetBlockId: null,
         unlockEffect: "go_to_next",
         lockedMessage: "",
@@ -177,6 +189,9 @@ describe("story gameplay schema", () => {
         objectType: "lock",
         grantItemId: null,
         linkedKeyId: null,
+        lockInputMode: "scene_key",
+        requiredItemId: null,
+        consumeRequiredItem: false,
         targetBlockId: null,
         unlockEffect: "go_to_next",
         lockedMessage: "",
@@ -197,6 +212,146 @@ describe("story gameplay schema", () => {
     ).toBe(true);
   });
 
+  it("warns when inventory lock has no required item", () => {
+    const title = createBlock("title", { x: 0, y: 0 });
+    const gameplay = createBlock("gameplay", { x: 50, y: 50 }) as GameplayBlock;
+
+    gameplay.objects = [
+      {
+        id: "lock-inv-1",
+        name: "Serrure inventaire",
+        assetId: null,
+        soundAssetId: null,
+        x: 10, y: 10, width: 20, height: 20, zIndex: 1,
+        visibleByDefault: true,
+        objectType: "lock",
+        grantItemId: null,
+        linkedKeyId: null,
+        lockInputMode: "inventory_item",
+        requiredItemId: null,
+        consumeRequiredItem: false,
+        targetBlockId: null,
+        unlockEffect: "go_to_next",
+        lockedMessage: "",
+        successMessage: "",
+        effects: [],
+      },
+    ];
+
+    const issues = validateStoryBlocks([title, gameplay], title.id);
+
+    expect(
+      issues.some(
+        (issue) =>
+          issue.level === "warning" &&
+          issue.blockId === gameplay.id &&
+          issue.message.includes("item d'inventaire"),
+      ),
+    ).toBe(true);
+  });
+
+  it("does not warn about missing key for inventory lock", () => {
+    const title = createBlock("title", { x: 0, y: 0 });
+    const gameplay = createBlock("gameplay", { x: 50, y: 50 }) as GameplayBlock;
+
+    gameplay.objects = [
+      {
+        id: "lock-inv-2",
+        name: "Serrure inventaire",
+        assetId: null,
+        soundAssetId: null,
+        x: 10, y: 10, width: 20, height: 20, zIndex: 1,
+        visibleByDefault: true,
+        objectType: "lock",
+        grantItemId: null,
+        linkedKeyId: null,
+        lockInputMode: "inventory_item",
+        requiredItemId: "item-1",
+        consumeRequiredItem: false,
+        targetBlockId: null,
+        unlockEffect: "go_to_next",
+        lockedMessage: "",
+        successMessage: "",
+        effects: [],
+      },
+    ];
+
+    const issues = validateStoryBlocks(
+      [title, gameplay],
+      title.id,
+      [{ id: "item-1", name: "Cle USB", description: "", iconAssetId: null }],
+    );
+
+    expect(
+      issues.some(
+        (issue) =>
+          issue.blockId === gameplay.id &&
+          issue.message.includes("aucune cle associee"),
+      ),
+    ).toBe(false);
+  });
+
+  it("accepts inventory lock requiring a collectible fallback id", () => {
+    const title = createBlock("title", { x: 0, y: 0 });
+    const gameplayCollect = createBlock("gameplay", { x: 50, y: 50 }) as GameplayBlock;
+    const gameplayLock = createBlock("gameplay", { x: 80, y: 80 }) as GameplayBlock;
+
+    gameplayCollect.objects = [
+      {
+        id: "collect-1",
+        name: "Badge",
+        assetId: null,
+        soundAssetId: null,
+        x: 10, y: 10, width: 20, height: 20, zIndex: 1,
+        visibleByDefault: true,
+        objectType: "collectible",
+        grantItemId: null,
+        linkedKeyId: null,
+        lockInputMode: "scene_key",
+        requiredItemId: null,
+        consumeRequiredItem: false,
+        targetBlockId: null,
+        unlockEffect: "go_to_next",
+        lockedMessage: "",
+        successMessage: "",
+        effects: [],
+      },
+    ];
+
+    gameplayLock.objects = [
+      {
+        id: "lock-inv-3",
+        name: "Porte badge",
+        assetId: null,
+        soundAssetId: null,
+        x: 10, y: 10, width: 20, height: 20, zIndex: 1,
+        visibleByDefault: true,
+        objectType: "lock",
+        grantItemId: null,
+        linkedKeyId: null,
+        lockInputMode: "inventory_item",
+        requiredItemId: "collect-1",
+        consumeRequiredItem: false,
+        targetBlockId: null,
+        unlockEffect: "go_to_next",
+        lockedMessage: "",
+        successMessage: "",
+        effects: [],
+      },
+    ];
+
+    const issues = validateStoryBlocks([title, gameplayCollect, gameplayLock], title.id, []);
+
+    expect(
+      issues.some(
+        (issue) =>
+          issue.level === "error" &&
+          issue.blockId === gameplayLock.id &&
+          issue.message.includes("item introuvable"),
+      ),
+    ).toBe(false);
+  });
+
   it("warns when key has no associated lock", () => {
     const title = createBlock("title", { x: 0, y: 0 });
     const gameplay = createBlock("gameplay", { x: 50, y: 50 }) as GameplayBlock;
@@ -212,6 +367,9 @@ describe("story gameplay schema", () => {
         objectType: "key",
         grantItemId: null,
         linkedKeyId: null,
+        lockInputMode: "scene_key",
+        requiredItemId: null,
+        consumeRequiredItem: false,
         targetBlockId: null,
         unlockEffect: "go_to_next",
         lockedMessage: "",
@@ -247,6 +405,9 @@ describe("story gameplay schema", () => {
         objectType: "collectible",
         grantItemId: "item_missing",
         linkedKeyId: null,
+        lockInputMode: "scene_key",
+        requiredItemId: null,
+        consumeRequiredItem: false,
         targetBlockId: null,
         unlockEffect: "go_to_next",
         lockedMessage: "",
@@ -281,6 +442,9 @@ describe("story gameplay schema", () => {
         objectType: "lock",
         grantItemId: null,
         linkedKeyId: "key-1",
+        lockInputMode: "scene_key",
+        requiredItemId: null,
+        consumeRequiredItem: false,
         targetBlockId: "success-block",
         unlockEffect: "go_to_next",
         lockedMessage: "",
@@ -308,6 +472,9 @@ describe("story gameplay schema", () => {
         objectType: "button",
         grantItemId: null,
         linkedKeyId: null,
+        lockInputMode: "scene_key",
+        requiredItemId: null,
+        consumeRequiredItem: false,
         targetBlockId: null,
         unlockEffect: "go_to_next",
         lockedMessage: "",
@@ -342,6 +509,9 @@ describe("story gameplay schema", () => {
       objectType: "button" as const,
       grantItemId: null,
       linkedKeyId: null,
+      lockInputMode: "scene_key",
+      requiredItemId: null,
+      consumeRequiredItem: false,
       targetBlockId: null,
       unlockEffect: "go_to_next" as const,
       lockedMessage: "",
@@ -375,6 +545,9 @@ describe("story gameplay schema", () => {
           objectType: "lock",
           grantItemId: null,
           linkedKeyId: "key-1",
+          lockInputMode: "scene_key",
+          requiredItemId: null,
+          consumeRequiredItem: false,
           targetBlockId: 123 as unknown as string,
           unlockEffect: "go_to_next",
           lockedMessage: "",
@@ -582,3 +755,5 @@ describe("story dialogue block (multi-line)", () => {
     ).toBe(true);
   });
 });
+
+

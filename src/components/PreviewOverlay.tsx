@@ -15,7 +15,8 @@ export interface PreviewOverlayProps {
   previewInteractedSet: Set<string>;
   previewGameplayCompleted: boolean;
   previewGameplayProgressLabel: string;
-  previewInventoryItems: { id: string; name: string }[];
+  previewInventoryItems: { id: string; name: string; iconAssetId: string | null; quantity: number }[];
+  equippedInventoryItemId: string | null;
   projectVariables: { id: string; name: string }[];
   assetPreviewSrcById: Record<string, string>;
   blockById: Map<string, StoryBlock>;
@@ -25,6 +26,8 @@ export interface PreviewOverlayProps {
   onPickChoice: (choiceId: string) => void;
   onPickObject: (objectId: string) => void;
   onDropKeyOnLock: (keyId: string, lockId: string) => void;
+  onDropInventoryItemOnLock: (itemId: string, lockId: string) => void;
+  onEquipInventoryItem: (itemId: string | null) => void;
 }
 
 /* ------------------------------------------------------------------ */
@@ -37,8 +40,10 @@ interface GameplayPreviewSceneProps {
   previewInteractedSet: Set<string>;
   assetPreviewSrcById: Record<string, string>;
   bgSrc: string | undefined;
+  equippedInventoryItem: { id: string; name: string; iconSrc: string | undefined } | null;
   onPickObject: (objectId: string) => void;
   onDropKeyOnLock: (keyId: string, lockId: string) => void;
+  onDropInventoryItemOnLock: (itemId: string, lockId: string) => void;
 }
 
 function GameplayPreviewScene({
@@ -47,12 +52,15 @@ function GameplayPreviewScene({
   previewInteractedSet,
   assetPreviewSrcById,
   bgSrc,
+  equippedInventoryItem,
   onPickObject,
   onDropKeyOnLock,
+  onDropInventoryItemOnLock,
 }: GameplayPreviewSceneProps) {
   const sceneRef = useRef<HTMLDivElement>(null);
-  const [dragKey, setDragKey] = useState<{
-    keyId: string;
+  const [dragObject, setDragObject] = useState<{
+    kind: "key" | "inventory_item";
+    objectId: string;
     pointerId: number;
     startX: number;
     startY: number;
@@ -60,7 +68,7 @@ function GameplayPreviewScene({
     dy: number;
   } | null>(null);
 
-  const handlePointerDown = useCallback(
+  const handleKeyPointerDown = useCallback(
     (e: ReactPointerEvent<HTMLButtonElement>, objectId: string) => {
       const obj = block.objects.find((o) => o.id === objectId);
       if (!obj || obj.objectType !== "key") return;
@@ -69,8 +77,9 @@ function GameplayPreviewScene({
       const container = sceneRef.current;
       if (!container) return;
       container.setPointerCapture(e.pointerId);
-      setDragKey({
-        keyId: objectId,
+      setDragObject({
+        kind: "key",
+        objectId,
         pointerId: e.pointerId,
         startX: e.clientX,
         startY: e.clientY,
@@ -81,46 +90,79 @@ function GameplayPreviewScene({
     [block.objects],
   );
 
-  const handlePointerMove = useCallback(
-    (e: ReactPointerEvent<HTMLDivElement>) => {
-      if (!dragKey || e.pointerId !== dragKey.pointerId) return;
-      setDragKey({
-        ...dragKey,
-        dx: e.clientX - dragKey.startX,
-        dy: e.clientY - dragKey.startY,
+  const handleInventoryItemPointerDown = useCallback(
+    (e: ReactPointerEvent<HTMLButtonElement>) => {
+      if (!equippedInventoryItem) return;
+      e.preventDefault();
+      e.stopPropagation();
+      const container = sceneRef.current;
+      if (!container) return;
+      container.setPointerCapture(e.pointerId);
+      setDragObject({
+        kind: "inventory_item",
+        objectId: equippedInventoryItem.id,
+        pointerId: e.pointerId,
+        startX: e.clientX,
+        startY: e.clientY,
+        dx: 0,
+        dy: 0,
       });
     },
-    [dragKey],
+    [equippedInventoryItem],
+  );
+
+  const handlePointerMove = useCallback(
+    (e: ReactPointerEvent<HTMLDivElement>) => {
+      if (!dragObject || e.pointerId !== dragObject.pointerId) return;
+      setDragObject({
+        ...dragObject,
+        dx: e.clientX - dragObject.startX,
+        dy: e.clientY - dragObject.startY,
+      });
+    },
+    [dragObject],
   );
 
   const handlePointerUp = useCallback(
     (e: ReactPointerEvent<HTMLDivElement>) => {
-      if (!dragKey || e.pointerId !== dragKey.pointerId) return;
+      if (!dragObject || e.pointerId !== dragObject.pointerId) return;
       const container = sceneRef.current;
       if (container?.hasPointerCapture(e.pointerId)) {
         container.releasePointerCapture(e.pointerId);
       }
 
-      // Check if dropped on a lock
       const rect = container?.getBoundingClientRect();
       if (rect) {
         const xPct = ((e.clientX - rect.left) / rect.width) * 100;
         const yPct = ((e.clientY - rect.top) / rect.height) * 100;
-        const lock = block.objects.find(
-          (o) =>
-            o.objectType === "lock" &&
-            (previewState?.gameplayObjectVisibility[o.id] ?? o.visibleByDefault) &&
-            xPct >= o.x && xPct <= o.x + o.width &&
-            yPct >= o.y && yPct <= o.y + o.height,
-        );
-        if (lock) {
-          onDropKeyOnLock(dragKey.keyId, lock.id);
+        if (dragObject.kind === "key") {
+          const lock = block.objects.find(
+            (o) =>
+              o.objectType === "lock" &&
+              (previewState?.gameplayObjectVisibility[o.id] ?? o.visibleByDefault) &&
+              xPct >= o.x && xPct <= o.x + o.width &&
+              yPct >= o.y && yPct <= o.y + o.height,
+          );
+          if (lock) {
+            onDropKeyOnLock(dragObject.objectId, lock.id);
+          }
+        } else {
+          const lock = block.objects.find(
+            (o) =>
+              o.objectType === "lock" &&
+              (previewState?.gameplayObjectVisibility[o.id] ?? o.visibleByDefault) &&
+              xPct >= o.x && xPct <= o.x + o.width &&
+              yPct >= o.y && yPct <= o.y + o.height,
+          );
+          if (lock) {
+            onDropInventoryItemOnLock(dragObject.objectId, lock.id);
+          }
         }
       }
 
-      setDragKey(null);
+      setDragObject(null);
     },
-    [block.objects, dragKey, onDropKeyOnLock, previewState],
+    [block.objects, dragObject, onDropInventoryItemOnLock, onDropKeyOnLock, previewState],
   );
 
   const sl = block.sceneLayout;
@@ -157,7 +199,7 @@ function GameplayPreviewScene({
           if (!isVisible) return null;
           const interacted = previewInteractedSet.has(obj.id);
           const imgSrc = assetPreviewSrcById[obj.assetId ?? ""];
-          const isDragging = dragKey?.keyId === obj.id;
+          const isDragging = dragObject?.kind === "key" && dragObject.objectId === obj.id;
 
           return (
             <button
@@ -178,10 +220,10 @@ function GameplayPreviewScene({
                 backgroundSize: "contain",
                 backgroundRepeat: "no-repeat",
                 backgroundPosition: "center",
-                transform: isDragging ? `translate(${dragKey.dx}px, ${dragKey.dy}px)` : undefined,
+                transform: isDragging ? `translate(${dragObject.dx}px, ${dragObject.dy}px)` : undefined,
                 cursor: obj.objectType === "key" ? "grab" : undefined,
               }}
-              onPointerDown={(e) => handlePointerDown(e, obj.id)}
+              onPointerDown={(e) => handleKeyPointerDown(e, obj.id)}
               onClick={(e) => {
                 e.stopPropagation();
                 if (!isDragging) onPickObject(obj.id);
@@ -191,6 +233,35 @@ function GameplayPreviewScene({
             </button>
           );
         })}
+      {equippedInventoryItem && (
+        <button
+          type="button"
+          className={`preview-pointclick-floating-item${
+            dragObject?.kind === "inventory_item" ? " preview-pointclick-dragging" : ""
+          }`}
+          style={{
+            left: "50%",
+            top: "50%",
+            width: "14%",
+            height: "14%",
+            zIndex: dragObject?.kind === "inventory_item" ? 1000 : 996,
+            backgroundImage: equippedInventoryItem.iconSrc
+              ? `url(${equippedInventoryItem.iconSrc})`
+              : undefined,
+            backgroundSize: "contain",
+            backgroundRepeat: "no-repeat",
+            backgroundPosition: "center",
+            transform:
+              dragObject?.kind === "inventory_item"
+                ? `translate(calc(-50% + ${dragObject.dx}px), calc(-50% + ${dragObject.dy}px))`
+                : "translate(-50%, -50%)",
+          }}
+          onPointerDown={handleInventoryItemPointerDown}
+          onClick={(e) => e.stopPropagation()}
+        >
+          {!equippedInventoryItem.iconSrc && <span>{equippedInventoryItem.name}</span>}
+        </button>
+      )}
     </div>
   );
 }
@@ -206,6 +277,7 @@ export function PreviewOverlay({
   previewGameplayCompleted,
   previewGameplayProgressLabel,
   previewInventoryItems,
+  equippedInventoryItemId,
   projectVariables,
   assetPreviewSrcById,
   blockById,
@@ -215,7 +287,16 @@ export function PreviewOverlay({
   onPickChoice,
   onPickObject,
   onDropKeyOnLock,
+  onDropInventoryItemOnLock,
+  onEquipInventoryItem,
 }: PreviewOverlayProps) {
+  const [inventoryPanelOpen, setInventoryPanelOpen] = useState(false);
+  const equippedInventoryItem =
+    equippedInventoryItemId
+      ? previewInventoryItems.find((item) => item.id === equippedInventoryItemId) ?? null
+      : null;
+  const showInventoryPanel = previewBlock?.type === "gameplay" && inventoryPanelOpen;
+
   return (
     <div className="preview-overlay">
       {/* Left wing — reserved for future options */}
@@ -517,6 +598,9 @@ export function PreviewOverlay({
           {previewBlock?.type === "gameplay" && (() => {
             const bgSrc = assetPreviewSrcById[previewBlock.backgroundAssetId ?? ""];
             const voiceSrc = assetPreviewSrcById[previewBlock.voiceAssetId ?? ""];
+            const equippedItemIconSrc = equippedInventoryItem
+              ? assetPreviewSrcById[equippedInventoryItem.iconAssetId ?? ""]
+              : undefined;
             return (
               <div className="preview-vn-scene">
                 <div className="preview-vn-gameplay-hud">
@@ -524,7 +608,78 @@ export function PreviewOverlay({
                     {previewGameplayCompleted ? "✓ objectif atteint" : "objectif en cours"}
                   </span>
                   <small>{previewGameplayProgressLabel}</small>
+                  <button
+                    type="button"
+                    className="preview-vn-inventory-btn"
+                    onClick={() => setInventoryPanelOpen((open) => !open)}
+                  >
+                    Inventaire ({previewInventoryItems.length})
+                  </button>
                 </div>
+
+                {equippedInventoryItem && (
+                  <div className="preview-vn-equipped-item">
+                    {equippedItemIconSrc && (
+                      <img src={equippedItemIconSrc} alt={equippedInventoryItem.name} />
+                    )}
+                    <span>Equipe: {equippedInventoryItem.name}</span>
+                  </div>
+                )}
+
+                {showInventoryPanel && (
+                  <div className="preview-vn-inventory-panel">
+                    <div className="preview-vn-inventory-panel-header">
+                      <strong>Inventaire</strong>
+                      <button
+                        type="button"
+                        className="preview-status-btn"
+                        onClick={() => setInventoryPanelOpen(false)}
+                        title="Fermer inventaire"
+                      >
+                        âœ•
+                      </button>
+                    </div>
+                    {previewInventoryItems.length === 0 && (
+                      <p className="empty-placeholder">Aucun item.</p>
+                    )}
+                    {previewInventoryItems.length > 0 && (
+                      <div className="preview-vn-inventory-list">
+                        {previewInventoryItems.map((item) => {
+                          const iconSrc = assetPreviewSrcById[item.iconAssetId ?? ""];
+                          const isSelected = equippedInventoryItemId === item.id;
+                          return (
+                            <button
+                              key={item.id}
+                              type="button"
+                              className={`preview-vn-inventory-item${isSelected ? " is-selected" : ""}`}
+                              onClick={() => {
+                                onEquipInventoryItem(item.id);
+                                setInventoryPanelOpen(false);
+                              }}
+                            >
+                              {iconSrc ? (
+                                <img src={iconSrc} alt={item.name} />
+                              ) : (
+                                <span className="item-placeholder">item</span>
+                              )}
+                              <span className="item-label">{item.name}</span>
+                              <strong>x{item.quantity}</strong>
+                            </button>
+                          );
+                        })}
+                      </div>
+                    )}
+                    {equippedInventoryItemId && (
+                      <button
+                        type="button"
+                        className="button-secondary"
+                        onClick={() => onEquipInventoryItem(null)}
+                      >
+                        Retirer l&apos;item equipe
+                      </button>
+                    )}
+                  </div>
+                )}
 
                 {voiceSrc && (
                   <audio className="preview-vn-audio" src={voiceSrc} controls autoPlay />
@@ -536,8 +691,18 @@ export function PreviewOverlay({
                   previewInteractedSet={previewInteractedSet}
                   assetPreviewSrcById={assetPreviewSrcById}
                   bgSrc={bgSrc}
+                  equippedInventoryItem={
+                    equippedInventoryItem
+                      ? {
+                          id: equippedInventoryItem.id,
+                          name: equippedInventoryItem.name,
+                          iconSrc: assetPreviewSrcById[equippedInventoryItem.iconAssetId ?? ""],
+                        }
+                      : null
+                  }
                   onPickObject={onPickObject}
                   onDropKeyOnLock={onDropKeyOnLock}
+                  onDropInventoryItemOnLock={onDropInventoryItemOnLock}
                 />
 
                 {previewState?.gameplayMessage && (
@@ -589,7 +754,7 @@ export function PreviewOverlay({
                 {previewInventoryItems.map((item) => (
                   <li key={item.id}>
                     <span>{item.name}</span>
-                    <strong>{previewState.inventory[item.id] ?? 0}</strong>
+                    <strong>{item.quantity}</strong>
                   </li>
                 ))}
               </ul>
