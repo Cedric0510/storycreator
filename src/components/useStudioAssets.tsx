@@ -462,8 +462,9 @@ export function useStudioAssets({
   }, [assetRefs, blocks, logAction, project, removeAssetIdsFromState, setStatusMessage]);
 
   /**
-   * Import a previously-exported ZIP bundle and reconstruct all studio state:
+   * Import a previously-exported ZIP bundle and decode its payload:
    * project metadata, blocks/nodes/edges, asset refs (files stored in IndexedDB).
+   * This function does not mutate studio state directly; caller decides merge/replace strategy.
    * Returns { nodes, edges, project, assetRefs } on success, or null.
    */
   const importFromZip = useCallback(async (file: File): Promise<{
@@ -487,29 +488,32 @@ export function useStudioAssets({
       // ── 2. Extract all asset files from ZIP & build path→assetId index ──
       const pathToAssetId = new Map<string, string>();
       const importedAssetRefs: Record<string, AssetRef> = {};
+      const reservedAssetIds = new Set<string>(Object.keys(assetRefsRef.current));
 
       const assetEntries = Object.entries(zip.files).filter(
         ([name]) => name.startsWith("assets/") && !name.endsWith("/"),
       );
-
-      // Clear previous IndexedDB blobs before importing
-      await clearAllAssetBlobs();
 
       for (const [zipPath, zipEntry] of assetEntries) {
         const blob = await zipEntry.async("blob");
         const fileName = zipPath.split("/").pop() ?? zipPath;
         // Extract original assetId from the filename pattern: assets/{assetId}-{sanitizedName}
         const assetIdMatch = /^assets\/(\w+_[a-f0-9]+)-/.exec(zipPath);
-        const assetId = assetIdMatch ? assetIdMatch[1] : createId("asset");
+        let assetId = assetIdMatch ? assetIdMatch[1] : createId("asset");
+        while (reservedAssetIds.has(assetId) || importedAssetRefs[assetId]) {
+          assetId = createId("asset");
+        }
+        reservedAssetIds.add(assetId);
 
         const mimeType = guessMimeType(fileName);
+        const packagePath = `assets/${assetId}-${sanitizeFileName(fileName)}`;
 
         const ref: AssetRef = {
           id: assetId,
           fileName,
           mimeType,
           size: blob.size,
-          packagePath: zipPath,
+          packagePath,
           uploadedAt: new Date().toISOString(),
           storageBucket: null,
           storagePath: null,
@@ -636,18 +640,9 @@ export function useStudioAssets({
         return null;
       }
 
-      // 6. Apply to local state.
-      assetRefsRef.current = importedAssetRefs;
-      assetPreviewSrcByIdRef.current = {};
-      inFlightPreviewByIdRef.current.clear();
-      setAssetRefs(importedAssetRefs);
-      setAssetPreviewSrcById({});
-      revokeAllObjectURLs();
-
       setStatusMessage(
         `Import reussi: ${deserializedBlocks.length} bloc(s), ${assetEntries.length} asset(s) depuis ${file.name}.`,
       );
-      logAction("zip_import", `${deserializedBlocks.length} blocs, ${assetEntries.length} assets`);
 
       return {
         nodes: importedNodes,
@@ -661,7 +656,7 @@ export function useStudioAssets({
       setStatusMessage(`Erreur import ZIP: ${msg}`);
       return null;
     }
-  }, [logAction, setStatusMessage]);
+  }, [setStatusMessage]);
 
   return {
     assetRefs,
