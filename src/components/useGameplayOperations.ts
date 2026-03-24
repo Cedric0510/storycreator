@@ -2,7 +2,6 @@ import {
   MouseEvent,
   PointerEvent as ReactPointerEvent,
   useCallback,
-  useEffect,
   useState,
 } from "react";
 
@@ -55,6 +54,13 @@ interface UseGameplayOperationsParams {
   updateSelectedBlock: (updater: (block: StoryBlock) => StoryBlock) => void;
 }
 
+function asEditableGameplayBlock(
+  canEdit: boolean,
+  selectedBlock: StoryBlock | null,
+): GameplayBlock | null {
+  return canEdit && selectedBlock?.type === "gameplay" ? selectedBlock : null;
+}
+
 /* ------------------------------------------------------------------ */
 /*  Hook                                                               */
 /* ------------------------------------------------------------------ */
@@ -69,26 +75,22 @@ export function useGameplayOperations({
     useState<GameplayPlacementTarget | null>(null);
   const [gameplayDragState, setGameplayDragState] = useState<GameplayDragState | null>(null);
 
-  /* Auto-clear when selected block changes or is not gameplay */
-  useEffect(() => {
-    if (!selectedBlock || selectedBlock.type !== "gameplay") {
-      setGameplayPlacementTarget(null);
-      setGameplayDragState(null);
-      return;
-    }
-    if (gameplayDragState) {
-      const exists = selectedBlock.objects.some((o) => o.id === gameplayDragState.objectId);
-      if (!exists) setGameplayDragState(null);
-    }
-  }, [selectedBlock, gameplayDragState]);
-
   const resetGameplayState = useCallback(() => {
     setGameplayPlacementTarget(null);
     setGameplayDragState(null);
   }, []);
 
-  const asGameplay = (): GameplayBlock | null =>
-    canEdit && selectedBlock?.type === "gameplay" ? selectedBlock : null;
+  const gameplayBlock = asEditableGameplayBlock(canEdit, selectedBlock);
+  const activeGameplayPlacementTarget =
+    gameplayPlacementTarget &&
+    gameplayBlock?.objects.some((obj) => obj.id === gameplayPlacementTarget.objectId)
+      ? gameplayPlacementTarget
+      : null;
+  const activeGameplayDragState =
+    gameplayDragState &&
+    gameplayBlock?.objects.some((obj) => obj.id === gameplayDragState.objectId)
+      ? gameplayDragState
+      : null;
 
   /* ── Objects ── */
 
@@ -248,7 +250,7 @@ export function useGameplayOperations({
 
   const startGameplayObjectDrag = useCallback(
     (event: ReactPointerEvent<HTMLDivElement>, objectId: string) => {
-      const block = asGameplay();
+      const block = asEditableGameplayBlock(canEdit, selectedBlock);
       if (!block) return;
       const obj = block.objects.find((o) => o.id === objectId);
       if (!obj) return;
@@ -284,7 +286,7 @@ export function useGameplayOperations({
 
   const startGameplayObjectResize = useCallback(
     (event: ReactPointerEvent<HTMLDivElement>, objectId: string) => {
-      const block = asGameplay();
+      const block = asEditableGameplayBlock(canEdit, selectedBlock);
       if (!block) return;
       const obj = block.objects.find((o) => o.id === objectId);
       if (!obj) return;
@@ -319,8 +321,12 @@ export function useGameplayOperations({
   );
 
   const onGameplayScenePointerMove = (event: ReactPointerEvent<HTMLDivElement>) => {
-    if (!gameplayDragState) return;
-    if (event.pointerId !== gameplayDragState.pointerId) return;
+    if (gameplayDragState && !activeGameplayDragState) {
+      setGameplayDragState(null);
+      return;
+    }
+    if (!activeGameplayDragState) return;
+    if (event.pointerId !== activeGameplayDragState.pointerId) return;
 
     const container = event.currentTarget;
     const containerRect = container.getBoundingClientRect();
@@ -329,19 +335,19 @@ export function useGameplayOperations({
     const xPercent = ((event.clientX - containerRect.left) / containerRect.width) * 100;
     const yPercent = ((event.clientY - containerRect.top) / containerRect.height) * 100;
 
-    if (gameplayDragState.mode === "move") {
+    if (activeGameplayDragState.mode === "move") {
       moveGameplayObject(
-        gameplayDragState.objectId,
-        xPercent - gameplayDragState.offsetX,
-        yPercent - gameplayDragState.offsetY,
+        activeGameplayDragState.objectId,
+        xPercent - activeGameplayDragState.offsetX,
+        yPercent - activeGameplayDragState.offsetY,
       );
     } else {
       // resize: offset stores the pointer start position in %
-      const dxPercent = xPercent - gameplayDragState.offsetX;
-      const dyPercent = yPercent - gameplayDragState.offsetY;
-      const newW = gameplayDragState.origWidth + dxPercent;
-      const newH = gameplayDragState.origHeight + dyPercent;
-      updateGameplayObject(gameplayDragState.objectId, (obj) => ({
+      const dxPercent = xPercent - activeGameplayDragState.offsetX;
+      const dyPercent = yPercent - activeGameplayDragState.offsetY;
+      const newW = activeGameplayDragState.origWidth + dxPercent;
+      const newH = activeGameplayDragState.origHeight + dyPercent;
+      updateGameplayObject(activeGameplayDragState.objectId, (obj) => ({
         ...obj,
         width: sanitizeGameplaySize(newW, obj.width),
         height: sanitizeGameplaySize(newH, obj.height),
@@ -351,8 +357,12 @@ export function useGameplayOperations({
   };
 
   const onGameplayScenePointerEnd = (event: ReactPointerEvent<HTMLDivElement>) => {
-    if (!gameplayDragState) return;
-    if (event.pointerId !== gameplayDragState.pointerId) return;
+    if (gameplayDragState && !activeGameplayDragState) {
+      setGameplayDragState(null);
+      return;
+    }
+    if (!activeGameplayDragState) return;
+    if (event.pointerId !== activeGameplayDragState.pointerId) return;
     if (event.currentTarget.hasPointerCapture(event.pointerId)) {
       event.currentTarget.releasePointerCapture(event.pointerId);
     }
@@ -360,7 +370,12 @@ export function useGameplayOperations({
   };
 
   const onGameplaySceneClick = (event: MouseEvent<HTMLDivElement>) => {
-    if (!selectedBlock || selectedBlock.type !== "gameplay" || !gameplayPlacementTarget) return;
+    if (!gameplayBlock || !activeGameplayPlacementTarget) {
+      if (gameplayPlacementTarget) {
+        setGameplayPlacementTarget(null);
+      }
+      return;
+    }
     const container = event.currentTarget;
     const rect = container.getBoundingClientRect();
     if (rect.width <= 0 || rect.height <= 0) return;
@@ -368,13 +383,13 @@ export function useGameplayOperations({
     const xPercent = ((event.clientX - rect.left) / rect.width) * 100;
     const yPercent = ((event.clientY - rect.top) / rect.height) * 100;
 
-    const obj = selectedBlock.objects.find((o) => o.id === gameplayPlacementTarget.objectId);
+    const obj = gameplayBlock.objects.find((o) => o.id === activeGameplayPlacementTarget.objectId);
     if (!obj) return;
     moveGameplayObject(obj.id, xPercent - obj.width / 2, yPercent - obj.height / 2);
   };
 
   return {
-    gameplayPlacementTarget,
+    gameplayPlacementTarget: activeGameplayPlacementTarget,
     setGameplayPlacementTarget,
     resetGameplayState,
     // Objects

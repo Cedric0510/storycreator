@@ -409,6 +409,7 @@ export function ChoiceEditorSection({
               onClearChoiceOptionImage(option.id),
             )}
           {option.imageAssetId && assetPreviewSrcById[option.imageAssetId] && (
+            // eslint-disable-next-line @next/next/no-img-element -- local asset preview uses dynamic blob URLs.
             <img
               src={assetPreviewSrcById[option.imageAssetId]}
               alt={`Option ${option.label}`}

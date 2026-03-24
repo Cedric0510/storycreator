@@ -266,6 +266,7 @@ export function SceneComposer({
         onPointerUp={handlePointerUp}
         onPointerCancel={handlePointerUp}
       >
+        {/* eslint-disable-next-line @next/next/no-img-element -- editor scene uses dynamic blob URLs and free-form transforms. */}
         <img
           src={src}
           alt={label}

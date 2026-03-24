@@ -1,4 +1,5 @@
 "use client";
+/* eslint-disable @next/next/no-img-element -- preview renders dynamic asset/blob URLs with absolute scene layout. */
 
 import { PointerEvent as ReactPointerEvent, useCallback, useRef, useState } from "react";
 
@@ -706,7 +707,6 @@ export function PreviewOverlay({
             return (
               <div className="preview-vn-scene preview-vn-profile-scene">
                 {defaultImgSrc && (
-                  // eslint-disable-next-line @next/next/no-img-element
                   <img className="preview-vn-character" src={defaultImgSrc} alt={previewBlock.npcName || "PNJ"} />
                 )}
                 <div className="preview-vn-profile-card">
