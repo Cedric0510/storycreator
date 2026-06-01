@@ -22,6 +22,7 @@ import {
   StoryBlock,
   SwitchBlock,
   blockTypeColor,
+  describeSwitchCase,
 } from "@/lib/story";
 
 export interface StoryNodeData {
@@ -236,9 +237,7 @@ function SwitchOutputs({ block }: { block: SwitchBlock }) {
         <div key={item.id} className="story-node-choice-row">
           <span className="story-node-choice-label">C{index + 1}</span>
           <span className="story-node-choice-text">
-            {item.conditionType === "choice"
-              ? `Choix x${item.choiceConditions.length || 1}`
-              : `= ${item.expectedValue}`}
+            {describeSwitchCase(item)}
           </span>
           <Handle
             type="source"

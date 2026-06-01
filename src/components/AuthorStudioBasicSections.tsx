@@ -9,11 +9,16 @@ import { NextBlockSelect } from "@/components/AuthorStudioNextBlockSelect";
 import {
   BLOCK_LABELS,
   ChoiceBlock,
+  NpcProfileBlock,
   ProjectMeta,
   StoryBlock,
+  SwitchCondition,
+  SwitchConditionType,
   SwitchBlock,
   TitleBlock,
   createId,
+  createDefaultSwitchCondition,
+  syncSwitchCaseCompatibility,
 } from "@/lib/story";
 
 interface TitleEditorSectionProps {
@@ -179,60 +184,45 @@ export function SwitchEditorSection({
       candidate.type !== "npc_profile",
   );
   const choiceBlocks = blocks.filter((candidate): candidate is ChoiceBlock => candidate.type === "choice");
+  const npcBlocks = blocks.filter((candidate): candidate is NpcProfileBlock => candidate.type === "npc_profile");
   const choiceBlockById = new Map(choiceBlocks.map((choiceBlock) => [choiceBlock.id, choiceBlock]));
-  const hasValueCases = block.cases.some((item) => item.conditionType !== "choice");
-  const defaultChoiceCondition = () => ({
-    id: createId("switch_cond"),
-    choiceBlockId: choiceBlocks[0]?.id ?? null,
-    choiceOptionId: choiceBlocks[0]?.choices[0]?.id ?? null,
-  });
-  const withLegacyChoiceReference = (
-    caseItem: SwitchBlock["cases"][number],
-    conditions: SwitchBlock["cases"][number]["choiceConditions"],
-  ) => ({
-    ...caseItem,
-    choiceConditions: conditions,
-    choiceBlockId: conditions[0]?.choiceBlockId ?? null,
-    choiceOptionId: conditions[0]?.choiceOptionId ?? null,
-  });
+  const defaultConditionType: SwitchConditionType = project.variables[0]
+    ? "variable"
+    : npcBlocks[0]
+      ? "affinity"
+      : "choice";
+  const buildDefaultCondition = (type: SwitchConditionType = defaultConditionType): SwitchCondition => {
+    const condition = createDefaultSwitchCondition(type);
+    if (type === "choice") {
+      return {
+        ...condition,
+        choiceBlockId: choiceBlocks[0]?.id ?? null,
+        choiceOptionId: choiceBlocks[0]?.choices[0]?.id ?? null,
+      };
+    }
+    if (type === "variable") {
+      return {
+        ...condition,
+        variableId: project.variables[0]?.id ?? null,
+      };
+    }
+    return {
+      ...condition,
+      npcProfileBlockId: npcBlocks[0]?.id ?? null,
+    };
+  };
+  const syncCase = (caseItem: SwitchBlock["cases"][number]) => syncSwitchCaseCompatibility(caseItem);
 
   return (
     <div className="subsection">
       <div className="title-with-help">
         <h3>Bloc switch</h3>
         <HelpHint title="Routage conditionnel">
-          Redirige selon des cas. Chaque cas peut comparer une valeur de variable ou un choix
-          memorise (bloc choix + option).
+          Redirige selon des cas ordonnes. Chaque cas peut combiner des choix memorises, des
+          ressources et des affinites. Toutes les conditions d un meme cas sont en ET. Pour les
+          ressources et affinites, la valeur saisie est un minimum a atteindre.
         </HelpHint>
       </div>
-      <label>
-        Variable evaluee (cas numeriques)
-        <select
-          value={block.variableId ?? ""}
-          onChange={(event) =>
-            onUpdateSelectedBlock((candidate) => {
-              if (candidate.type !== "switch") return candidate;
-              return {
-                ...candidate,
-                variableId: event.target.value || null,
-              };
-            })
-          }
-          disabled={!canEdit}
-        >
-          <option value="">Aucune variable</option>
-          {project.variables.map((variable) => (
-            <option key={variable.id} value={variable.id}>
-              {variable.name}
-            </option>
-          ))}
-        </select>
-      </label>
-      {!hasValueCases && (
-        <small className="help-text">
-          Aucun cas numerique actif: cette variable n est pas utilisee.
-        </small>
-      )}
 
       <div className="section-title-row">
         <div className="title-with-help">
@@ -250,15 +240,16 @@ export function SwitchEditorSection({
                 ...candidate,
                 cases: [
                   ...candidate.cases,
-                  {
+                  syncCase({
                     id: createId("switch_case"),
-                    conditionType: choiceBlocks.length > 0 ? "choice" : "value",
+                    conditionType: "mixed",
                     expectedValue: 0,
-                    choiceConditions: choiceBlocks.length > 0 ? [defaultChoiceCondition()] : [],
-                    choiceBlockId: choiceBlocks[0]?.id ?? null,
-                    choiceOptionId: choiceBlocks[0]?.choices[0]?.id ?? null,
+                    conditions: [buildDefaultCondition()],
+                    choiceConditions: [],
+                    choiceBlockId: null,
+                    choiceOptionId: null,
                     targetBlockId: null,
-                  },
+                  }),
                 ],
               };
             })
@@ -294,96 +285,81 @@ export function SwitchEditorSection({
               x
             </button>
           </div>
-          <label>
-            Condition
-            <select
-              value={item.conditionType}
-              onChange={(event) =>
+          <div className="section-title-row">
+            <div className="title-with-help">
+              <span>Conditions (ET)</span>
+              <HelpHint title="Conditions multiples">
+                Toutes les conditions de ce cas doivent etre vraies pour activer la cible.
+              </HelpHint>
+            </div>
+            <button
+              className="button-secondary"
+              onClick={() =>
                 onUpdateSelectedBlock((candidate) => {
                   if (candidate.type !== "switch") return candidate;
                   return {
                     ...candidate,
-                    cases: candidate.cases.map((candidateCase) => {
-                      if (candidateCase.id !== item.id) return candidateCase;
-                      const nextConditionType =
-                        event.target.value === "choice" ? "choice" : "value";
-                      if (nextConditionType === "choice") {
-                        const nextConditions =
-                          candidateCase.choiceConditions.length > 0
-                            ? candidateCase.choiceConditions
-                            : [defaultChoiceCondition()];
-                        return withLegacyChoiceReference(
-                          {
+                    cases: candidate.cases.map((candidateCase) =>
+                      candidateCase.id === item.id
+                        ? syncCase({
                             ...candidateCase,
-                            conditionType: "choice",
-                          },
-                          nextConditions,
-                        );
-                      }
-                      return {
-                        ...candidateCase,
-                        conditionType: "value",
-                        choiceConditions: [],
-                        choiceBlockId: null,
-                        choiceOptionId: null,
-                      };
-                    }),
+                            conditions: [...candidateCase.conditions, buildDefaultCondition()],
+                          })
+                        : candidateCase,
+                    ),
                   };
                 })
               }
               disabled={!canEdit}
             >
-              <option value="choice">Choix memorise</option>
-              <option value="value">Valeur variable</option>
-            </select>
-          </label>
+              + condition
+            </button>
+          </div>
 
-          {item.conditionType === "choice" ? (
-            <>
-              <div className="section-title-row">
-                <div className="title-with-help">
-                  <span>Conditions (ET)</span>
-                  <HelpHint title="Conditions multiples">
-                    Toutes les conditions de ce cas doivent etre vraies pour activer la cible.
-                  </HelpHint>
-                </div>
-                <button
-                  className="button-secondary"
-                  onClick={() =>
+          {item.conditions.length === 0 && (
+            <small className="empty-placeholder">
+              Ajoute au moins une condition.
+            </small>
+          )}
+
+          {item.conditions.map((condition, conditionIndex) => {
+            const sourceChoices = condition.choiceBlockId
+              ? choiceBlockById.get(condition.choiceBlockId)?.choices ?? []
+              : [];
+
+            return (
+              <div key={condition.id} className="effect-row">
+                <select
+                  value={condition.type}
+                  onChange={(event) =>
                     onUpdateSelectedBlock((candidate) => {
                       if (candidate.type !== "switch") return candidate;
                       return {
                         ...candidate,
                         cases: candidate.cases.map((candidateCase) => {
                           if (candidateCase.id !== item.id) return candidateCase;
-                          const nextConditions = [
-                            ...candidateCase.choiceConditions,
-                            defaultChoiceCondition(),
-                          ];
-                          return withLegacyChoiceReference(candidateCase, nextConditions);
+                          return syncCase({
+                            ...candidateCase,
+                            conditions: candidateCase.conditions.map((candidateCondition) =>
+                              candidateCondition.id === condition.id
+                                ? { ...buildDefaultCondition(event.target.value as SwitchConditionType), id: condition.id }
+                                : candidateCondition,
+                            ),
+                          });
                         }),
                       };
                     })
                   }
                   disabled={!canEdit}
+                  title={`Condition ${conditionIndex + 1} - type`}
                 >
-                  + condition
-                </button>
-              </div>
+                  <option value="choice">Choix memorise</option>
+                  <option value="variable">Ressource</option>
+                  <option value="affinity">Affinite</option>
+                </select>
 
-              {item.choiceConditions.length === 0 && (
-                <small className="empty-placeholder">
-                  Ajoute au moins une condition.
-                </small>
-              )}
-
-              {item.choiceConditions.map((condition, conditionIndex) => {
-                const sourceChoices = condition.choiceBlockId
-                  ? choiceBlockById.get(condition.choiceBlockId)?.choices ?? []
-                  : [];
-
-                return (
-                  <div key={condition.id} className="effect-row">
+                {condition.type === "choice" ? (
+                  <>
                     <select
                       value={condition.choiceBlockId ?? ""}
                       onChange={(event) =>
@@ -393,19 +369,21 @@ export function SwitchEditorSection({
                             ...candidate,
                             cases: candidate.cases.map((candidateCase) => {
                               if (candidateCase.id !== item.id) return candidateCase;
-                              const nextConditions = candidateCase.choiceConditions.map((candidateCondition) => {
-                                if (candidateCondition.id !== condition.id) return candidateCondition;
-                                const nextChoiceBlockId = event.target.value || null;
-                                const nextChoiceBlock = nextChoiceBlockId
-                                  ? choiceBlockById.get(nextChoiceBlockId) ?? null
-                                  : null;
-                                return {
-                                  ...candidateCondition,
-                                  choiceBlockId: nextChoiceBlockId,
-                                  choiceOptionId: nextChoiceBlock?.choices[0]?.id ?? null,
-                                };
+                              return syncCase({
+                                ...candidateCase,
+                                conditions: candidateCase.conditions.map((candidateCondition) => {
+                                  if (candidateCondition.id !== condition.id) return candidateCondition;
+                                  const nextChoiceBlockId = event.target.value || null;
+                                  const nextChoiceBlock = nextChoiceBlockId
+                                    ? choiceBlockById.get(nextChoiceBlockId) ?? null
+                                    : null;
+                                  return {
+                                    ...candidateCondition,
+                                    choiceBlockId: nextChoiceBlockId,
+                                    choiceOptionId: nextChoiceBlock?.choices[0]?.id ?? null,
+                                  };
+                                }),
                               });
-                              return withLegacyChoiceReference(candidateCase, nextConditions);
                             }),
                           };
                         })
@@ -429,12 +407,14 @@ export function SwitchEditorSection({
                             ...candidate,
                             cases: candidate.cases.map((candidateCase) => {
                               if (candidateCase.id !== item.id) return candidateCase;
-                              const nextConditions = candidateCase.choiceConditions.map((candidateCondition) =>
-                                candidateCondition.id === condition.id
-                                  ? { ...candidateCondition, choiceOptionId: event.target.value || null }
-                                  : candidateCondition,
-                              );
-                              return withLegacyChoiceReference(candidateCase, nextConditions);
+                              return syncCase({
+                                ...candidateCase,
+                                conditions: candidateCase.conditions.map((candidateCondition) =>
+                                  candidateCondition.id === condition.id
+                                    ? { ...candidateCondition, choiceOptionId: event.target.value || null }
+                                    : candidateCondition,
+                                ),
+                              });
                             }),
                           };
                         })
@@ -449,59 +429,126 @@ export function SwitchEditorSection({
                         </option>
                       ))}
                     </select>
-                    <button
-                      className="button-danger"
-                      onClick={() =>
+                  </>
+                ) : (
+                  <>
+                    <select
+                      value={
+                        condition.type === "variable"
+                          ? condition.variableId ?? ""
+                          : condition.npcProfileBlockId ?? ""
+                      }
+                      onChange={(event) =>
                         onUpdateSelectedBlock((candidate) => {
                           if (candidate.type !== "switch") return candidate;
                           return {
                             ...candidate,
                             cases: candidate.cases.map((candidateCase) => {
                               if (candidateCase.id !== item.id) return candidateCase;
-                              const nextConditions = candidateCase.choiceConditions.filter(
-                                (candidateCondition) => candidateCondition.id !== condition.id,
-                              );
-                              return withLegacyChoiceReference(candidateCase, nextConditions);
+                              return syncCase({
+                                ...candidateCase,
+                                conditions: candidateCase.conditions.map((candidateCondition) => {
+                                  if (candidateCondition.id !== condition.id) return candidateCondition;
+                                  return condition.type === "variable"
+                                    ? { ...candidateCondition, variableId: event.target.value || null }
+                                    : { ...candidateCondition, npcProfileBlockId: event.target.value || null };
+                                }),
+                              });
                             }),
                           };
                         })
                       }
                       disabled={!canEdit}
-                      title="Supprimer cette condition"
+                      title={`Condition ${conditionIndex + 1} - source`}
                     >
-                      x
-                    </button>
-                  </div>
-                );
-              })}
-              {choiceBlocks.length === 0 && (
-                <small className="empty-placeholder">
-                  Aucun bloc choix dans l histoire. Ajoute un bloc choix pour utiliser ce mode.
-                </small>
-              )}
-            </>
-          ) : (
-            <label>
-              Valeur attendue
-              <input
-                type="number"
-                value={item.expectedValue}
-                onChange={(event) =>
-                  onUpdateSelectedBlock((candidate) => {
-                    if (candidate.type !== "switch") return candidate;
-                    return {
-                      ...candidate,
-                      cases: candidate.cases.map((candidateCase) =>
-                        candidateCase.id === item.id
-                          ? { ...candidateCase, expectedValue: normalizeDelta(event.target.value) }
-                          : candidateCase,
-                      ),
-                    };
-                  })
-                }
-                disabled={!canEdit}
-              />
-            </label>
+                      <option value="">
+                        {condition.type === "variable" ? "Aucune ressource" : "Aucun personnage"}
+                      </option>
+                      {condition.type === "variable"
+                        ? project.variables.map((variable) => (
+                            <option key={variable.id} value={variable.id}>
+                              {variable.name}
+                            </option>
+                          ))
+                        : npcBlocks.map((npcBlock) => (
+                            <option key={npcBlock.id} value={npcBlock.id}>
+                              {npcBlock.npcName || npcBlock.name || "PNJ"}
+                            </option>
+                          ))}
+                    </select>
+                    <span className="help-text" title="Seuil minimal">Mini</span>
+                    <input
+                      type="number"
+                      value={condition.expectedValue}
+                      onChange={(event) =>
+                        onUpdateSelectedBlock((candidate) => {
+                          if (candidate.type !== "switch") return candidate;
+                          return {
+                            ...candidate,
+                            cases: candidate.cases.map((candidateCase) => {
+                              if (candidateCase.id !== item.id) return candidateCase;
+                              return syncCase({
+                                ...candidateCase,
+                                conditions: candidateCase.conditions.map((candidateCondition) =>
+                                  candidateCondition.id === condition.id
+                                    ? {
+                                        ...candidateCondition,
+                                        expectedValue: normalizeDelta(event.target.value),
+                                      }
+                                    : candidateCondition,
+                                ),
+                              });
+                            }),
+                          };
+                        })
+                      }
+                      disabled={!canEdit}
+                      title={`Condition ${conditionIndex + 1} - seuil minimal`}
+                    />
+                  </>
+                )}
+                <button
+                  className="button-danger"
+                  onClick={() =>
+                    onUpdateSelectedBlock((candidate) => {
+                      if (candidate.type !== "switch") return candidate;
+                      return {
+                        ...candidate,
+                        cases: candidate.cases.map((candidateCase) => {
+                          if (candidateCase.id !== item.id) return candidateCase;
+                          return syncCase({
+                            ...candidateCase,
+                            conditions: candidateCase.conditions.filter(
+                              (candidateCondition) => candidateCondition.id !== condition.id,
+                            ),
+                          });
+                        }),
+                      };
+                    })
+                  }
+                  disabled={!canEdit}
+                  title="Supprimer cette condition"
+                >
+                  x
+                </button>
+              </div>
+            );
+          })}
+
+          {choiceBlocks.length === 0 && item.conditions.some((condition) => condition.type === "choice") && (
+            <small className="empty-placeholder">
+              Aucun bloc choix dans l histoire. Ajoute un bloc choix pour utiliser cette condition.
+            </small>
+          )}
+          {project.variables.length === 0 && item.conditions.some((condition) => condition.type === "variable") && (
+            <small className="empty-placeholder">
+              Aucune ressource n est definie dans le projet.
+            </small>
+          )}
+          {npcBlocks.length === 0 && item.conditions.some((condition) => condition.type === "affinity") && (
+            <small className="empty-placeholder">
+              Aucune fiche PNJ n est definie dans l histoire.
+            </small>
           )}
           <label>
             Cible bloc

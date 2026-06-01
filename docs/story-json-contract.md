@@ -1,13 +1,13 @@
 # Contrat `story.json` (Studio Auteur)
 
 Ce document fige le format exporte par l outil auteur pour la partie lecture.
-Version courante: `schemaVersion = "1.2.0"`.
+Version courante: `schemaVersion = "1.10.0"`.
 
 ## Racine
 
 ```json
 {
-  "schemaVersion": "1.2.0",
+  "schemaVersion": "1.10.0",
   "exportedAt": "2026-02-24T10:00:00.000Z",
   "project": {
     "id": "project_xxx",
@@ -46,7 +46,7 @@ Version courante: `schemaVersion = "1.2.0"`.
 
 Chaque bloc contient au minimum:
 - `id`: string
-- `type`: `title | cinematic | dialogue | choice | gameplay`
+- `type`: `title | cinematic | dialogue | choice | switch | gameplay`
 - `name`: string
 - `position`: `{ x: number, y: number }`
 - `notes`: string
@@ -118,6 +118,41 @@ Bloc de choix autonome (decision narrative sans dialogue).
 - `id`: string
 - `label`: `A | B | C | D`
 - `text`: string (texte court du bouton)
+
+### `switch`
+
+Bloc de routage conditionnel. Les cas sont evalues de haut en bas. Le premier cas dont toutes
+les conditions sont vraies est suivi, sinon `nextBlockId` est utilise.
+
+Pour les conditions `variable` et `affinity`, `expectedValue` represente un seuil minimal
+(`valeur courante >= expectedValue`), pas une egalite stricte.
+
+- `variableId`: string | null
+  Champ legacy conserve pour compatibilite descendante avec les anciens switches numeriques.
+- `cases[]`:
+  - `id`: string
+  - `conditionType`: `"choice" | "value" | "mixed"`
+    Champ legacy/miroir pour compatibilite.
+  - `expectedValue`: number
+    Champ legacy/miroir pour compatibilite.
+  - `conditions[]`:
+    - `id`: string
+    - `type`: `"choice" | "variable" | "affinity"`
+    - `variableId`: string | null
+    - `npcProfileBlockId`: string | null
+    - `choiceBlockId`: string | null
+    - `choiceOptionId`: string | null
+    - `operator`: champ technique/legacy. En pratique, le studio utilise `eq` pour `choice`
+      et `gte` pour `variable` / `affinity`.
+    - `expectedValue`: number
+  - `choiceConditions[]`
+    Champ legacy conserve pour compatibilite avec les anciens switches bases sur les choix.
+  - `choiceBlockId`: string | null
+    Champ legacy.
+  - `choiceOptionId`: string | null
+    Champ legacy.
+  - `targetBlockId`: string | null
+- `nextBlockId`: string | null
 - `description`: string (detail ou consequence visible)
 - `imagePath`: string | null (illustration de l option)
 - `layout`: `{ x, y, width, height }` (position/taille clickable dans la scene)

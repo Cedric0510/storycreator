@@ -448,6 +448,12 @@ export function remapBlockForZipImport(block: StoryBlock, maps: ZipImportMergeMa
       variableId: remapOptionalId(block.variableId, maps.variableIdMap),
       cases: block.cases.map((item) => ({
         ...item,
+        conditions: item.conditions.map((condition) => ({
+          ...condition,
+          variableId: remapOptionalId(condition.variableId, maps.variableIdMap),
+          npcProfileBlockId: remapOptionalId(condition.npcProfileBlockId, maps.blockIdMap),
+          choiceBlockId: remapOptionalId(condition.choiceBlockId, maps.blockIdMap),
+        })),
         choiceConditions: item.choiceConditions.map((condition) => ({
           ...condition,
           choiceBlockId: remapOptionalId(condition.choiceBlockId, maps.blockIdMap),

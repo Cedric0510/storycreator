@@ -1,4 +1,4 @@
-export const STORY_SCHEMA_VERSION = "1.9.0";
+export const STORY_SCHEMA_VERSION = "1.10.0";
 
 export type BlockType =
   | "title"
@@ -127,6 +127,20 @@ export interface DialogueLineCondition {
   type: DialogueLineConditionType;
   npcProfileBlockId: string;
   value: number;
+}
+
+export type SwitchConditionType = "choice" | "variable" | "affinity";
+export type SwitchComparisonOperator = "eq" | "ne" | "gt" | "gte" | "lt" | "lte";
+
+export interface SwitchCondition {
+  id: string;
+  type: SwitchConditionType;
+  variableId: string | null;
+  npcProfileBlockId: string | null;
+  choiceBlockId: string | null;
+  choiceOptionId: string | null;
+  operator: SwitchComparisonOperator;
+  expectedValue: number;
 }
 
 export interface StoryItemDefinition {
@@ -470,8 +484,10 @@ export interface ChoiceBlock extends BaseBlock {
 
 export interface SwitchCase {
   id: string;
-  conditionType: "value" | "choice";
+  conditionType: "value" | "choice" | "mixed";
   expectedValue: number;
+  /** Unified conditions combined with AND (authoritative representation). */
+  conditions: SwitchCondition[];
   /** Choice conditions combined with AND (choice mode only). */
   choiceConditions: SwitchChoiceCondition[];
   /** @deprecated Legacy single choice source (migrated to choiceConditions). */
@@ -676,6 +692,113 @@ export function createDefaultCinematicNarration(): CinematicNarration {
     continueTargetBlockId: null,
     continueTargetNarrationId: null,
   };
+}
+
+export function createDefaultSwitchCondition(type: SwitchConditionType = "choice"): SwitchCondition {
+  return {
+    id: createId("switch_cond"),
+    type,
+    variableId: null,
+    npcProfileBlockId: null,
+    choiceBlockId: null,
+    choiceOptionId: null,
+    operator: type === "choice" ? "eq" : "gte",
+    expectedValue: 0,
+  };
+}
+
+function normalizeSwitchConditionType(raw: unknown): SwitchConditionType {
+  switch (raw) {
+    case "variable":
+    case "affinity":
+    case "choice":
+      return raw;
+    default:
+      return "choice";
+  }
+}
+
+export function normalizeSwitchCondition(condition: unknown): SwitchCondition {
+  const candidate = (condition && typeof condition === "object"
+    ? condition
+    : {}) as Partial<SwitchCondition>;
+  const type = normalizeSwitchConditionType(candidate.type);
+  return {
+    id: typeof candidate.id === "string" && candidate.id ? candidate.id : createId("switch_cond"),
+    type,
+    variableId:
+      typeof candidate.variableId === "string" && candidate.variableId
+        ? candidate.variableId
+        : null,
+    npcProfileBlockId:
+      typeof candidate.npcProfileBlockId === "string" && candidate.npcProfileBlockId
+        ? candidate.npcProfileBlockId
+        : null,
+    choiceBlockId:
+      typeof candidate.choiceBlockId === "string" && candidate.choiceBlockId
+        ? candidate.choiceBlockId
+        : null,
+    choiceOptionId:
+      typeof candidate.choiceOptionId === "string" && candidate.choiceOptionId
+        ? candidate.choiceOptionId
+        : null,
+    operator: type === "choice" ? "eq" : "gte",
+    expectedValue:
+      typeof candidate.expectedValue === "number" && Number.isFinite(candidate.expectedValue)
+        ? candidate.expectedValue
+        : 0,
+  };
+}
+
+export function syncSwitchCaseCompatibility(caseItem: SwitchCase): SwitchCase {
+  const normalizedConditions = Array.isArray(caseItem.conditions)
+    ? caseItem.conditions.map((condition) => normalizeSwitchCondition(condition))
+    : [];
+  const choiceConditions = normalizedConditions
+    .filter((condition) => condition.type === "choice")
+    .map((condition) => ({
+      id: condition.id,
+      choiceBlockId: condition.choiceBlockId,
+      choiceOptionId: condition.choiceOptionId,
+    }));
+  const onlyChoiceConditions =
+    normalizedConditions.length > 0 && normalizedConditions.every((condition) => condition.type === "choice");
+  const onlySingleVariableCondition =
+    normalizedConditions.length === 1 && normalizedConditions[0]?.type === "variable";
+
+  return {
+    ...caseItem,
+    conditions: normalizedConditions,
+    conditionType: onlyChoiceConditions ? "choice" : onlySingleVariableCondition ? "value" : "mixed",
+    expectedValue: onlySingleVariableCondition
+      ? normalizedConditions[0].expectedValue
+      : typeof caseItem.expectedValue === "number" && Number.isFinite(caseItem.expectedValue)
+        ? caseItem.expectedValue
+        : 0,
+    choiceConditions,
+    choiceBlockId: choiceConditions[0]?.choiceBlockId ?? null,
+    choiceOptionId: choiceConditions[0]?.choiceOptionId ?? null,
+  };
+}
+
+export function describeSwitchCase(caseItem: SwitchCase): string {
+  const conditionCount = caseItem.conditions?.length ?? 0;
+  if (conditionCount === 0) return "Aucune condition";
+
+  const counts = {
+    choice: 0,
+    variable: 0,
+    affinity: 0,
+  };
+  for (const condition of caseItem.conditions) {
+    counts[condition.type] += 1;
+  }
+
+  const parts: string[] = [];
+  if (counts.choice > 0) parts.push(counts.choice === 1 ? "1 choix" : `${counts.choice} choix`);
+  if (counts.variable > 0) parts.push(counts.variable === 1 ? "1 ressource" : `${counts.variable} ressources`);
+  if (counts.affinity > 0) parts.push(counts.affinity === 1 ? "1 affinite" : `${counts.affinity} affinites`);
+  return parts.join(" + ");
 }
 
 function createDefaultChoiceOption(label: ChoiceLabel): ChoiceOption {
@@ -920,6 +1043,11 @@ export function createBlock(type: BlockType, position: XYPosition): StoryBlock {
           id: createId("switch_case"),
           conditionType: "choice",
           expectedValue: 1,
+          conditions: [
+            {
+              ...createDefaultSwitchCondition("choice"),
+            },
+          ],
           choiceConditions: [
             {
               id: createId("switch_cond"),
@@ -1472,18 +1600,24 @@ export function normalizeStoryBlock(block: StoryBlock): StoryBlock {
   }
 
   if (block.type === "switch") {
+    const rawSwitch = block as unknown as Record<string, unknown>;
+    const normalizedVariableId =
+      typeof rawSwitch.variableId === "string" && rawSwitch.variableId
+        ? (rawSwitch.variableId as string)
+        : null;
     return {
       ...block,
       entryEffects: normalizeVariableEffects((block as { entryEffects?: unknown }).entryEffects),
-      variableId:
-        typeof (block as unknown as Record<string, unknown>).variableId === "string" &&
-        (block as unknown as Record<string, unknown>).variableId
-          ? ((block as unknown as Record<string, unknown>).variableId as string)
-          : null,
-      cases: Array.isArray((block as unknown as Record<string, unknown>).cases)
-        ? ((block as unknown as Record<string, unknown>).cases as Record<string, unknown>[])
+      variableId: normalizedVariableId,
+      cases: Array.isArray(rawSwitch.cases)
+        ? (rawSwitch.cases as Record<string, unknown>[])
             .map((item) => {
-              const conditionType = item.conditionType === "choice" ? "choice" : "value";
+              const legacyConditionType =
+                item.conditionType === "choice"
+                  ? "choice"
+                  : item.conditionType === "mixed"
+                    ? "mixed"
+                    : "value";
               const choiceConditions = Array.isArray(item.choiceConditions)
                 ? (item.choiceConditions as Record<string, unknown>[])
                     .map((conditionItem) => ({
@@ -1501,28 +1635,66 @@ export function normalizeStoryBlock(block: StoryBlock): StoryBlock {
                           : null,
                     }))
                 : [];
-              if (
-                conditionType === "choice" &&
-                choiceConditions.length === 0 &&
-                typeof item.choiceBlockId === "string" &&
-                item.choiceBlockId &&
-                typeof item.choiceOptionId === "string" &&
-                item.choiceOptionId
-              ) {
-                choiceConditions.push({
-                  id: createId("switch_cond"),
-                  choiceBlockId: item.choiceBlockId,
-                  choiceOptionId: item.choiceOptionId,
-                });
-              }
+              const explicitConditions = Array.isArray(item.conditions)
+                ? (item.conditions as unknown[]).map((condition) => normalizeSwitchCondition(condition))
+                : [];
+              const migratedConditions = explicitConditions.length > 0
+                ? explicitConditions
+                : legacyConditionType === "choice"
+                  ? [
+                      ...choiceConditions.map((condition) => ({
+                        id: condition.id,
+                        type: "choice" as const,
+                        variableId: null,
+                        npcProfileBlockId: null,
+                        choiceBlockId: condition.choiceBlockId,
+                        choiceOptionId: condition.choiceOptionId,
+                        operator: "eq" as const,
+                        expectedValue: 0,
+                      })),
+                      ...(
+                        choiceConditions.length === 0 &&
+                        typeof item.choiceBlockId === "string" &&
+                        item.choiceBlockId &&
+                        typeof item.choiceOptionId === "string" &&
+                        item.choiceOptionId
+                          ? [{
+                              id: createId("switch_cond"),
+                              type: "choice" as const,
+                              variableId: null,
+                              npcProfileBlockId: null,
+                              choiceBlockId: item.choiceBlockId,
+                              choiceOptionId: item.choiceOptionId,
+                              operator: "eq" as const,
+                              expectedValue: 0,
+                            }]
+                          : []
+                      ),
+                    ]
+                  : [
+                      {
+                        id: createId("switch_cond"),
+                        type: "variable" as const,
+                        variableId: normalizedVariableId,
+                        npcProfileBlockId: null,
+                        choiceBlockId: null,
+                        choiceOptionId: null,
+                        operator: "gte" as const,
+                        expectedValue:
+                          typeof item.expectedValue === "number" && Number.isFinite(item.expectedValue)
+                            ? item.expectedValue
+                            : 0,
+                      },
+                    ];
 
-              return {
+              return syncSwitchCaseCompatibility({
                 id: typeof item.id === "string" && item.id ? item.id : createId("switch_case"),
-                conditionType,
+                conditionType: legacyConditionType,
                 expectedValue:
                   typeof item.expectedValue === "number" && Number.isFinite(item.expectedValue)
                     ? item.expectedValue
                     : 0,
+                conditions: migratedConditions,
                 choiceConditions,
                 choiceBlockId:
                   typeof item.choiceBlockId === "string" && item.choiceBlockId
@@ -1536,7 +1708,7 @@ export function normalizeStoryBlock(block: StoryBlock): StoryBlock {
                   typeof item.targetBlockId === "string" && item.targetBlockId
                     ? item.targetBlockId
                     : null,
-              };
+              });
             })
         : [],
       nextBlockId: block.nextBlockId ?? null,
@@ -1698,10 +1870,12 @@ export function validateStoryBlocks(
   blocks: StoryBlock[],
   startBlockId: string | null,
   items: StoryItemDefinition[] = [],
+  variables: VariableDefinition[] = [],
 ) {
   const issues: ValidationIssue[] = [];
   const blockById = new Map(blocks.map((block) => [block.id, block]));
   const itemIds = new Set(items.map((item) => item.id));
+  const variableIds = new Set(variables.map((variable) => variable.id));
   const collectibleInventoryIds = new Set<string>();
   for (const block of blocks) {
     if (block.type !== "gameplay") continue;
@@ -1891,17 +2065,6 @@ export function validateStoryBlocks(
 
       }
     } else if (block.type === "switch") {
-      const valueCases = block.cases.filter((item) => item.conditionType !== "choice");
-      const choiceCases = block.cases.filter((item) => item.conditionType === "choice");
-
-      if (valueCases.length > 0 && !block.variableId) {
-        issues.push({
-          level: "warning",
-          message: "Selectionne une variable pour les cas numeriques de ce switch.",
-          blockId: block.id,
-        });
-      }
-
       if (block.cases.length === 0) {
         issues.push({
           level: "warning",
@@ -1909,26 +2072,12 @@ export function validateStoryBlocks(
           blockId: block.id,
         });
       }
-
-      const seenValues = new Set<number>();
-      for (const item of valueCases) {
-        if (seenValues.has(item.expectedValue)) {
+      const seenCaseSignatures = new Set<string>();
+      for (const item of block.cases) {
+        if ((item.conditions ?? []).length === 0) {
           issues.push({
             level: "warning",
-            message: "Deux cas du switch utilisent la meme valeur attendue.",
-            blockId: block.id,
-          });
-          break;
-        }
-        seenValues.add(item.expectedValue);
-      }
-
-      const seenChoiceCaseSignatures = new Set<string>();
-      for (const item of choiceCases) {
-        if (item.choiceConditions.length === 0) {
-          issues.push({
-            level: "warning",
-            message: "Un cas du switch en mode choix doit avoir au moins une condition.",
+            message: "Un cas du switch doit avoir au moins une condition.",
             blockId: block.id,
           });
           continue;
@@ -1937,54 +2086,108 @@ export function validateStoryBlocks(
         const seenCaseConditionKeys = new Set<string>();
         const caseSignatureParts: string[] = [];
 
-        for (const condition of item.choiceConditions) {
-          if (!condition.choiceBlockId) {
-            issues.push({
-              level: "warning",
-              message: "Une condition du switch n a pas de bloc choix source.",
-              blockId: block.id,
-            });
-            continue;
+        for (const condition of item.conditions ?? []) {
+          let conditionKey = `${condition.type}`;
+
+          if (condition.type === "choice") {
+            if (!condition.choiceBlockId) {
+              issues.push({
+                level: "warning",
+                message: "Une condition du switch n a pas de bloc choix source.",
+                blockId: block.id,
+              });
+              continue;
+            }
+
+            const sourceBlock = blockById.get(condition.choiceBlockId);
+            if (!sourceBlock) {
+              issues.push({
+                level: "error",
+                message: "Une condition du switch pointe vers un bloc choix supprime.",
+                blockId: block.id,
+              });
+              continue;
+            }
+            if (sourceBlock.type !== "choice") {
+              issues.push({
+                level: "error",
+                message: "Une condition du switch reference un bloc qui n est pas un bloc choix.",
+                blockId: block.id,
+              });
+              continue;
+            }
+
+            if (!condition.choiceOptionId) {
+              issues.push({
+                level: "warning",
+                message: "Une condition du switch n a pas d option choisie.",
+                blockId: block.id,
+              });
+              continue;
+            }
+
+            const optionExists = sourceBlock.choices.some((option) => option.id === condition.choiceOptionId);
+            if (!optionExists) {
+              issues.push({
+                level: "error",
+                message: "Une condition du switch reference une option de choix supprimee.",
+                blockId: block.id,
+              });
+              continue;
+            }
+
+            conditionKey = `choice:${condition.choiceBlockId}:${condition.choiceOptionId}`;
+          } else if (condition.type === "variable") {
+            if (!condition.variableId) {
+              issues.push({
+                level: "warning",
+                message: "Une condition du switch n a pas de ressource selectionnee.",
+                blockId: block.id,
+              });
+              continue;
+            }
+
+            if (variables.length > 0 && !variableIds.has(condition.variableId)) {
+              issues.push({
+                level: "error",
+                message: "Une condition du switch reference une ressource supprimee.",
+                blockId: block.id,
+              });
+              continue;
+            }
+
+            conditionKey = `variable:${condition.variableId}:${condition.operator}:${condition.expectedValue}`;
+          } else if (condition.type === "affinity") {
+            if (!condition.npcProfileBlockId) {
+              issues.push({
+                level: "warning",
+                message: "Une condition du switch n a pas de personnage selectionne.",
+                blockId: block.id,
+              });
+              continue;
+            }
+
+            const npcBlock = blockById.get(condition.npcProfileBlockId);
+            if (!npcBlock) {
+              issues.push({
+                level: "error",
+                message: "Une condition du switch reference un personnage supprime.",
+                blockId: block.id,
+              });
+              continue;
+            }
+            if (npcBlock.type !== "npc_profile") {
+              issues.push({
+                level: "error",
+                message: "Une condition du switch reference un bloc qui n est pas une fiche PNJ.",
+                blockId: block.id,
+              });
+              continue;
+            }
+
+            conditionKey = `affinity:${condition.npcProfileBlockId}:${condition.operator}:${condition.expectedValue}`;
           }
 
-          const sourceBlock = blockById.get(condition.choiceBlockId);
-          if (!sourceBlock) {
-            issues.push({
-              level: "error",
-              message: "Une condition du switch pointe vers un bloc choix supprime.",
-              blockId: block.id,
-            });
-            continue;
-          }
-          if (sourceBlock.type !== "choice") {
-            issues.push({
-              level: "error",
-              message: "Une condition du switch reference un bloc qui n est pas un bloc choix.",
-              blockId: block.id,
-            });
-            continue;
-          }
-
-          if (!condition.choiceOptionId) {
-            issues.push({
-              level: "warning",
-              message: "Une condition du switch n a pas d option choisie.",
-              blockId: block.id,
-            });
-            continue;
-          }
-
-          const optionExists = sourceBlock.choices.some((option) => option.id === condition.choiceOptionId);
-          if (!optionExists) {
-            issues.push({
-              level: "error",
-              message: "Une condition du switch reference une option de choix supprimee.",
-              blockId: block.id,
-            });
-            continue;
-          }
-
-          const conditionKey = `${condition.choiceBlockId}:${condition.choiceOptionId}`;
           if (seenCaseConditionKeys.has(conditionKey)) {
             issues.push({
               level: "warning",
@@ -1999,7 +2202,7 @@ export function validateStoryBlocks(
 
         const caseSignature = caseSignatureParts.sort().join(" && ");
         if (!caseSignature) continue;
-        if (seenChoiceCaseSignatures.has(caseSignature)) {
+        if (seenCaseSignatures.has(caseSignature)) {
           issues.push({
             level: "warning",
             message: "Deux cas du switch utilisent exactement le meme ensemble de conditions.",
@@ -2007,7 +2210,7 @@ export function validateStoryBlocks(
           });
           break;
         }
-        seenChoiceCaseSignatures.add(caseSignature);
+        seenCaseSignatures.add(caseSignature);
       }
 
       for (const item of block.cases) {

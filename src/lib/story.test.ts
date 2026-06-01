@@ -747,6 +747,10 @@ describe("story switch block", () => {
     expect(block.cases).toHaveLength(1);
     expect(block.cases[0].conditionType).toBe("choice");
     expect(block.cases[0].expectedValue).toBe(1);
+    expect(block.cases[0].conditions).toHaveLength(1);
+    expect(block.cases[0].conditions[0].type).toBe("choice");
+    expect(block.cases[0].conditions[0].choiceBlockId).toBeNull();
+    expect(block.cases[0].conditions[0].choiceOptionId).toBeNull();
     expect(block.cases[0].choiceConditions).toHaveLength(1);
     expect(block.cases[0].choiceConditions[0].choiceBlockId).toBeNull();
     expect(block.cases[0].choiceConditions[0].choiceOptionId).toBeNull();
@@ -763,6 +767,18 @@ describe("story switch block", () => {
         id: "case-1",
         conditionType: "value",
         expectedValue: 1,
+        conditions: [
+          {
+            id: "cond-1",
+            type: "variable",
+            variableId: "force",
+            npcProfileBlockId: null,
+            choiceBlockId: null,
+            choiceOptionId: null,
+            operator: "eq",
+            expectedValue: 1,
+          },
+        ],
         choiceConditions: [],
         choiceBlockId: null,
         choiceOptionId: null,
@@ -772,6 +788,18 @@ describe("story switch block", () => {
         id: "case-2",
         conditionType: "value",
         expectedValue: 2,
+        conditions: [
+          {
+            id: "cond-2",
+            type: "variable",
+            variableId: "force",
+            npcProfileBlockId: null,
+            choiceBlockId: null,
+            choiceOptionId: null,
+            operator: "eq",
+            expectedValue: 2,
+          },
+        ],
         choiceConditions: [],
         choiceBlockId: null,
         choiceOptionId: null,
@@ -809,6 +837,11 @@ describe("story switch block", () => {
 
     const normalized = normalizeStoryBlock(raw as unknown as SwitchBlock) as SwitchBlock;
     expect(normalized.cases[0].conditionType).toBe("value");
+    expect(normalized.cases[0].conditions).toHaveLength(1);
+    expect(normalized.cases[0].conditions[0].type).toBe("variable");
+    expect(normalized.cases[0].conditions[0].variableId).toBe("var_1");
+    expect(normalized.cases[0].conditions[0].operator).toBe("gte");
+    expect(normalized.cases[0].conditions[0].expectedValue).toBe(2);
     expect(normalized.cases[0].choiceConditions).toEqual([]);
     expect(normalized.cases[0].choiceBlockId).toBeNull();
     expect(normalized.cases[0].choiceOptionId).toBeNull();
@@ -838,9 +871,126 @@ describe("story switch block", () => {
     };
 
     const normalized = normalizeStoryBlock(raw as unknown as SwitchBlock) as SwitchBlock;
+    expect(normalized.cases[0].conditions).toHaveLength(1);
+    expect(normalized.cases[0].conditions[0].type).toBe("choice");
+    expect(normalized.cases[0].conditions[0].choiceBlockId).toBe("choice_block_1");
+    expect(normalized.cases[0].conditions[0].choiceOptionId).toBe("choice_option_b");
     expect(normalized.cases[0].choiceConditions).toHaveLength(1);
     expect(normalized.cases[0].choiceConditions[0].choiceBlockId).toBe("choice_block_1");
     expect(normalized.cases[0].choiceConditions[0].choiceOptionId).toBe("choice_option_b");
+  });
+
+  it("keeps mixed switch conditions normalized", () => {
+    const normalized = normalizeStoryBlock({
+      id: "switch_mixed",
+      type: "switch",
+      name: "Mixed",
+      notes: "",
+      position: { x: 0, y: 0 },
+      entryEffects: [],
+      chapterId: null,
+      variableId: null,
+      cases: [
+        {
+          id: "case_mixed",
+          conditionType: "mixed",
+          expectedValue: 0,
+          conditions: [
+            {
+              id: "cond_force",
+              type: "variable",
+              variableId: "var_force",
+              npcProfileBlockId: null,
+              choiceBlockId: null,
+              choiceOptionId: null,
+              operator: "gte",
+              expectedValue: 5,
+            },
+            {
+              id: "cond_emma",
+              type: "affinity",
+              variableId: null,
+              npcProfileBlockId: "npc_emma",
+              choiceBlockId: null,
+              choiceOptionId: null,
+              operator: "gte",
+              expectedValue: 20,
+            },
+          ],
+          choiceConditions: [],
+          choiceBlockId: null,
+          choiceOptionId: null,
+          targetBlockId: "target_ok",
+        },
+      ],
+      nextBlockId: "target_else",
+    } as unknown as SwitchBlock) as SwitchBlock;
+
+    expect(normalized.cases[0].conditionType).toBe("mixed");
+    expect(normalized.cases[0].conditions).toHaveLength(2);
+    expect(normalized.cases[0].conditions[0].operator).toBe("gte");
+    expect(normalized.cases[0].conditions[1].type).toBe("affinity");
+    expect(normalized.cases[0].conditions[1].operator).toBe("gte");
+  });
+
+  it("validates deleted variable and affinity references in switch conditions", () => {
+    const title = createBlock("title", { x: 0, y: 0 });
+    const choice = createBlock("choice", { x: 100, y: 0 }) as ChoiceBlock;
+    const switchBlock = createBlock("switch", { x: 200, y: 0 }) as SwitchBlock;
+
+    switchBlock.cases = [
+      {
+        id: "case_invalid",
+        conditionType: "mixed",
+        expectedValue: 0,
+        conditions: [
+          {
+            id: "cond_var",
+            type: "variable",
+            variableId: "missing_var",
+            npcProfileBlockId: null,
+            choiceBlockId: null,
+            choiceOptionId: null,
+            operator: "gte",
+            expectedValue: 5,
+          },
+          {
+            id: "cond_aff",
+            type: "affinity",
+            variableId: null,
+            npcProfileBlockId: "missing_npc",
+            choiceBlockId: null,
+            choiceOptionId: null,
+            operator: "gte",
+            expectedValue: 10,
+          },
+          {
+            id: "cond_choice",
+            type: "choice",
+            variableId: null,
+            npcProfileBlockId: null,
+            choiceBlockId: choice.id,
+            choiceOptionId: choice.choices[0].id,
+            operator: "eq",
+            expectedValue: 0,
+          },
+        ],
+        choiceConditions: [],
+        choiceBlockId: null,
+        choiceOptionId: null,
+        targetBlockId: null,
+      },
+    ];
+
+    const issues = validateStoryBlocks(
+      [title, choice, switchBlock],
+      title.id,
+      [],
+      [{ id: "existing_var", name: "Force", initialValue: 0 }],
+    );
+
+    expect(issues.some((issue) => issue.message.includes("ressource supprimee"))).toBe(true);
+    expect(issues.some((issue) => issue.message.includes("personnage supprime"))).toBe(true);
   });
 });
 

@@ -23,7 +23,9 @@ import {
   createBlock,
   createId,
   defaultChoiceOptionLayout,
+  describeSwitchCase,
   normalizeStoryBlock,
+  syncSwitchCaseCompatibility,
 } from "@/lib/story";
 
 export type EditorNode = Node<StoryNodeData>;
@@ -292,15 +294,12 @@ export function rebuildEdgesFromNodes(nodes: EditorNode[]): EditorEdge[] {
     } else if (block.type === "switch") {
       for (const item of block.cases) {
         if (!item.targetBlockId) continue;
-        const caseLabel = item.conditionType === "choice"
-          ? `Choix x${Math.max(1, item.choiceConditions.length)}`
-          : `= ${item.expectedValue}`;
         edges.push(
           buildEdge(
             block.id,
             item.targetBlockId,
             `switch-case-${item.id}`,
-            caseLabel,
+            describeSwitchCase(item),
           ),
         );
       }
@@ -637,22 +636,17 @@ export function removeNodeReferences(block: StoryBlock, removedBlockId: string):
     return {
       ...block,
       nextBlockId: block.nextBlockId === removedBlockId ? null : block.nextBlockId,
-      cases: block.cases.map((item) => {
-        const nextChoiceConditions = item.choiceConditions.filter(
-          (condition) => condition.choiceBlockId !== removedBlockId,
-        );
-        return {
+      cases: block.cases.map((item) =>
+        syncSwitchCaseCompatibility({
           ...item,
           targetBlockId: item.targetBlockId === removedBlockId ? null : item.targetBlockId,
-          choiceConditions: nextChoiceConditions,
-          choiceBlockId:
-            nextChoiceConditions[0]?.choiceBlockId
-            ?? (item.choiceBlockId === removedBlockId ? null : item.choiceBlockId),
-          choiceOptionId:
-            nextChoiceConditions[0]?.choiceOptionId
-            ?? (item.choiceBlockId === removedBlockId ? null : item.choiceOptionId),
-        };
-      }),
+          conditions: item.conditions.filter((condition) => {
+            if (condition.type === "choice") return condition.choiceBlockId !== removedBlockId;
+            if (condition.type === "affinity") return condition.npcProfileBlockId !== removedBlockId;
+            return true;
+          }),
+        })
+      ),
     };
   }
 
@@ -723,6 +717,14 @@ export function removeVariableReferences(block: StoryBlock, removedVariableId: s
         block.variableId === removedVariableId
           ? null
           : block.variableId,
+      cases: block.cases.map((item) =>
+        syncSwitchCaseCompatibility({
+          ...item,
+          conditions: item.conditions.filter(
+            (condition) => condition.type !== "variable" || condition.variableId !== removedVariableId,
+          ),
+        })
+      ),
     };
   }
 
@@ -1024,6 +1026,16 @@ export function serializeBlock(
         id: item.id,
         conditionType: item.conditionType,
         expectedValue: item.expectedValue,
+        conditions: item.conditions.map((condition) => ({
+          id: condition.id,
+          type: condition.type,
+          variableId: condition.variableId,
+          npcProfileBlockId: condition.npcProfileBlockId,
+          choiceBlockId: condition.choiceBlockId,
+          choiceOptionId: condition.choiceOptionId,
+          operator: condition.operator,
+          expectedValue: condition.expectedValue,
+        })),
         choiceConditions: item.choiceConditions.map((condition) => ({
           id: condition.id,
           choiceBlockId: condition.choiceBlockId,
@@ -1350,11 +1362,61 @@ export function deserializeBlockFromExport(
           : null,
       cases: rawCases.map((item: Record<string, unknown>) => ({
         id: (item.id as string) ?? createId("switch_case"),
-        conditionType: item.conditionType === "choice" ? "choice" : "value",
+        conditionType:
+          item.conditionType === "choice"
+            ? "choice"
+            : item.conditionType === "mixed"
+              ? "mixed"
+              : "value",
         expectedValue:
           typeof item.expectedValue === "number"
             ? item.expectedValue
             : 0,
+        conditions: Array.isArray(item.conditions)
+          ? item.conditions.map((condition) => {
+              const rawCondition = condition as Record<string, unknown>;
+              return {
+                id:
+                  typeof rawCondition.id === "string" && rawCondition.id
+                    ? rawCondition.id
+                    : createId("switch_cond"),
+                type:
+                  rawCondition.type === "variable"
+                    ? "variable"
+                    : rawCondition.type === "affinity"
+                      ? "affinity"
+                      : "choice",
+                variableId:
+                  typeof rawCondition.variableId === "string" && rawCondition.variableId
+                    ? rawCondition.variableId
+                    : null,
+                npcProfileBlockId:
+                  typeof rawCondition.npcProfileBlockId === "string" && rawCondition.npcProfileBlockId
+                    ? rawCondition.npcProfileBlockId
+                    : null,
+                choiceBlockId:
+                  typeof rawCondition.choiceBlockId === "string" && rawCondition.choiceBlockId
+                    ? rawCondition.choiceBlockId
+                    : null,
+                choiceOptionId:
+                  typeof rawCondition.choiceOptionId === "string" && rawCondition.choiceOptionId
+                    ? rawCondition.choiceOptionId
+                    : null,
+                operator:
+                  rawCondition.operator === "ne" ||
+                  rawCondition.operator === "gt" ||
+                  rawCondition.operator === "gte" ||
+                  rawCondition.operator === "lt" ||
+                  rawCondition.operator === "lte"
+                    ? rawCondition.operator
+                    : "eq",
+                expectedValue:
+                  typeof rawCondition.expectedValue === "number"
+                    ? rawCondition.expectedValue
+                    : 0,
+              };
+            })
+          : [],
         choiceConditions: Array.isArray(item.choiceConditions)
           ? (item.choiceConditions as Record<string, unknown>[]).map((condition) => ({
               id: (condition.id as string) ?? createId("switch_cond"),

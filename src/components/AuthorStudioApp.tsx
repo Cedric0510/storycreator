@@ -619,11 +619,13 @@ export function AuthorStudioApp() {
   /** Validation skips blocks hidden inside collapsed chapters for perf */
   const liveIssues = useMemo(
     () => {
-      if (hiddenBlockIds.size === 0) return validateStoryBlocks(blocks, project.info.startBlockId, project.items);
+      if (hiddenBlockIds.size === 0) {
+        return validateStoryBlocks(blocks, project.info.startBlockId, project.items, project.variables);
+      }
       const visible = blocks.filter((b) => !hiddenBlockIds.has(b.id));
-      return validateStoryBlocks(visible, project.info.startBlockId, project.items);
+      return validateStoryBlocks(visible, project.info.startBlockId, project.items, project.variables);
     },
-    [blocks, hiddenBlockIds, project.info.startBlockId, project.items],
+    [blocks, hiddenBlockIds, project.info.startBlockId, project.items, project.variables],
   );
 
   const issuesByBlock = useMemo(() => {

@@ -14,6 +14,8 @@ import {
   NpcProfileBlock,
   ProjectMeta,
   StoryBlock,
+  SwitchCase,
+  SwitchCondition,
 } from "@/lib/story";
 
 export interface PreviewRuntimeState {
@@ -101,6 +103,38 @@ function findNextCinematicNarrationId(
   return block.narrations[currentIndex + 1]?.id ?? null;
 }
 
+function switchConditionMatches(
+  condition: SwitchCondition,
+  variables: Record<string, number>,
+  choiceHistory: Record<string, string>,
+  npcAffinity: Record<string, number>,
+): boolean {
+  if (condition.type === "choice") {
+    if (!condition.choiceBlockId || !condition.choiceOptionId) return false;
+    return choiceHistory[condition.choiceBlockId] === condition.choiceOptionId;
+  }
+
+  if (condition.type === "variable") {
+    if (!condition.variableId) return false;
+    return (variables[condition.variableId] ?? 0) >= condition.expectedValue;
+  }
+
+  if (!condition.npcProfileBlockId) return false;
+  return (npcAffinity[condition.npcProfileBlockId] ?? 0) >= condition.expectedValue;
+}
+
+function switchCaseMatches(
+  switchCase: SwitchCase,
+  variables: Record<string, number>,
+  choiceHistory: Record<string, string>,
+  npcAffinity: Record<string, number>,
+): boolean {
+  const conditions = switchCase.conditions ?? [];
+  return conditions.length > 0 && conditions.every((condition) =>
+    switchConditionMatches(condition, variables, choiceHistory, npcAffinity)
+  );
+}
+
 export function usePreviewRuntime({
   project,
   blockById,
@@ -165,23 +199,10 @@ export function usePreviewRuntime({
 
         nextVariables = applyEffects(nextVariables, resolvedBlock.entryEffects ?? []);
         if (resolvedBlock.type === "switch") {
-          const variableValue = resolvedBlock.variableId
-            ? (nextVariables[resolvedBlock.variableId] ?? 0)
-            : 0;
           const matchedCase = resolvedBlock.cases.find(
             (item) => {
               if (!item.targetBlockId) return false;
-              if (item.conditionType === "choice") {
-                if (item.choiceConditions.length > 0) {
-                  return item.choiceConditions.every((condition) => {
-                    if (!condition.choiceBlockId || !condition.choiceOptionId) return false;
-                    return choiceHistory[condition.choiceBlockId] === condition.choiceOptionId;
-                  });
-                }
-                if (!item.choiceBlockId || !item.choiceOptionId) return false;
-                return choiceHistory[item.choiceBlockId] === item.choiceOptionId;
-              }
-              return item.expectedValue === variableValue;
+              return switchCaseMatches(item, nextVariables, choiceHistory, npcAffinity);
             },
           );
           resolvedBlockId = matchedCase?.targetBlockId ?? resolvedBlock.nextBlockId;

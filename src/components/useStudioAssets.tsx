@@ -241,7 +241,7 @@ export function useStudioAssets({
 
   const exportZip = useCallback(async () => {
    try {
-    const issues = validateStoryBlocks(blocks, project.info.startBlockId, project.items);
+    const issues = validateStoryBlocks(blocks, project.info.startBlockId, project.items, project.variables);
     setLastValidation(issues);
 
     const errors = issues.filter((issue) => issue.level === "error");
