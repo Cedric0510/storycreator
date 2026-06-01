@@ -745,6 +745,7 @@ describe("story switch block", () => {
     expect(block.type).toBe("switch");
     expect(block.variableId).toBeNull();
     expect(block.cases).toHaveLength(1);
+    expect(block.cases[0].logic).toBe("and");
     expect(block.cases[0].conditionType).toBe("choice");
     expect(block.cases[0].expectedValue).toBe(1);
     expect(block.cases[0].conditions).toHaveLength(1);
@@ -765,6 +766,7 @@ describe("story switch block", () => {
     block.cases = [
       {
         id: "case-1",
+        logic: "and",
         conditionType: "value",
         expectedValue: 1,
         conditions: [
@@ -786,6 +788,7 @@ describe("story switch block", () => {
       },
       {
         id: "case-2",
+        logic: "and",
         conditionType: "value",
         expectedValue: 2,
         conditions: [
@@ -836,6 +839,7 @@ describe("story switch block", () => {
     };
 
     const normalized = normalizeStoryBlock(raw as unknown as SwitchBlock) as SwitchBlock;
+    expect(normalized.cases[0].logic).toBe("and");
     expect(normalized.cases[0].conditionType).toBe("value");
     expect(normalized.cases[0].conditions).toHaveLength(1);
     expect(normalized.cases[0].conditions[0].type).toBe("variable");
@@ -871,6 +875,7 @@ describe("story switch block", () => {
     };
 
     const normalized = normalizeStoryBlock(raw as unknown as SwitchBlock) as SwitchBlock;
+    expect(normalized.cases[0].logic).toBe("and");
     expect(normalized.cases[0].conditions).toHaveLength(1);
     expect(normalized.cases[0].conditions[0].type).toBe("choice");
     expect(normalized.cases[0].conditions[0].choiceBlockId).toBe("choice_block_1");
@@ -893,6 +898,7 @@ describe("story switch block", () => {
       cases: [
         {
           id: "case_mixed",
+          logic: "or",
           conditionType: "mixed",
           expectedValue: 0,
           conditions: [
@@ -927,6 +933,7 @@ describe("story switch block", () => {
     } as unknown as SwitchBlock) as SwitchBlock;
 
     expect(normalized.cases[0].conditionType).toBe("mixed");
+    expect(normalized.cases[0].logic).toBe("or");
     expect(normalized.cases[0].conditions).toHaveLength(2);
     expect(normalized.cases[0].conditions[0].operator).toBe("gte");
     expect(normalized.cases[0].conditions[1].type).toBe("affinity");
@@ -941,6 +948,7 @@ describe("story switch block", () => {
     switchBlock.cases = [
       {
         id: "case_invalid",
+        logic: "and",
         conditionType: "mixed",
         expectedValue: 0,
         conditions: [
@@ -991,6 +999,29 @@ describe("story switch block", () => {
 
     expect(issues.some((issue) => issue.message.includes("ressource supprimee"))).toBe(true);
     expect(issues.some((issue) => issue.message.includes("personnage supprime"))).toBe(true);
+  });
+
+  it("defaults legacy switch logic to and", () => {
+    const normalized = normalizeStoryBlock({
+      id: "switch_legacy_logic",
+      type: "switch",
+      name: "Legacy Logic",
+      notes: "",
+      position: { x: 0, y: 0 },
+      entryEffects: [],
+      chapterId: null,
+      variableId: "var_1",
+      cases: [
+        {
+          id: "case_legacy_logic",
+          expectedValue: 3,
+          targetBlockId: "target_ok",
+        },
+      ],
+      nextBlockId: "target_else",
+    } as unknown as SwitchBlock) as SwitchBlock;
+
+    expect(normalized.cases[0].logic).toBe("and");
   });
 });
 

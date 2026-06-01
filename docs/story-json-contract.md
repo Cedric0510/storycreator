@@ -121,8 +121,8 @@ Bloc de choix autonome (decision narrative sans dialogue).
 
 ### `switch`
 
-Bloc de routage conditionnel. Les cas sont evalues de haut en bas. Le premier cas dont toutes
-les conditions sont vraies est suivi, sinon `nextBlockId` est utilise.
+Bloc de routage conditionnel. Les cas sont evalues de haut en bas. Le premier cas valide est
+suivi, sinon `nextBlockId` est utilise.
 
 Pour les conditions `variable` et `affinity`, `expectedValue` represente un seuil minimal
 (`valeur courante >= expectedValue`), pas une egalite stricte.
@@ -131,6 +131,8 @@ Pour les conditions `variable` et `affinity`, `expectedValue` represente un seui
   Champ legacy conserve pour compatibilite descendante avec les anciens switches numeriques.
 - `cases[]`:
   - `id`: string
+  - `logic`: `"and" | "or"`
+    `and` = toutes les conditions doivent etre vraies. `or` = au moins une condition doit etre vraie.
   - `conditionType`: `"choice" | "value" | "mixed"`
     Champ legacy/miroir pour compatibilite.
   - `expectedValue`: number

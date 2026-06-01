@@ -130,9 +130,14 @@ function switchCaseMatches(
   npcAffinity: Record<string, number>,
 ): boolean {
   const conditions = switchCase.conditions ?? [];
-  return conditions.length > 0 && conditions.every((condition) =>
-    switchConditionMatches(condition, variables, choiceHistory, npcAffinity)
-  );
+  if (conditions.length === 0) return false;
+  return switchCase.logic === "or"
+    ? conditions.some((condition) =>
+        switchConditionMatches(condition, variables, choiceHistory, npcAffinity)
+      )
+    : conditions.every((condition) =>
+        switchConditionMatches(condition, variables, choiceHistory, npcAffinity)
+      );
 }
 
 export function usePreviewRuntime({

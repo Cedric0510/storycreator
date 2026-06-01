@@ -242,6 +242,7 @@ export function SwitchEditorSection({
                   ...candidate.cases,
                   syncCase({
                     id: createId("switch_case"),
+                    logic: "and",
                     conditionType: "mixed",
                     expectedValue: 0,
                     conditions: [buildDefaultCondition()],
@@ -285,11 +286,38 @@ export function SwitchEditorSection({
               x
             </button>
           </div>
+          <label>
+            Mode du cas
+            <select
+              value={item.logic}
+              onChange={(event) =>
+                onUpdateSelectedBlock((candidate) => {
+                  if (candidate.type !== "switch") return candidate;
+                  return {
+                    ...candidate,
+                    cases: candidate.cases.map((candidateCase) =>
+                      candidateCase.id === item.id
+                        ? syncCase({
+                            ...candidateCase,
+                            logic: event.target.value === "or" ? "or" : "and",
+                          })
+                        : candidateCase,
+                    ),
+                  };
+                })
+              }
+              disabled={!canEdit}
+            >
+              <option value="and">Toutes les conditions (ET)</option>
+              <option value="or">Au moins une condition (OU)</option>
+            </select>
+          </label>
           <div className="section-title-row">
             <div className="title-with-help">
-              <span>Conditions (ET)</span>
+              <span>Conditions</span>
               <HelpHint title="Conditions multiples">
-                Toutes les conditions de ce cas doivent etre vraies pour activer la cible.
+                Choisis ET pour exiger toutes les conditions, ou OU pour exiger au moins une
+                condition.
               </HelpHint>
             </div>
             <button

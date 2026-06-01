@@ -131,6 +131,7 @@ export interface DialogueLineCondition {
 
 export type SwitchConditionType = "choice" | "variable" | "affinity";
 export type SwitchComparisonOperator = "eq" | "ne" | "gt" | "gte" | "lt" | "lte";
+export type SwitchCaseLogic = "and" | "or";
 
 export interface SwitchCondition {
   id: string;
@@ -484,9 +485,10 @@ export interface ChoiceBlock extends BaseBlock {
 
 export interface SwitchCase {
   id: string;
+  logic: SwitchCaseLogic;
   conditionType: "value" | "choice" | "mixed";
   expectedValue: number;
-  /** Unified conditions combined with AND (authoritative representation). */
+  /** Unified conditions evaluated with case-level logic (authoritative representation). */
   conditions: SwitchCondition[];
   /** Choice conditions combined with AND (choice mode only). */
   choiceConditions: SwitchChoiceCondition[];
@@ -768,6 +770,7 @@ export function syncSwitchCaseCompatibility(caseItem: SwitchCase): SwitchCase {
 
   return {
     ...caseItem,
+    logic: caseItem.logic === "or" ? "or" : "and",
     conditions: normalizedConditions,
     conditionType: onlyChoiceConditions ? "choice" : onlySingleVariableCondition ? "value" : "mixed",
     expectedValue: onlySingleVariableCondition
@@ -783,7 +786,8 @@ export function syncSwitchCaseCompatibility(caseItem: SwitchCase): SwitchCase {
 
 export function describeSwitchCase(caseItem: SwitchCase): string {
   const conditionCount = caseItem.conditions?.length ?? 0;
-  if (conditionCount === 0) return "Aucune condition";
+  const logicLabel = caseItem.logic === "or" ? "OU" : "ET";
+  if (conditionCount === 0) return `${logicLabel}: aucune condition`;
 
   const counts = {
     choice: 0,
@@ -798,7 +802,7 @@ export function describeSwitchCase(caseItem: SwitchCase): string {
   if (counts.choice > 0) parts.push(counts.choice === 1 ? "1 choix" : `${counts.choice} choix`);
   if (counts.variable > 0) parts.push(counts.variable === 1 ? "1 ressource" : `${counts.variable} ressources`);
   if (counts.affinity > 0) parts.push(counts.affinity === 1 ? "1 affinite" : `${counts.affinity} affinites`);
-  return parts.join(" + ");
+  return `${logicLabel}: ${parts.join(" + ")}`;
 }
 
 function createDefaultChoiceOption(label: ChoiceLabel): ChoiceOption {
@@ -1041,6 +1045,7 @@ export function createBlock(type: BlockType, position: XYPosition): StoryBlock {
       cases: [
         {
           id: createId("switch_case"),
+          logic: "and",
           conditionType: "choice",
           expectedValue: 1,
           conditions: [
@@ -1689,6 +1694,7 @@ export function normalizeStoryBlock(block: StoryBlock): StoryBlock {
 
               return syncSwitchCaseCompatibility({
                 id: typeof item.id === "string" && item.id ? item.id : createId("switch_case"),
+                logic: item.logic === "or" ? "or" : "and",
                 conditionType: legacyConditionType,
                 expectedValue:
                   typeof item.expectedValue === "number" && Number.isFinite(item.expectedValue)
@@ -2200,12 +2206,13 @@ export function validateStoryBlocks(
           caseSignatureParts.push(conditionKey);
         }
 
-        const caseSignature = caseSignatureParts.sort().join(" && ");
-        if (!caseSignature) continue;
+        const conditionSignature = caseSignatureParts.sort().join(" && ");
+        if (!conditionSignature) continue;
+        const caseSignature = `${item.logic === "or" ? "or" : "and"}::${conditionSignature}`;
         if (seenCaseSignatures.has(caseSignature)) {
           issues.push({
             level: "warning",
-            message: "Deux cas du switch utilisent exactement le meme ensemble de conditions.",
+            message: "Deux cas du switch utilisent exactement le meme ensemble de conditions avec la meme logique.",
             blockId: block.id,
           });
           break;

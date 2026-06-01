@@ -487,44 +487,14 @@ export function isGameplayCompleted(block: GameplayBlock, interactedObjectIds: S
 
 export function buildInitialStudio(): InitialStudio {
   const titleBlock = createBlock("title", { x: 70, y: 120 }) as TitleBlock;
-  const introBlock = createBlock("cinematic", { x: 410, y: 120 });
-  const dialogueBlock = createBlock("dialogue", { x: 760, y: 280 }) as DialogueBlock;
 
   titleBlock.name = "Accueil histoire";
   titleBlock.storyTitle = "Nouvelle histoire";
   titleBlock.subtitle = "Un moteur de light novel";
-  titleBlock.nextBlockId = introBlock.id;
+  titleBlock.nextBlockId = null;
 
-  if (introBlock.type === "cinematic") {
-    introBlock.name = "Scene intro";
-    introBlock.heading = "Prologue";
-    introBlock.body = "L'aube se leve sur la ville. Le joueur rejoint son equipe.";
-    introBlock.narrations = introBlock.narrations.map((narration, index) =>
-      index === 0
-        ? {
-            ...narration,
-            heading: "Prologue",
-            body: "L'aube se leve sur la ville. Le joueur rejoint son equipe.",
-          }
-        : narration,
-    );
-    introBlock.nextBlockId = dialogueBlock.id;
-  }
-
-  dialogueBlock.name = "Premier choix";
-  dialogueBlock.lines[0].speaker = "Ami";
-  dialogueBlock.lines[0].text = "As-tu bien dormi ?";
-  dialogueBlock.lines[0].responses = dialogueBlock.lines[0].responses.map((resp) => {
-    if (resp.label === "A") return { ...resp, text: "Oui" };
-    if (resp.label === "B") return { ...resp, text: "Non" };
-    return resp;
-  });
-
-  const nodes = [blockToNode(titleBlock), blockToNode(introBlock), blockToNode(dialogueBlock)];
-  const edges = [
-    buildEdge(titleBlock.id, introBlock.id, "next"),
-    buildEdge(introBlock.id, dialogueBlock.id, "next"),
-  ];
+  const nodes = [blockToNode(titleBlock)];
+  const edges: EditorEdge[] = [];
 
   const ownerId = createId("member");
   const editorId = createId("member");
@@ -541,7 +511,6 @@ export function buildInitialStudio(): InitialStudio {
     },
     variables: [
       { id: createId("var"), name: "energie", initialValue: 0 },
-      { id: createId("var"), name: "relation_ami", initialValue: 0 },
     ],
     items: [],
     hero: createDefaultHeroProfile(),
@@ -558,7 +527,7 @@ export function buildInitialStudio(): InitialStudio {
         memberId: ownerId,
         timestamp: new Date().toISOString(),
         action: "project_init",
-        details: "Projet initialise avec 3 blocs de base.",
+        details: "Projet initialise avec un bloc titre de base.",
       },
     ],
   };
@@ -1024,6 +993,7 @@ export function serializeBlock(
         : null,
       cases: block.cases.map((item) => ({
         id: item.id,
+        logic: item.logic,
         conditionType: item.conditionType,
         expectedValue: item.expectedValue,
         conditions: item.conditions.map((condition) => ({
@@ -1362,6 +1332,7 @@ export function deserializeBlockFromExport(
           : null,
       cases: rawCases.map((item: Record<string, unknown>) => ({
         id: (item.id as string) ?? createId("switch_case"),
+        logic: item.logic === "or" ? "or" : "and",
         conditionType:
           item.conditionType === "choice"
             ? "choice"
