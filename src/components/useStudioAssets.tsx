@@ -45,6 +45,7 @@ interface UseStudioAssetsParams {
   project: ProjectMeta;
   edges: EditorEdge[];
   variableNameById: Map<string, string>;
+  openedValidatedChapterIds: string[];
   canEdit: boolean;
   supabase: SupabaseClient | null;
   authUser: User | null;
@@ -60,6 +61,7 @@ export function useStudioAssets({
   project,
   edges,
   variableNameById,
+  openedValidatedChapterIds,
   canEdit,
   supabase,
   authUser,
@@ -258,6 +260,15 @@ export function useStudioAssets({
       }
     }
 
+    const openedValidatedChapterIdSet = new Set(
+      project.chapters
+        .filter((chapter) => chapter.validated)
+        .map((chapter) => chapter.id),
+    );
+    const persistedOpenedValidatedChapterIds = openedValidatedChapterIds.filter((chapterId) =>
+      openedValidatedChapterIdSet.has(chapterId),
+    );
+
     const payload = {
       schemaVersion: project.info.schemaVersion,
       exportedAt: new Date().toISOString(),
@@ -269,6 +280,9 @@ export function useStudioAssets({
         startBlockId: project.info.startBlockId,
         updatedAt: project.info.updatedAt,
         chapters: project.chapters,
+      },
+      studio: {
+        openedValidatedChapterIds: persistedOpenedValidatedChapterIds,
       },
       variables: project.variables,
       itemsCatalog: project.items.map((item) => ({
@@ -413,6 +427,7 @@ export function useStudioAssets({
     edges,
     logAction,
     project,
+    openedValidatedChapterIds,
     setLastValidation,
     setStatusMessage,
     supabase,
@@ -467,13 +482,14 @@ export function useStudioAssets({
    * Import a previously-exported ZIP bundle and decode its payload:
    * project metadata, blocks/nodes/edges, asset refs (files stored in IndexedDB).
    * This function does not mutate studio state directly; caller decides merge/replace strategy.
-   * Returns { nodes, edges, project, assetRefs } on success, or null.
+   * Returns { nodes, edges, project, assetRefs, studioOpenedValidatedChapterIds } on success, or null.
    */
   const importFromZip = useCallback(async (file: File): Promise<{
     nodes: EditorNode[];
     edges: EditorEdge[];
     project: ProjectMeta;
     assetRefs: Record<string, AssetRef>;
+    studioOpenedValidatedChapterIds: string[];
   } | null> => {
     try {
       const zip = await JSZip.loadAsync(file);
@@ -554,6 +570,11 @@ export function useStudioAssets({
       const rawVariables = Array.isArray(storyData.variables) ? storyData.variables : [];
       const rawItemsCatalog = Array.isArray(storyData.itemsCatalog) ? storyData.itemsCatalog : [];
       const rawHero = (storyData.hero ?? {}) as Record<string, unknown>;
+      const rawStudio = (storyData.studio ?? {}) as Record<string, unknown>;
+      const studioOpenedValidatedChapterIds = Array.isArray(rawStudio.openedValidatedChapterIds)
+        ? rawStudio.openedValidatedChapterIds
+            .filter((chapterId): chapterId is string => typeof chapterId === "string" && chapterId.length > 0)
+        : [];
 
       const variables: VariableDefinition[] = rawVariables.map(
         (v: Record<string, unknown>) => ({
@@ -651,6 +672,7 @@ export function useStudioAssets({
         edges: importedEdges,
         project: importedProject,
         assetRefs: importedAssetRefs,
+        studioOpenedValidatedChapterIds,
       };
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err);

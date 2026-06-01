@@ -63,11 +63,16 @@ Chaque bloc contient au minimum:
 
 - `heading`: string
 - `body`: string
+- `narrations`: `Array<{ id, heading, body, continueTargetBlockId, continueTargetNarrationId }>`
+- `startNarrationId`: string
 - `backgroundPath`: string | null
 - `videoPath`: string | null
 - `voicePath`: string | null
 - `autoAdvanceSeconds`: number | null
 - `nextBlockId`: string | null
+
+`heading` / `body` restent presents pour compatibilite descendante et refletent la narration
+de depart. Les nouvelles cinematiques multi-ecrans utilisent `narrations[]`.
 
 ### `dialogue`
 

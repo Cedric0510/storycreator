@@ -23,6 +23,7 @@ import {
   NpcProfileEditorSection,
 } from "@/components/AuthorStudioProfileChapterSections";
 import {
+  CinematicNarration,
   CharacterLayer,
   ChapterEndBlock,
   CinematicBlock,
@@ -30,6 +31,7 @@ import {
   GameplayObject,
   ProjectMeta,
   StoryBlock,
+  createDefaultCinematicNarration,
   createId,
 } from "@/lib/story";
 
@@ -147,6 +149,7 @@ function CinematicEditorSection({
   onStatusMessage,
 }: CinematicEditorSectionProps) {
   const layers = block.characterLayers ?? [];
+  const narrations = block.narrations ?? [];
 
   const withLegacyCharacterAsset = useCallback((nextLayers: CharacterLayer[]) => {
     const legacyCharacterAssetId =
@@ -157,32 +160,27 @@ function CinematicEditorSection({
     };
   }, []);
 
+  const withSyncedNarrations = useCallback((nextNarrations: CinematicNarration[]) => {
+    const safeNarrations =
+      nextNarrations.length > 0 ? nextNarrations : [createDefaultCinematicNarration()];
+    const startNarration = safeNarrations[0];
+    return {
+      narrations: safeNarrations,
+      startNarrationId: startNarration.id,
+      heading: startNarration.heading,
+      body: startNarration.body,
+    };
+  }, []);
+
   return (
     <div className="subsection">
       <div className="title-with-help">
         <h3>Bloc cinematique</h3>
         <HelpHint title="Bloc cinematique">
-          Permet de raconter une scene avec texte, image/video/voix puis d&apos;avancer vers
-          un autre bloc. Tu peux aussi composer une scene multi-personnages.
+          Permet de raconter une scene avec plusieurs ecrans de narration en reutilisant la
+          meme scene image/video/voix. Tu peux aussi composer une scene multi-personnages.
         </HelpHint>
       </div>
-      <label>
-        Titre scene
-        <input
-          value={block.heading}
-          onChange={(event) => onSetSelectedDynamicField("heading", event.target.value)}
-          disabled={!canEdit}
-        />
-      </label>
-      <label>
-        Texte / narration
-        <textarea
-          rows={4}
-          value={block.body}
-          onChange={(event) => onSetSelectedDynamicField("body", event.target.value)}
-          disabled={!canEdit}
-        />
-      </label>
       <label>
         Auto avance (secondes)
         <input
@@ -198,6 +196,127 @@ function CinematicEditorSection({
           disabled={!canEdit}
         />
       </label>
+
+      <div className="section-title-row">
+        <div className="title-with-help">
+          <h3>Narrations ({narrations.length})</h3>
+          <HelpHint title="Narrations">
+            Chaque narration correspond a un ecran de texte interne au bloc. Le bouton
+            Continuer passe a la narration suivante puis au bloc externe.
+          </HelpHint>
+        </div>
+        <button
+          className="button-secondary"
+          type="button"
+          onClick={() =>
+            onUpdateSelectedBlock((b) => {
+              if (b.type !== "cinematic") return b;
+              return {
+                ...b,
+                ...withSyncedNarrations([
+                  ...(b.narrations ?? []),
+                  createDefaultCinematicNarration(),
+                ]),
+              };
+            })
+          }
+          disabled={!canEdit}
+        >
+          + narration
+        </button>
+      </div>
+      {narrations.map((narration, narrationIndex) => (
+        <div key={narration.id} className="choice-card" style={{ marginBottom: 12 }}>
+          <div className="section-title-row" style={{ marginBottom: 8 }}>
+            <strong>Narration {narrationIndex + 1}</strong>
+            <div className="row-inline">
+              <button
+                className="button-secondary"
+                type="button"
+                onClick={() =>
+                  onUpdateSelectedBlock((b) => {
+                    if (b.type !== "cinematic") return b;
+                    const insertAt = narrationIndex + 1;
+                    const nextNarrations = [...(b.narrations ?? [])];
+                    nextNarrations.splice(insertAt, 0, createDefaultCinematicNarration());
+                    return {
+                      ...b,
+                      ...withSyncedNarrations(nextNarrations),
+                    };
+                  })
+                }
+                disabled={!canEdit}
+              >
+                + narration
+              </button>
+              <button
+                className="button-danger"
+                type="button"
+                onClick={() =>
+                  onUpdateSelectedBlock((b) => {
+                    if (b.type !== "cinematic") return b;
+                    return {
+                      ...b,
+                      ...withSyncedNarrations(
+                        (b.narrations ?? []).filter((item) => item.id !== narration.id),
+                      ),
+                    };
+                  })
+                }
+                disabled={!canEdit || narrations.length <= 1}
+                title="Supprimer cette narration"
+              >
+                x
+              </button>
+            </div>
+          </div>
+          <label>
+            Titre narration
+            <input
+              value={narration.heading}
+              onChange={(event) =>
+                onUpdateSelectedBlock((b) => {
+                  if (b.type !== "cinematic") return b;
+                  return {
+                    ...b,
+                    ...withSyncedNarrations(
+                      (b.narrations ?? []).map((item) =>
+                        item.id === narration.id
+                          ? { ...item, heading: event.target.value }
+                          : item,
+                      ),
+                    ),
+                  };
+                })
+              }
+              disabled={!canEdit}
+            />
+          </label>
+          <label>
+            Texte / narration
+            <textarea
+              rows={4}
+              value={narration.body}
+              onChange={(event) =>
+                onUpdateSelectedBlock((b) => {
+                  if (b.type !== "cinematic") return b;
+                  return {
+                    ...b,
+                    ...withSyncedNarrations(
+                      (b.narrations ?? []).map((item) =>
+                        item.id === narration.id
+                          ? { ...item, body: event.target.value }
+                          : item,
+                      ),
+                    ),
+                  };
+                })
+              }
+              disabled={!canEdit}
+            />
+          </label>
+        </div>
+      ))}
 
       {/* --- Scene clipboard: copy / paste images + layout --- */}
       <SceneCopyPaste

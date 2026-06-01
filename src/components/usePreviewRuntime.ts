@@ -7,11 +7,19 @@ import {
   interactiveObjectIds,
   isGameplayCompleted,
 } from "@/components/author-studio-core";
-import { ProjectMeta, DialogueBlock, DialogueLine, NpcProfileBlock, StoryBlock } from "@/lib/story";
+import {
+  CinematicBlock,
+  DialogueBlock,
+  DialogueLine,
+  NpcProfileBlock,
+  ProjectMeta,
+  StoryBlock,
+} from "@/lib/story";
 
 export interface PreviewRuntimeState {
   currentBlockId: string | null;
   currentDialogueLineId: string | null;
+  currentCinematicNarrationId: string | null;
   variables: Record<string, number>;
   /** Last selected option id per choice block id. */
   choiceHistory: Record<string, string>;
@@ -84,6 +92,15 @@ function findNextDialogueLineId(
   return null;
 }
 
+function findNextCinematicNarrationId(
+  block: CinematicBlock,
+  currentNarrationId: string,
+): string | null {
+  const currentIndex = block.narrations.findIndex((narration) => narration.id === currentNarrationId);
+  if (currentIndex < 0) return block.narrations[0]?.id ?? null;
+  return block.narrations[currentIndex + 1]?.id ?? null;
+}
+
 export function usePreviewRuntime({
   project,
   blockById,
@@ -101,6 +118,7 @@ export function usePreviewRuntime({
       entryLineId?: string | null,
       equippedInventoryItemId?: string | null,
       choiceHistory: Record<string, string> = {},
+      entryCinematicNarrationId?: string | null,
     ) => {
       const nextEquippedInventoryItemId =
         equippedInventoryItemId && (inventory[equippedInventoryItemId] ?? 0) > 0
@@ -109,6 +127,7 @@ export function usePreviewRuntime({
       const buildEndedState = (endedVariables: Record<string, number>): PreviewRuntimeState => ({
         currentBlockId: null,
         currentDialogueLineId: null,
+        currentCinematicNarrationId: null,
         variables: endedVariables,
         choiceHistory,
         inventory,
@@ -199,6 +218,30 @@ export function usePreviewRuntime({
         return {
           currentBlockId: resolvedBlockId,
           currentDialogueLineId: resolvedLineId,
+          currentCinematicNarrationId: null,
+          variables: nextVariables,
+          choiceHistory,
+          inventory,
+          npcAffinity,
+          ended: false,
+          gameplayInteractedObjectIds: [],
+          gameplayObjectVisibility: {},
+          gameplayButtonSequenceInput: [],
+          equippedInventoryItemId: nextEquippedInventoryItemId,
+          gameplayMessage: null,
+        } as PreviewRuntimeState;
+      }
+
+      if (block && block.type === "cinematic") {
+        const resolvedNarrationId =
+          (entryCinematicNarrationId && block.narrations.find((item) => item.id === entryCinematicNarrationId)?.id)
+          ?? block.narrations.find((item) => item.id === block.startNarrationId)?.id
+          ?? block.narrations[0]?.id
+          ?? null;
+        return {
+          currentBlockId: resolvedBlockId,
+          currentDialogueLineId: null,
+          currentCinematicNarrationId: resolvedNarrationId,
           variables: nextVariables,
           choiceHistory,
           inventory,
@@ -216,6 +259,7 @@ export function usePreviewRuntime({
         return {
           currentBlockId: resolvedBlockId,
           currentDialogueLineId: null,
+          currentCinematicNarrationId: null,
           variables: nextVariables,
           choiceHistory,
           inventory,
@@ -238,6 +282,7 @@ export function usePreviewRuntime({
       return {
         currentBlockId: resolvedBlockId,
         currentDialogueLineId: null,
+        currentCinematicNarrationId: null,
         variables: nextVariables,
         choiceHistory,
         inventory,
@@ -364,6 +409,7 @@ export function usePreviewRuntime({
         setPreviewState({
           ...previewState,
           currentDialogueLineId: nextLineId,
+          currentCinematicNarrationId: null,
           gameplayMessage: null,
         });
         return;
@@ -382,6 +428,62 @@ export function usePreviewRuntime({
         ),
       );
       return;
+    }
+
+    if (previewBlock.type === "cinematic") {
+      const currentNarration =
+        previewState.currentCinematicNarrationId
+          ? previewBlock.narrations.find((item) => item.id === previewState.currentCinematicNarrationId) ?? null
+          : previewBlock.narrations.find((item) => item.id === previewBlock.startNarrationId)
+            ?? previewBlock.narrations[0]
+            ?? null;
+      if (currentNarration?.continueTargetBlockId) {
+        setPreviewState(
+          buildPreviewState(
+            currentNarration.continueTargetBlockId,
+            previewState.variables,
+            previewState.inventory,
+            previewState.npcAffinity,
+            null,
+            previewState.equippedInventoryItemId,
+            previewState.choiceHistory,
+            currentNarration.continueTargetNarrationId,
+          ),
+        );
+        return;
+      }
+
+      if (currentNarration?.continueTargetNarrationId) {
+        setPreviewState(
+          buildPreviewState(
+            previewBlock.id,
+            previewState.variables,
+            previewState.inventory,
+            previewState.npcAffinity,
+            null,
+            previewState.equippedInventoryItemId,
+            previewState.choiceHistory,
+            currentNarration.continueTargetNarrationId,
+          ),
+        );
+        return;
+      }
+
+      const currentNarrationId =
+        currentNarration?.id
+        ?? null;
+      if (currentNarrationId) {
+        const nextNarrationId = findNextCinematicNarrationId(previewBlock, currentNarrationId);
+        if (nextNarrationId) {
+          setPreviewState({
+            ...previewState,
+            currentDialogueLineId: null,
+            currentCinematicNarrationId: nextNarrationId,
+            gameplayMessage: null,
+          });
+          return;
+        }
+      }
     }
 
     if (previewBlock.type === "gameplay") {
@@ -451,6 +553,7 @@ export function usePreviewRuntime({
           setPreviewState({
             ...previewState,
             currentDialogueLineId: resolvedLineId,
+            currentCinematicNarrationId: null,
             variables: nextVariables,
             npcAffinity: nextAffinity,
           });

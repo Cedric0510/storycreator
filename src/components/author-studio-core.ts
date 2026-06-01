@@ -70,6 +70,28 @@ export function isDialogueAutoNextHandle(handle: string | null | undefined): boo
   return Boolean(handle && /^line-next-(.+)$/.test(handle));
 }
 
+export function narrationIdFromHandle(handle: string | null | undefined): string | null {
+  if (!handle) return null;
+  const match = /^narration-(.+)$/.exec(handle);
+  return match ? match[1] : null;
+}
+
+export function narrationContinueIdFromHandle(handle: string | null | undefined): string | null {
+  if (!handle) return null;
+  const match = /^narration-continue-(.+)$/.exec(handle);
+  return match ? match[1] : null;
+}
+
+export function isCinematicAutoNextHandle(handle: string | null | undefined): boolean {
+  return Boolean(handle && /^narration-next-(.+)$/.test(handle));
+}
+
+export function narrationAutoNextIdFromHandle(handle: string | null | undefined): string | null {
+  if (!handle) return null;
+  const match = /^narration-next-(.+)$/.exec(handle);
+  return match ? match[1] : null;
+}
+
 export function gameplayLockIdFromHandle(handle: string | null | undefined): string | null {
   if (!handle) return null;
   const match = /^lock-(.+)$/.exec(handle);
@@ -90,6 +112,8 @@ export function buildEdge(source: string, target: string, sourceHandle: string, 
   const lockId = gameplayLockIdFromHandle(sourceHandle);
   const switchCaseId = switchCaseIdFromHandle(sourceHandle);
   const lineContinueId = lineContinueIdFromHandle(sourceHandle);
+  const narrationContinueId = narrationContinueIdFromHandle(sourceHandle);
+  const isCinematicAutoNext = isCinematicAutoNextHandle(sourceHandle);
   const isButtonSequenceSuccess = sourceHandle === GAMEPLAY_BUTTON_SEQUENCE_SUCCESS_HANDLE;
   const isButtonSequenceFailure = sourceHandle === GAMEPLAY_BUTTON_SEQUENCE_FAILURE_HANDLE;
   const isSwitchDefault = sourceHandle === SWITCH_DEFAULT_HANDLE;
@@ -104,6 +128,10 @@ export function buildEdge(source: string, target: string, sourceHandle: string, 
             ? "Cas"
             : lineContinueId
               ? "Continuer"
+            : narrationContinueId
+              ? "Continuer"
+            : isCinematicAutoNext
+              ? "Suite"
             : isSwitchDefault
               ? "Sinon"
           : isButtonSequenceSuccess
@@ -197,6 +225,63 @@ export function rebuildEdgesFromNodes(nodes: EditorNode[]): EditorEdge[] {
       }
       if (block.npcProfileBlockId) {
         edges.push(buildEdge(block.npcProfileBlockId, block.id, "npc-link"));
+      }
+    } else if (block.type === "cinematic") {
+      for (let narrationIndex = 0; narrationIndex < block.narrations.length; narrationIndex += 1) {
+        const narration = block.narrations[narrationIndex];
+        if (narration.continueTargetBlockId) {
+          const targetHandle = narration.continueTargetNarrationId
+            ? `narration-${narration.continueTargetNarrationId}`
+            : undefined;
+          edges.push(
+            buildEdge(
+              block.id,
+              narration.continueTargetBlockId,
+              `narration-continue-${narration.id}`,
+              "Continuer",
+              targetHandle,
+            ),
+          );
+          continue;
+        }
+
+        if (narration.continueTargetNarrationId) {
+          edges.push(
+            buildEdge(
+              block.id,
+              block.id,
+              `narration-continue-${narration.id}`,
+              "Continuer",
+              `narration-${narration.continueTargetNarrationId}`,
+            ),
+          );
+          continue;
+        }
+
+        const nextNarration = block.narrations[narrationIndex + 1];
+        if (nextNarration) {
+          const autoNextEdge = buildEdge(
+            block.id,
+            block.id,
+            `narration-next-${narration.id}`,
+            "Suite",
+            `narration-${nextNarration.id}`,
+          );
+          autoNextEdge.id = `cinematic-auto-next-${block.id}-${narration.id}-${nextNarration.id}`;
+          edges.push(autoNextEdge);
+          continue;
+        }
+
+        if (block.nextBlockId) {
+          const autoExitEdge = buildEdge(
+            block.id,
+            block.nextBlockId,
+            `narration-next-${narration.id}`,
+            "Sortie",
+          );
+          autoExitEdge.id = `cinematic-auto-exit-${block.id}-${narration.id}-${block.nextBlockId}`;
+          edges.push(autoExitEdge);
+        }
       }
     } else if (block.type === "choice") {
       for (const option of block.choices) {
@@ -415,6 +500,15 @@ export function buildInitialStudio(): InitialStudio {
     introBlock.name = "Scene intro";
     introBlock.heading = "Prologue";
     introBlock.body = "L'aube se leve sur la ville. Le joueur rejoint son equipe.";
+    introBlock.narrations = introBlock.narrations.map((narration, index) =>
+      index === 0
+        ? {
+            ...narration,
+            heading: "Prologue",
+            body: "L'aube se leve sur la ville. Le joueur rejoint son equipe.",
+          }
+        : narration,
+    );
     introBlock.nextBlockId = dialogueBlock.id;
   }
 
@@ -509,6 +603,22 @@ export function removeNodeReferences(block: StoryBlock, removedBlockId: string):
             : resp,
         ),
       })),
+    };
+  }
+
+  if (block.type === "cinematic") {
+    return {
+      ...block,
+      nextBlockId: block.nextBlockId === removedBlockId ? null : block.nextBlockId,
+      narrations: block.narrations.map((narration) =>
+        narration.continueTargetBlockId === removedBlockId
+          ? {
+              ...narration,
+              continueTargetBlockId: null,
+              continueTargetNarrationId: null,
+            }
+          : narration,
+      ),
     };
   }
 
@@ -755,9 +865,25 @@ export function serializeBlock(
   }
 
   if (block.type === "cinematic") {
+    const fallbackNarrations =
+      (block.narrations ?? []).length > 0
+        ? block.narrations
+        : [
+            {
+              id: block.startNarrationId || createId("cnarr"),
+              heading: block.heading,
+              body: block.body,
+              continueTargetBlockId: null,
+              continueTargetNarrationId: null,
+            },
+          ];
     const legacyCharacterAssetId =
       block.characterAssetId
       ?? (block.characterLayers ?? []).find((layer) => layer.assetId)?.assetId
+      ?? null;
+    const startNarration =
+      fallbackNarrations.find((item) => item.id === block.startNarrationId)
+      ?? fallbackNarrations[0]
       ?? null;
     return {
       id: block.id,
@@ -767,8 +893,16 @@ export function serializeBlock(
       notes: block.notes,
       chapterId,
       entryEffects: serializeEffects(block.entryEffects ?? [], variableNameById),
-      heading: block.heading,
-      body: block.body,
+      heading: startNarration?.heading ?? block.heading,
+      body: startNarration?.body ?? block.body,
+      narrations: fallbackNarrations.map((narration) => ({
+        id: narration.id,
+        heading: narration.heading,
+        body: narration.body,
+        continueTargetBlockId: narration.continueTargetBlockId,
+        continueTargetNarrationId: narration.continueTargetNarrationId,
+      })),
+      startNarrationId: startNarration?.id ?? block.startNarrationId,
       backgroundPath: assetPath(block.backgroundAssetId, assetRefs),
       characterPath: assetPath(legacyCharacterAssetId, assetRefs),
       characterLayers: (block.characterLayers ?? []).map((layer) => ({
@@ -1061,12 +1195,24 @@ export function deserializeBlockFromExport(
         layout: (layer.layout as CharacterLayer["layout"] | undefined) ?? { ...DEFAULT_CHARACTER_LAYOUT },
       }),
     );
+    const rawNarrations = Array.isArray(raw.narrations) ? raw.narrations : [];
 
     return normalizeStoryBlock({
       ...base,
       type: "cinematic",
       heading: (raw.heading as string) ?? "",
       body: (raw.body as string) ?? "",
+      narrations: rawNarrations.map((item: Record<string, unknown>) => ({
+        id: (item.id as string) ?? createId("cnarr"),
+        heading: (item.heading as string) ?? "",
+        body: (item.body as string) ?? "",
+        continueTargetBlockId:
+          typeof item.continueTargetBlockId === "string" ? item.continueTargetBlockId : null,
+        continueTargetNarrationId:
+          typeof item.continueTargetNarrationId === "string" ? item.continueTargetNarrationId : null,
+      })),
+      startNarrationId:
+        typeof raw.startNarrationId === "string" ? raw.startNarrationId : "",
       backgroundAssetId: resolveAssetId(raw.backgroundPath, pathToAssetId),
       characterAssetId: resolveAssetId(raw.characterPath, pathToAssetId),
       characterLayers,

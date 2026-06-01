@@ -276,6 +276,8 @@ export interface CinematicBlock extends BaseBlock {
   type: "cinematic";
   heading: string;
   body: string;
+  narrations: CinematicNarration[];
+  startNarrationId: string;
   backgroundAssetId: string | null;
   /** @deprecated Use characterLayers instead. Kept for migration. */
   characterAssetId: string | null;
@@ -286,6 +288,14 @@ export interface CinematicBlock extends BaseBlock {
   voiceAssetId: string | null;
   autoAdvanceSeconds: number | null;
   nextBlockId: string | null;
+}
+
+export interface CinematicNarration {
+  id: string;
+  heading: string;
+  body: string;
+  continueTargetBlockId: string | null;
+  continueTargetNarrationId: string | null;
 }
 
 export interface DialogueResponse {
@@ -658,6 +668,16 @@ export function createDefaultLine(speaker?: string): DialogueLine {
   };
 }
 
+export function createDefaultCinematicNarration(): CinematicNarration {
+  return {
+    id: createId("cnarr"),
+    heading: "Cinematique",
+    body: "",
+    continueTargetBlockId: null,
+    continueTargetNarrationId: null,
+  };
+}
+
 function createDefaultChoiceOption(label: ChoiceLabel): ChoiceOption {
   return {
     id: createId("option"),
@@ -837,12 +857,15 @@ export function createBlock(type: BlockType, position: XYPosition): StoryBlock {
   }
 
   if (type === "cinematic") {
+    const firstNarration = createDefaultCinematicNarration();
     return {
       ...base,
       type,
       name: "Intro",
-      heading: "Cinematique",
-      body: "",
+      heading: firstNarration.heading,
+      body: firstNarration.body,
+      narrations: [firstNarration],
+      startNarrationId: firstNarration.id,
       backgroundAssetId: null,
       characterAssetId: null,
       sceneLayout: { ...DEFAULT_SCENE_LAYOUT },
@@ -1313,9 +1336,65 @@ export function normalizeStoryBlock(block: StoryBlock): StoryBlock {
   if (block.type === "cinematic") {
     const raw = block as unknown as Record<string, unknown>;
     const sceneLayout = normalizeSceneLayout(raw.sceneLayout);
+    const rawNarrations = Array.isArray(raw.narrations) ? raw.narrations : [];
+    const normalizedNarrations = rawNarrations
+      .map((item) => {
+        if (!item || typeof item !== "object") return null;
+        const narration = item as Record<string, unknown>;
+        return {
+          id:
+            typeof narration.id === "string" && narration.id
+              ? narration.id
+              : createId("cnarr"),
+          heading:
+            typeof narration.heading === "string"
+              ? narration.heading
+              : typeof raw.heading === "string"
+                ? raw.heading
+                : "Cinematique",
+          body:
+            typeof narration.body === "string"
+              ? narration.body
+              : typeof raw.body === "string"
+                ? raw.body
+                : "",
+          continueTargetBlockId:
+            typeof narration.continueTargetBlockId === "string" && narration.continueTargetBlockId
+              ? narration.continueTargetBlockId
+              : null,
+          continueTargetNarrationId:
+            typeof narration.continueTargetNarrationId === "string" && narration.continueTargetNarrationId
+              ? narration.continueTargetNarrationId
+              : null,
+        };
+      })
+      .filter((item): item is CinematicNarration => Boolean(item));
+    const fallbackNarration = {
+      id:
+        typeof raw.startNarrationId === "string" && raw.startNarrationId
+          ? raw.startNarrationId
+          : createId("cnarr"),
+      heading: typeof raw.heading === "string" ? raw.heading : "Cinematique",
+      body: typeof raw.body === "string" ? raw.body : "",
+      continueTargetBlockId: null,
+      continueTargetNarrationId: null,
+    };
+    const narrations =
+      normalizedNarrations.length > 0 ? normalizedNarrations : [fallbackNarration];
+    const startNarrationId =
+      typeof raw.startNarrationId === "string" &&
+      narrations.some((item) => item.id === raw.startNarrationId)
+        ? raw.startNarrationId
+        : narrations[0].id;
+    const startNarration =
+      narrations.find((item) => item.id === startNarrationId) ?? narrations[0];
     return {
       ...block,
       entryEffects: normalizeVariableEffects(raw.entryEffects),
+      heading: startNarration.heading,
+      body: startNarration.body,
+      narrations,
+      startNarrationId,
       characterAssetId:
         typeof raw.characterAssetId === "string" && raw.characterAssetId
           ? raw.characterAssetId as string
@@ -1516,6 +1595,16 @@ export function getBlockOutgoingTargets(block: StoryBlock) {
       .map((line) => line.continueTargetBlockId)
       .filter((targetId): targetId is string => Boolean(targetId));
     return Array.from(new Set([...responseTargets, ...continueTargets]));
+  }
+
+  if (block.type === "cinematic") {
+    const narrationTargets = (block.narrations ?? [])
+      .map((narration) => narration.continueTargetBlockId)
+      .filter((targetId): targetId is string => Boolean(targetId));
+    const targets = block.nextBlockId
+      ? [...narrationTargets, block.nextBlockId]
+      : narrationTargets;
+    return Array.from(new Set(targets));
   }
 
   if (block.type === "choice") {
@@ -1945,6 +2034,46 @@ export function validateStoryBlocks(
           message: "Renseigne un nom pour ce PNJ.",
           blockId: block.id,
         });
+      }
+    } else if (block.type === "cinematic") {
+      if ((block.narrations ?? []).length === 0) {
+        issues.push({
+          level: "error",
+          message: "Cette cinematique ne contient aucune narration.",
+          blockId: block.id,
+        });
+      }
+
+      for (const narration of block.narrations ?? []) {
+        if (!narration.body.trim()) {
+          issues.push({
+            level: "warning",
+            message: `Une narration de "${block.name || "Cinematique"}" est vide.`,
+            blockId: block.id,
+          });
+          break;
+        }
+
+        if (
+          narration.continueTargetNarrationId &&
+          !(block.narrations ?? []).some((item) => item.id === narration.continueTargetNarrationId)
+        ) {
+          issues.push({
+            level: "error",
+            message: "Une narration pointe vers une autre narration supprimee.",
+            blockId: block.id,
+          });
+          break;
+        }
+
+        if (narration.continueTargetBlockId && !blockById.has(narration.continueTargetBlockId)) {
+          issues.push({
+            level: "error",
+            message: "Une narration pointe vers un bloc supprime.",
+            blockId: block.id,
+          });
+          break;
+        }
       }
     } else if (block.type === "gameplay") {
       if (!block.objective.trim()) {

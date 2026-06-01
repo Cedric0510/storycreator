@@ -14,6 +14,7 @@ import {
 import { HelpHint } from "@/components/HelpHint";
 import {
   BLOCK_LABELS,
+  CinematicBlock,
   ChapterStartBlock,
   ChoiceBlock,
   DialogueBlock,
@@ -96,6 +97,65 @@ function DialogueOutputs({ block }: { block: DialogueBlock }) {
           )}
         </div>
       ))}
+    </div>
+  );
+}
+
+function CinematicOutputs({ block }: { block: CinematicBlock }) {
+  return (
+    <div className="story-node-dialogue-outputs">
+      {block.narrations.map((narration, narrationIndex) => {
+        const hasManualTarget =
+          Boolean(narration.continueTargetBlockId) || Boolean(narration.continueTargetNarrationId);
+        const hasAutoNarration = Boolean(!hasManualTarget && block.narrations[narrationIndex + 1]);
+        const hasAutoExit = Boolean(!hasManualTarget && !block.narrations[narrationIndex + 1] && block.nextBlockId);
+        return (
+          <div key={narration.id} className="story-node-dialogue-line-group">
+            <div className="story-node-dialogue-line-header">
+              <Handle
+                type="target"
+                id={`narration-${narration.id}`}
+                position={Position.Left}
+                className="story-node-handle"
+              />
+              <span className="story-node-dialogue-line-title">
+                {narration.heading || "Narration"}: {(narration.body || "…").slice(0, 30)}
+                {narration.body.length > 30 ? "…" : ""}
+              </span>
+            </div>
+            {(hasAutoNarration || hasAutoExit) && (
+              <div className="story-node-choice-row">
+                <span className="story-node-choice-label">▶</span>
+                <span className="story-node-choice-text">
+                  {hasAutoNarration ? "Suite auto" : "Sortie auto"}
+                </span>
+                <Handle
+                  type="source"
+                  id={`narration-next-${narration.id}`}
+                  position={Position.Right}
+                  className="story-node-handle"
+                />
+              </div>
+            )}
+            <div className="story-node-choice-row">
+              <span className="story-node-choice-label">&gt;&gt;</span>
+              <span className="story-node-choice-text">
+                {narration.continueTargetNarrationId
+                  ? "Continuer -> narration"
+                  : narration.continueTargetBlockId
+                    ? "Continuer -> bloc"
+                    : "Continuer -> sortie"}
+              </span>
+              <Handle
+                type="source"
+                id={`narration-continue-${narration.id}`}
+                position={Position.Right}
+                className="story-node-handle"
+              />
+            </div>
+          </div>
+        );
+      })}
     </div>
   );
 }
@@ -204,7 +264,14 @@ function SwitchOutputs({ block }: { block: SwitchBlock }) {
 
 function blockSummary(block: StoryBlock) {
   if (block.type === "title") return block.storyTitle || "Titre vide";
-  if (block.type === "cinematic") return block.heading || "Cinematique";
+  if (block.type === "cinematic") {
+    const startNarration =
+      block.narrations.find((item) => item.id === block.startNarrationId)
+      ?? block.narrations[0]
+      ?? { id: block.startNarrationId || block.id, heading: block.heading, body: block.body };
+    if (startNarration.body.trim()) return `${startNarration.heading || "Cinematique"}: ${startNarration.body}`;
+    return startNarration.heading || "Cinematique";
+  }
   if (block.type === "dialogue") {
     const first = block.lines[0];
     return first ? `${first.speaker}: ${first.text || "..."}` : "Dialogue vide";
@@ -225,7 +292,7 @@ function blockHelp(block: StoryBlock) {
     return "Ecran d'accueil de l'histoire: titre, fond, style des boutons et lien vers la suite.";
   }
   if (block.type === "cinematic") {
-    return "Scene narrative lineaire: texte, image/video/voix puis passage au bloc suivant.";
+    return "Scene narrative lineaire: plusieurs narrations internes reutilisent la meme scene, puis passage au bloc suivant.";
   }
   if (block.type === "dialogue") {
     return "Dialogue multi-lignes: chaque ligne a des reponses qui menent a d'autres lignes internes ou des blocs externes.";
@@ -340,7 +407,7 @@ export function StoryNode({ data, selected }: NodeProps<StoryEditorNode>) {
   const summary = blockSummary(data.block);
   const canReceiveConnections =
     data.block.type !== "hero_profile" && data.block.type !== "npc_profile";
-  const hasPerLineHandles = data.block.type === "dialogue";
+  const hasPerLineHandles = data.block.type === "dialogue" || data.block.type === "cinematic";
 
   return (
     <div
@@ -388,6 +455,8 @@ export function StoryNode({ data, selected }: NodeProps<StoryEditorNode>) {
       <p className="story-node-summary">{summary}</p>
       {data.block.type === "dialogue" ? (
         <DialogueOutputs block={data.block} />
+      ) : data.block.type === "cinematic" ? (
+        <CinematicOutputs block={data.block} />
       ) : data.block.type === "choice" ? (
         <ChoiceOutputs block={data.block} />
       ) : data.block.type === "gameplay" ? (

@@ -357,6 +357,16 @@ export function PreviewOverlay({
 
           {/* ── CINEMATIC ── */}
           {previewBlock?.type === "cinematic" && (() => {
+            const currentNarration =
+              previewState?.currentCinematicNarrationId
+                ? previewBlock.narrations.find((item) => item.id === previewState.currentCinematicNarrationId) ?? null
+                : previewBlock.narrations.find((item) => item.id === previewBlock.startNarrationId)
+                  ?? previewBlock.narrations[0]
+                  ?? {
+                    id: previewBlock.startNarrationId || previewBlock.id,
+                    heading: previewBlock.heading,
+                    body: previewBlock.body,
+                  };
             const bgSrc = assetPreviewSrcById[previewBlock.backgroundAssetId ?? ""];
             const legacyCharSrc = assetPreviewSrcById[previewBlock.characterAssetId ?? ""];
             const videoSrc = assetPreviewSrcById[previewBlock.videoAssetId ?? ""];
@@ -431,10 +441,10 @@ export function PreviewOverlay({
                 )}
                 <div className="preview-vn-textbox preview-vn-cinematic-textbox">
                   <div className="preview-vn-textbox-inner">
-                    {previewBlock.heading && (
-                      <span className="preview-vn-speaker">{previewBlock.heading}</span>
+                    {currentNarration?.heading && (
+                      <span className="preview-vn-speaker">{currentNarration.heading}</span>
                     )}
-                    <p className="preview-vn-text">{previewBlock.body || "…"}</p>
+                    <p className="preview-vn-text">{currentNarration?.body || "…"}</p>
                   </div>
                   <button className="preview-vn-next-btn" onClick={onContinue}>▶</button>
                 </div>

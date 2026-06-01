@@ -50,16 +50,20 @@ import {
   buildEdge,
   buildInitialStudio,
   choiceLabelFromHandle,
-  GAMEPLAY_BUTTON_SEQUENCE_FAILURE_HANDLE,
-  GAMEPLAY_BUTTON_SEQUENCE_SUCCESS_HANDLE,
-  SWITCH_DEFAULT_HANDLE,
-  gameplayLockIdFromHandle,
-  isDialogueAutoNextHandle,
-  lineContinueIdFromHandle,
-  lineIdFromHandle,
-  rebuildEdgesFromNodes,
-  removeItemReferences,
-  removeNodeReferences,
+   GAMEPLAY_BUTTON_SEQUENCE_FAILURE_HANDLE,
+   GAMEPLAY_BUTTON_SEQUENCE_SUCCESS_HANDLE,
+   SWITCH_DEFAULT_HANDLE,
+   gameplayLockIdFromHandle,
+   isCinematicAutoNextHandle,
+   isDialogueAutoNextHandle,
+   lineContinueIdFromHandle,
+   lineIdFromHandle,
+   narrationAutoNextIdFromHandle,
+   narrationContinueIdFromHandle,
+   narrationIdFromHandle,
+   rebuildEdgesFromNodes,
+   removeItemReferences,
+   removeNodeReferences,
   removeVariableReferences,
   responseIdFromHandle,
   switchCaseIdFromHandle,
@@ -113,7 +117,9 @@ export function AuthorStudioApp() {
   );
   const [nodes, setNodes] = useState<EditorNode[]>(seed.nodes);
   const [edges, setEdges] = useState<EditorEdge[]>(
-    seed.edges.filter((edge) => !isDialogueAutoNextHandle(edge.sourceHandle)),
+    seed.edges.filter(
+      (edge) => !isDialogueAutoNextHandle(edge.sourceHandle) && !isCinematicAutoNextHandle(edge.sourceHandle),
+    ),
   );
   const [project, setProject] = useState<ProjectMeta>(initialProject);
   const [selectedBlockId, setSelectedBlockId] = useState<string | null>(
@@ -916,7 +922,7 @@ export function AuthorStudioApp() {
       });
 
       const rebuiltEdges = rebuildEdgesFromNodes(updatedStoryNodes).filter(
-        (edge) => !isDialogueAutoNextHandle(edge.sourceHandle),
+        (edge) => !isDialogueAutoNextHandle(edge.sourceHandle) && !isCinematicAutoNextHandle(edge.sourceHandle),
       );
       setEdges(rebuiltEdges);
       return withCollapsedChapterFolders([...folderNodes, ...updatedStoryNodes], project.chapters);
@@ -964,6 +970,7 @@ export function AuthorStudioApp() {
     project,
     edges,
     variableNameById,
+    openedValidatedChapterIds,
     canEdit,
     supabase,
     authUser,
@@ -1226,7 +1233,9 @@ export function AuthorStudioApp() {
       const safeChanges = changes.filter((change) => {
         if (change.type !== "remove") return true;
         const edge = edgeById.get(change.id);
-        return edge ? !isDialogueAutoNextHandle(edge.sourceHandle) : true;
+        return edge
+          ? !isDialogueAutoNextHandle(edge.sourceHandle) && !isCinematicAutoNextHandle(edge.sourceHandle)
+          : true;
       });
       return applyEdgeChanges(safeChanges, current);
     });
@@ -1255,6 +1264,7 @@ export function AuthorStudioApp() {
   const setConnection = useCallback(
     (sourceId: string, sourceHandle: string, targetId: string | null, targetHandle?: string | null) => {
       const targetLineId = lineIdFromHandle(targetHandle);
+      const targetNarrationId = narrationIdFromHandle(targetHandle);
 
       setNodes((current) =>
         current.map((node) => {
@@ -1296,6 +1306,30 @@ export function AuthorStudioApp() {
                         : resp,
                     ),
                   })),
+                },
+              },
+            };
+          }
+
+          if (node.data.block.type === "cinematic") {
+            const continueNarrationId = narrationContinueIdFromHandle(sourceHandle);
+            if (!continueNarrationId) return node;
+
+            return {
+              ...node,
+              data: {
+                ...node.data,
+                block: {
+                  ...node.data.block,
+                  narrations: node.data.block.narrations.map((narration) =>
+                    narration.id === continueNarrationId
+                      ? {
+                          ...narration,
+                          continueTargetBlockId: targetId,
+                          continueTargetNarrationId: targetNarrationId,
+                        }
+                      : narration,
+                  ),
                 },
               },
             };
@@ -1698,6 +1732,33 @@ export function AuthorStudioApp() {
       clone.startLineId = lineIdMap.get(oldStart) ?? (lines[0]?.id ?? "");
     }
 
+    if (selectedBlock.type === "cinematic") {
+      const narrations = clone.narrations as Array<Record<string, unknown>>;
+      const narrationIdMap = new Map<string, string>();
+      for (const narration of narrations) {
+        const oldNarrationId = narration.id as string;
+        const freshNarrationId = createId("cnarr");
+        narrationIdMap.set(oldNarrationId, freshNarrationId);
+        narration.id = freshNarrationId;
+        const oldTargetBlockId = narration.continueTargetBlockId as string | null | undefined;
+        narration.continueTargetBlockId =
+          oldTargetBlockId === selectedBlock.id ? newId : null;
+      }
+      for (const narration of narrations) {
+        const oldTargetNarrationId = narration.continueTargetNarrationId as string | null | undefined;
+        narration.continueTargetNarrationId =
+          oldTargetNarrationId && narrationIdMap.has(oldTargetNarrationId)
+            ? narrationIdMap.get(oldTargetNarrationId)!
+            : null;
+        if (narration.continueTargetNarrationId && !narration.continueTargetBlockId) {
+          narration.continueTargetBlockId = newId;
+        }
+      }
+      const oldStartNarrationId = clone.startNarrationId as string;
+      clone.startNarrationId =
+        narrationIdMap.get(oldStartNarrationId) ?? (narrations[0]?.id ?? "");
+    }
+
     // Regenerate IDs for choice options
     if (selectedBlock.type === "choice") {
       const choices = clone.choices as Array<Record<string, unknown>>;
@@ -1757,7 +1818,7 @@ export function AuthorStudioApp() {
   const deleteEdge = useCallback(
     (sourceId: string, sourceHandle: string) => {
       if (!canEdit) return;
-      if (isDialogueAutoNextHandle(sourceHandle)) return;
+      if (isDialogueAutoNextHandle(sourceHandle) || isCinematicAutoNextHandle(sourceHandle)) return;
       const sourceBlock = blockById.get(sourceId);
       if (!sourceBlock) return;
 
@@ -1791,9 +1852,11 @@ export function AuthorStudioApp() {
   }, [chapterBlockSets]);
 
   const edgesWithAutoDialogueLinks = useMemo(() => {
-    const manualEdges = edges.filter((edge) => !isDialogueAutoNextHandle(edge.sourceHandle));
+    const manualEdges = edges.filter(
+      (edge) => !isDialogueAutoNextHandle(edge.sourceHandle) && !isCinematicAutoNextHandle(edge.sourceHandle),
+    );
     const autoEdges = rebuildEdgesFromNodes(nodes).filter((edge) =>
-      isDialogueAutoNextHandle(edge.sourceHandle),
+      isDialogueAutoNextHandle(edge.sourceHandle) || isCinematicAutoNextHandle(edge.sourceHandle),
     );
     return [...manualEdges, ...autoEdges];
   }, [edges, nodes]);
@@ -1801,7 +1864,11 @@ export function AuthorStudioApp() {
   const displayEdges = useMemo(
     () => {
       const onDeleteForEdge = (edge: EditorEdge) =>
-        canEdit && !isDialogueAutoNextHandle(edge.sourceHandle) ? deleteEdge : undefined;
+        canEdit &&
+        !isDialogueAutoNextHandle(edge.sourceHandle) &&
+        !isCinematicAutoNextHandle(edge.sourceHandle)
+          ? deleteEdge
+          : undefined;
 
       if (hiddenBlockIds.size === 0) {
         return edgesWithAutoDialogueLinks.map((edge) => ({
@@ -1919,6 +1986,17 @@ export function AuthorStudioApp() {
         const handle = `line-continue-${continueLineId}`;
         setConnection(connection.source, handle, connection.target, null);
         logAction("link", `${sourceNode.name} continuer ${continueLineId} -> ${connection.target}`);
+        return;
+      }
+
+      if (sourceNode.type === "cinematic") {
+        const continueNarrationId =
+          narrationContinueIdFromHandle(connection.sourceHandle)
+          ?? narrationAutoNextIdFromHandle(connection.sourceHandle);
+        if (!continueNarrationId) return;
+        const handle = `narration-continue-${continueNarrationId}`;
+        setConnection(connection.source, handle, connection.target, connection.targetHandle);
+        logAction("link", `${sourceNode.name} narration ${continueNarrationId} -> ${connection.target}`);
         return;
       }
 
@@ -2212,7 +2290,7 @@ export function AuthorStudioApp() {
 
     const hydratedNodes = withCollapsedChapterFolders(normalizedNodes, normalizedProject.chapters);
     const hydratedEdges = rebuildEdgesFromNodes(normalizedNodes).filter(
-      (edge) => !isDialogueAutoNextHandle(edge.sourceHandle),
+      (edge) => !isDialogueAutoNextHandle(edge.sourceHandle) && !isCinematicAutoNextHandle(edge.sourceHandle),
     );
 
     setProject(normalizedProject);
@@ -2473,7 +2551,9 @@ export function AuthorStudioApp() {
 
   const resetStudioToBlank = (options?: { preserveStatusMessage?: boolean }) => {
     const fresh = buildInitialStudio();
-    const freshEdges = fresh.edges.filter((edge) => !isDialogueAutoNextHandle(edge.sourceHandle));
+    const freshEdges = fresh.edges.filter(
+      (edge) => !isDialogueAutoNextHandle(edge.sourceHandle) && !isCinematicAutoNextHandle(edge.sourceHandle),
+    );
     const normalizedFreshProject: ProjectMeta = {
       ...fresh.project,
       chapters: normalizeProjectChapters(fresh.project.chapters),
@@ -3003,7 +3083,7 @@ export function AuthorStudioApp() {
 
       const mergedStoryNodes = [...currentStoryNodes, ...shiftedImportedNodes];
       const mergedEdges = rebuildEdgesFromNodes(mergedStoryNodes).filter(
-        (edge) => !isDialogueAutoNextHandle(edge.sourceHandle),
+        (edge) => !isDialogueAutoNextHandle(edge.sourceHandle) && !isCinematicAutoNextHandle(edge.sourceHandle),
       );
       const mergedVariableIds = new Set(mergedVariables.map((variable) => variable.id));
       const mergedItemIds = new Set(mergedItems.map((item) => item.id));
@@ -3040,6 +3120,23 @@ export function AuthorStudioApp() {
       setProject(mergedProject);
       setNodes(mergedNodes);
       setEdges(mergedEdges);
+      const mergedValidatedChapterIdSet = new Set(
+        mergedProject.chapters
+          .filter((chapter) => chapter.validated)
+          .map((chapter) => chapter.id),
+      );
+      const mappedImportedOpenedValidatedChapterIds = result.studioOpenedValidatedChapterIds
+        .map((chapterId) => chapterIdMap.get(chapterId) ?? chapterId)
+        .filter((chapterId) => mergedValidatedChapterIdSet.has(chapterId));
+      setOpenedValidatedChapterIds((current) => {
+        const next = new Set(
+          current.filter((chapterId) => mergedValidatedChapterIdSet.has(chapterId)),
+        );
+        for (const chapterId of mappedImportedOpenedValidatedChapterIds) {
+          next.add(chapterId);
+        }
+        return [...next];
+      });
       setAssetRefs((current) => ({
         ...current,
         ...result.assetRefs,

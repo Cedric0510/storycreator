@@ -972,6 +972,12 @@ describe("story cinematic block (multi-character)", () => {
     const block = createBlock("cinematic", { x: 0, y: 0 }) as CinematicBlock;
 
     expect(block.type).toBe("cinematic");
+    expect(block.narrations).toHaveLength(1);
+    expect(block.startNarrationId).toBe(block.narrations[0]?.id);
+    expect(block.heading).toBe(block.narrations[0]?.heading);
+    expect(block.body).toBe(block.narrations[0]?.body);
+    expect(block.narrations[0]?.continueTargetBlockId).toBeNull();
+    expect(block.narrations[0]?.continueTargetNarrationId).toBeNull();
     expect(block.characterAssetId).toBeNull();
     expect(block.characterLayers).toEqual([]);
     expect(block.sceneLayout).toEqual({
@@ -1006,6 +1012,12 @@ describe("story cinematic block (multi-character)", () => {
     const normalized = normalizeStoryBlock(rawLegacy as unknown as CinematicBlock);
     const cinematic = normalized as CinematicBlock;
 
+    expect(cinematic.narrations).toHaveLength(1);
+    expect(cinematic.startNarrationId).toBe(cinematic.narrations[0]?.id);
+    expect(cinematic.heading).toBe("Intro");
+    expect(cinematic.body).toBe("");
+    expect(cinematic.narrations[0]?.continueTargetBlockId).toBeNull();
+    expect(cinematic.narrations[0]?.continueTargetNarrationId).toBeNull();
     expect(cinematic.characterAssetId).toBe("asset_char_legacy");
     expect(cinematic.characterLayers).toHaveLength(1);
     expect(cinematic.characterLayers[0].assetId).toBe("asset_char_legacy");
@@ -1015,6 +1027,61 @@ describe("story cinematic block (multi-character)", () => {
       width: 42,
       height: 76,
     });
+  });
+
+  it("keeps cinematic narrations and syncs legacy heading/body to the start narration", () => {
+    const raw = {
+      id: "cin_2",
+      type: "cinematic",
+      name: "Flashback",
+      notes: "",
+      position: { x: 0, y: 0 },
+      entryEffects: [],
+      chapterId: null,
+      heading: "Ancien titre",
+      body: "Ancien texte",
+      narrations: [
+        { id: "cnarr_1", heading: "Intro", body: "Premier ecran", continueTargetBlockId: null, continueTargetNarrationId: "cnarr_2" },
+        { id: "cnarr_2", heading: "Suite", body: "Deuxieme ecran", continueTargetBlockId: "block_ext", continueTargetNarrationId: null },
+      ],
+      startNarrationId: "cnarr_1",
+      backgroundAssetId: null,
+      characterAssetId: null,
+      sceneLayout: {
+        background: { x: 0, y: 0, width: 100, height: 100 },
+        character: { x: 25, y: 10, width: 50, height: 80 },
+      },
+      characterLayers: [],
+      videoAssetId: null,
+      voiceAssetId: null,
+      autoAdvanceSeconds: null,
+      nextBlockId: null,
+    };
+
+    const cinematic = normalizeStoryBlock(raw as unknown as CinematicBlock) as CinematicBlock;
+
+    expect(cinematic.narrations).toHaveLength(2);
+    expect(cinematic.startNarrationId).toBe("cnarr_1");
+    expect(cinematic.heading).toBe("Intro");
+    expect(cinematic.body).toBe("Premier ecran");
+    expect(cinematic.narrations[1]?.heading).toBe("Suite");
+    expect(cinematic.narrations[1]?.body).toBe("Deuxieme ecran");
+    expect(cinematic.narrations[0]?.continueTargetNarrationId).toBe("cnarr_2");
+    expect(cinematic.narrations[1]?.continueTargetBlockId).toBe("block_ext");
+  });
+
+  it("includes cinematic narration block targets in outgoing links", () => {
+    const block = createBlock("cinematic", { x: 0, y: 0 }) as CinematicBlock;
+    block.nextBlockId = "block_default";
+    block.narrations = [
+      {
+        ...block.narrations[0],
+        continueTargetBlockId: "block_alt",
+        continueTargetNarrationId: null,
+      },
+    ];
+
+    expect(getBlockOutgoingTargets(block)).toEqual(["block_alt", "block_default"]);
   });
 });
 
