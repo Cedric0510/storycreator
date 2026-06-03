@@ -1,6 +1,7 @@
 import { ChangeEvent, ReactNode } from "react";
 
 import { HelpHint } from "@/components/HelpHint";
+import { PlayerTextInput } from "@/components/PlayerTextFormatting";
 import {
   SceneComposer,
   SceneCopyPaste,
@@ -547,20 +548,17 @@ export function DialogueEditorSection({
             )}
           </div>
 
-          <label>
-            Personnage
-            <input
-              list={`npc-names-${line.id}`}
-              value={
-                linkedNpcBlock?.npcName.trim()
-                  ? linkedNpcBlock.npcName
-                  : line.speaker
-              }
-              onChange={(event) =>
-                onUpdateDialogueLineField(line.id, "speaker", event.target.value)
-              }
-              disabled={!canEdit || Boolean(linkedNpcBlock)}
-            />
+          <PlayerTextInput
+            label="Personnage"
+            value={
+              linkedNpcBlock?.npcName.trim()
+                ? linkedNpcBlock.npcName
+                : line.speaker
+            }
+            onChange={(value) => onUpdateDialogueLineField(line.id, "speaker", value)}
+            disabled={!canEdit || Boolean(linkedNpcBlock)}
+            list={`npc-names-${line.id}`}
+          >
             <datalist id={`npc-names-${line.id}`}>
               {blocks
                 .filter((b): b is NpcProfileBlock => b.type === "npc_profile" && b.npcName.trim() !== "")
@@ -568,18 +566,15 @@ export function DialogueEditorSection({
                   <option key={npc.id} value={npc.npcName} />
                 ))}
             </datalist>
-          </label>
-          <label>
-            Replique
-            <textarea
-              rows={3}
-              value={line.text}
-              onChange={(event) =>
-                onUpdateDialogueLineField(line.id, "text", event.target.value)
-              }
-              disabled={!canEdit}
-            />
-          </label>
+          </PlayerTextInput>
+          <PlayerTextInput
+            label="Replique"
+            value={line.text}
+            onChange={(value) => onUpdateDialogueLineField(line.id, "text", value)}
+            disabled={!canEdit}
+            multiline
+            rows={3}
+          />
           <label>
             Voix
             <input
@@ -630,16 +625,14 @@ export function DialogueEditorSection({
                   x
                 </button>
               </div>
-              <label>
-                Texte
-                <input
-                  value={resp.text}
-                  onChange={(event) =>
-                    onUpdateDialogueResponseField(line.id, resp.id, "text", event.target.value)
-                  }
-                  disabled={!canEdit}
-                />
-              </label>
+              <PlayerTextInput
+                label="Texte"
+                value={resp.text}
+                onChange={(value) =>
+                  onUpdateDialogueResponseField(line.id, resp.id, "text", value)
+                }
+                disabled={!canEdit}
+              />
 
               {/* --- Target: internal line OR external block (mutually exclusive) --- */}
               <label>

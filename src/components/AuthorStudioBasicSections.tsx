@@ -6,6 +6,7 @@ import {
 } from "@/components/author-studio-core";
 import { HelpHint } from "@/components/HelpHint";
 import { NextBlockSelect } from "@/components/AuthorStudioNextBlockSelect";
+import { PlayerTextInput } from "@/components/PlayerTextFormatting";
 import {
   BLOCK_LABELS,
   ChoiceBlock,
@@ -51,22 +52,18 @@ export function TitleEditorSection({
           boutons.
         </HelpHint>
       </div>
-      <label>
-        Titre histoire
-        <input
-          value={block.storyTitle}
-          onChange={(event) => onSetSelectedDynamicField("storyTitle", event.target.value)}
-          disabled={!canEdit}
-        />
-      </label>
-      <label>
-        Sous titre
-        <input
-          value={block.subtitle}
-          onChange={(event) => onSetSelectedDynamicField("subtitle", event.target.value)}
-          disabled={!canEdit}
-        />
-      </label>
+      <PlayerTextInput
+        label="Titre histoire"
+        value={block.storyTitle}
+        onChange={(value) => onSetSelectedDynamicField("storyTitle", value)}
+        disabled={!canEdit}
+      />
+      <PlayerTextInput
+        label="Sous titre"
+        value={block.subtitle}
+        onChange={(value) => onSetSelectedDynamicField("subtitle", value)}
+        disabled={!canEdit}
+      />
       <label>
         Image de fond
         <input

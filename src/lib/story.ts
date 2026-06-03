@@ -2264,18 +2264,6 @@ export function validateStoryBlocks(
           break;
         }
 
-        if (
-          narration.continueTargetNarrationId &&
-          !(block.narrations ?? []).some((item) => item.id === narration.continueTargetNarrationId)
-        ) {
-          issues.push({
-            level: "error",
-            message: "Une narration pointe vers une autre narration supprimee.",
-            blockId: block.id,
-          });
-          break;
-        }
-
         if (narration.continueTargetBlockId && !blockById.has(narration.continueTargetBlockId)) {
           issues.push({
             level: "error",
@@ -2283,6 +2271,32 @@ export function validateStoryBlocks(
             blockId: block.id,
           });
           break;
+        }
+
+        if (narration.continueTargetNarrationId) {
+          const targetCinematicBlock = narration.continueTargetBlockId
+            ? blockById.get(narration.continueTargetBlockId) ?? null
+            : block;
+
+          if (!targetCinematicBlock) continue;
+
+          if (targetCinematicBlock.type !== "cinematic") {
+            issues.push({
+              level: "error",
+              message: "Une narration cible une narration sur un bloc qui n est pas une cinematique.",
+              blockId: block.id,
+            });
+            break;
+          }
+
+          if (!(targetCinematicBlock.narrations ?? []).some((item) => item.id === narration.continueTargetNarrationId)) {
+            issues.push({
+              level: "error",
+              message: "Une narration pointe vers une autre narration supprimee.",
+              blockId: block.id,
+            });
+            break;
+          }
         }
       }
     } else if (block.type === "gameplay") {

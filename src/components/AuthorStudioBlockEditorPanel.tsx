@@ -4,6 +4,7 @@ import { normalizeDelta } from "@/components/author-studio-core";
 import { GameplayPlacementTarget } from "@/components/author-studio-types";
 import { HelpHint } from "@/components/HelpHint";
 import { NextBlockSelect } from "@/components/AuthorStudioNextBlockSelect";
+import { PlayerTextInput } from "@/components/PlayerTextFormatting";
 import {
   SwitchEditorSection,
   TitleEditorSection,
@@ -270,51 +271,48 @@ function CinematicEditorSection({
               </button>
             </div>
           </div>
-          <label>
-            Titre narration
-            <input
-              value={narration.heading}
-              onChange={(event) =>
-                onUpdateSelectedBlock((b) => {
-                  if (b.type !== "cinematic") return b;
-                  return {
-                    ...b,
-                    ...withSyncedNarrations(
-                      (b.narrations ?? []).map((item) =>
-                        item.id === narration.id
-                          ? { ...item, heading: event.target.value }
-                          : item,
-                      ),
+          <PlayerTextInput
+            label="Titre narration"
+            value={narration.heading}
+            onChange={(value) =>
+              onUpdateSelectedBlock((b) => {
+                if (b.type !== "cinematic") return b;
+                return {
+                  ...b,
+                  ...withSyncedNarrations(
+                    (b.narrations ?? []).map((item) =>
+                      item.id === narration.id
+                        ? { ...item, heading: value }
+                        : item,
                     ),
-                  };
-                })
-              }
-              disabled={!canEdit}
-            />
-          </label>
-          <label>
-            Texte / narration
-            <textarea
-              rows={4}
-              value={narration.body}
-              onChange={(event) =>
-                onUpdateSelectedBlock((b) => {
-                  if (b.type !== "cinematic") return b;
-                  return {
-                    ...b,
-                    ...withSyncedNarrations(
-                      (b.narrations ?? []).map((item) =>
-                        item.id === narration.id
-                          ? { ...item, body: event.target.value }
-                          : item,
-                      ),
+                  ),
+                };
+              })
+            }
+            disabled={!canEdit}
+          />
+          <PlayerTextInput
+            label="Texte / narration"
+            value={narration.body}
+            onChange={(value) =>
+              onUpdateSelectedBlock((b) => {
+                if (b.type !== "cinematic") return b;
+                return {
+                  ...b,
+                  ...withSyncedNarrations(
+                    (b.narrations ?? []).map((item) =>
+                      item.id === narration.id
+                        ? { ...item, body: value }
+                        : item,
                     ),
-                  };
-                })
-              }
-              disabled={!canEdit}
-            />
-          </label>
+                  ),
+                };
+              })
+            }
+            disabled={!canEdit}
+            multiline
+            rows={4}
+          />
         </div>
       ))}
 

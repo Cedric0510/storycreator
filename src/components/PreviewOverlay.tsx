@@ -3,6 +3,7 @@
 
 import { PointerEvent as ReactPointerEvent, useCallback, useRef, useState } from "react";
 
+import { FormattedPlayerText } from "@/components/PlayerTextFormatting";
 import { PreviewRuntimeState } from "@/components/usePreviewRuntime";
 import { GameplayBlock, StoryBlock } from "@/lib/story";
 
@@ -335,8 +336,16 @@ export function PreviewOverlay({
             return (
               <div className="preview-vn-scene" style={bgSrc ? { backgroundImage: `url(${bgSrc})` } : undefined}>
                 <div className="preview-vn-title-content">
-                  <h2 className="preview-vn-title-heading">{previewBlock.storyTitle || "Titre"}</h2>
-                  <p className="preview-vn-title-sub">{previewBlock.subtitle}</p>
+                  <FormattedPlayerText
+                    as="h2"
+                    className="preview-vn-title-heading"
+                    text={previewBlock.storyTitle || "Titre"}
+                  />
+                  <FormattedPlayerText
+                    as="p"
+                    className="preview-vn-title-sub"
+                    text={previewBlock.subtitle}
+                  />
                   <button
                     className="preview-vn-styled-btn"
                     style={{
@@ -442,9 +451,16 @@ export function PreviewOverlay({
                 <div className="preview-vn-textbox preview-vn-cinematic-textbox">
                   <div className="preview-vn-textbox-inner">
                     {currentNarration?.heading && (
-                      <span className="preview-vn-speaker">{currentNarration.heading}</span>
+                      <FormattedPlayerText
+                        className="preview-vn-speaker"
+                        text={currentNarration.heading}
+                      />
                     )}
-                    <p className="preview-vn-text">{currentNarration?.body || "…"}</p>
+                    <FormattedPlayerText
+                      as="p"
+                      className="preview-vn-text"
+                      text={currentNarration?.body || "…"}
+                    />
                   </div>
                   <button className="preview-vn-next-btn" onClick={onContinue}>▶</button>
                 </div>
@@ -542,8 +558,15 @@ export function PreviewOverlay({
                 <div className="preview-vn-dialogue-area">
                   <div className="preview-vn-textbox">
                     <div className="preview-vn-textbox-inner">
-                      <span className="preview-vn-speaker">{speakerName || "Personnage"}</span>
-                      <p className="preview-vn-text">{currentLine.text || "…"}</p>
+                      <FormattedPlayerText
+                        className="preview-vn-speaker"
+                        text={speakerName || "Personnage"}
+                      />
+                      <FormattedPlayerText
+                        as="p"
+                        className="preview-vn-text"
+                        text={currentLine.text || "…"}
+                      />
                     </div>
                   </div>
                   <div className="preview-vn-responses">
@@ -555,7 +578,7 @@ export function PreviewOverlay({
                         onClick={() => onPickChoice(resp.id)}
                       >
                         <strong>{resp.label}</strong>
-                        <span>{resp.text || "…"}</span>
+                        <FormattedPlayerText text={resp.text || "…"} />
                       </button>
                       ))
                     ) : (
@@ -630,7 +653,11 @@ export function PreviewOverlay({
                 ))}
 
                 <div className="preview-vn-choice-scene-area">
-                  <h3 className="preview-vn-choice-prompt">{previewBlock.prompt || "Choisissez..."}</h3>
+                  <FormattedPlayerText
+                    as="h3"
+                    className="preview-vn-choice-prompt"
+                    text={previewBlock.prompt || "Choisissez..."}
+                  />
 
                   {showVisualChoiceScene ? (
                     <div className="preview-vn-choice-scene">
@@ -659,9 +686,10 @@ export function PreviewOverlay({
                               {option.label}
                             </span>
                           )}
-                          <span className="preview-vn-choice-hotspot-caption">
-                            {option.text || option.label}
-                          </span>
+                          <FormattedPlayerText
+                            className="preview-vn-choice-hotspot-caption"
+                            text={option.text || option.label}
+                          />
                         </button>
                       ))}
                     </div>
@@ -674,8 +702,10 @@ export function PreviewOverlay({
                           onClick={() => onPickChoice(option.id)}
                         >
                           <strong>{option.label}</strong>
-                          <span>{option.text || "..."}</span>
-                          {option.description && <small>{option.description}</small>}
+                          <FormattedPlayerText text={option.text || "..."} />
+                          {option.description && (
+                            <FormattedPlayerText as="small" text={option.description} />
+                          )}
                         </button>
                       ))}
                     </div>
@@ -690,7 +720,7 @@ export function PreviewOverlay({
                           onClick={() => onPickChoice(option.id)}
                         >
                           <strong>{option.label}</strong>
-                          <span>{option.text || "Choix"}</span>
+                          <FormattedPlayerText text={option.text || "Choix"} />
                         </button>
                       ))}
                     </div>

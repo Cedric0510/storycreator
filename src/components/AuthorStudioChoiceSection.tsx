@@ -1,6 +1,7 @@
 import { ChangeEvent, ReactNode } from "react";
 
 import { HelpHint } from "@/components/HelpHint";
+import { PlayerTextInput } from "@/components/PlayerTextFormatting";
 import { SceneComposer } from "@/components/AuthorStudioSceneComposer";
 import {
   BLOCK_LABELS,
@@ -119,16 +120,15 @@ export function ChoiceEditorSection({
       <small className="empty-placeholder">
         Le choix du joueur est memorise automatiquement pour toute la partie.
       </small>
-      <label>
-        Situation / Prompt
-        <textarea
-          rows={3}
-          value={block.prompt}
-          onChange={(event) => onSetSelectedDynamicField("prompt", event.target.value)}
-          disabled={!canEdit}
-          placeholder="Que fais-tu ?"
-        />
-      </label>
+      <PlayerTextInput
+        label="Situation / Prompt"
+        value={block.prompt}
+        onChange={(value) => onSetSelectedDynamicField("prompt", value)}
+        disabled={!canEdit}
+        multiline
+        rows={3}
+        placeholder="Que fais-tu ?"
+      />
       <label>
         Image fond
         <input
@@ -370,27 +370,22 @@ export function ChoiceEditorSection({
       {block.choices.map((option) => (
         <div key={option.id} className="choice-card">
           <strong>Option {option.label}</strong>
-          <label>
-            Texte
-            <input
-              value={option.text}
-              onChange={(event) => onUpdateChoiceField(option.id, "text", event.target.value)}
-              disabled={!canEdit}
-              placeholder="Aller a gauche"
-            />
-          </label>
-          <label>
-            Description
-            <textarea
-              rows={2}
-              value={option.description}
-              onChange={(event) =>
-                onUpdateChoiceOptionDescription(option.id, event.target.value)
-              }
-              disabled={!canEdit}
-              placeholder="Un chemin sombre serpente entre les arbres..."
-            />
-          </label>
+          <PlayerTextInput
+            label="Texte"
+            value={option.text}
+            onChange={(value) => onUpdateChoiceField(option.id, "text", value)}
+            disabled={!canEdit}
+            placeholder="Aller a gauche"
+          />
+          <PlayerTextInput
+            label="Description"
+            value={option.description}
+            onChange={(value) => onUpdateChoiceOptionDescription(option.id, value)}
+            disabled={!canEdit}
+            multiline
+            rows={2}
+            placeholder="Un chemin sombre serpente entre les arbres..."
+          />
           <label>
             Image option
             <input

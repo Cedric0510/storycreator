@@ -1264,6 +1264,63 @@ describe("story cinematic block (multi-character)", () => {
 
     expect(getBlockOutgoingTargets(block)).toEqual(["block_alt", "block_default"]);
   });
+
+  it("allows a cinematic narration to target a narration in another cinematic block", () => {
+    const title = createBlock("title", { x: 0, y: 0 });
+    const source = createBlock("cinematic", { x: 50, y: 50 }) as CinematicBlock;
+    const target = createBlock("cinematic", { x: 100, y: 50 }) as CinematicBlock;
+
+    source.narrations = [
+      {
+        ...source.narrations[0],
+        body: "Source narration",
+        continueTargetBlockId: target.id,
+        continueTargetNarrationId: target.narrations[0].id,
+      },
+    ];
+    target.narrations = [
+      {
+        ...target.narrations[0],
+        body: "Target narration",
+      },
+    ];
+
+    const issues = validateStoryBlocks([title, source, target], title.id);
+
+    expect(
+      issues.some(
+        (issue) =>
+          issue.level === "error" &&
+          issue.blockId === source.id,
+      ),
+    ).toBe(false);
+  });
+
+  it("reports a cinematic narration target on a non-cinematic block", () => {
+    const title = createBlock("title", { x: 0, y: 0 });
+    const source = createBlock("cinematic", { x: 50, y: 50 }) as CinematicBlock;
+    const target = createBlock("dialogue", { x: 100, y: 50 }) as DialogueBlock;
+
+    source.narrations = [
+      {
+        ...source.narrations[0],
+        body: "Source narration",
+        continueTargetBlockId: target.id,
+        continueTargetNarrationId: "fake_narration_id",
+      },
+    ];
+
+    const issues = validateStoryBlocks([title, source, target], title.id);
+
+    expect(
+      issues.some(
+        (issue) =>
+          issue.level === "error" &&
+          issue.blockId === source.id &&
+          issue.message.includes("pas une cinematique"),
+      ),
+    ).toBe(true);
+  });
 });
 
 
