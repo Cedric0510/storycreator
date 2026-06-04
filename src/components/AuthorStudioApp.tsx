@@ -46,6 +46,7 @@ import {
   InitialStudio,
   blockFromNode,
   blockToNode,
+  computeChapterBlockSets,
   buildStudioChangeFingerprint,
   buildEdge,
   buildInitialStudio,
@@ -475,6 +476,16 @@ export function AuthorStudioApp() {
     return ids;
   }, [collapsedChapterIds, hiddenValidatedChapterIds]);
 
+  const edgesWithAutoDialogueLinks = useMemo(() => {
+    const manualEdges = edges.filter(
+      (edge) => !isDialogueAutoNextHandle(edge.sourceHandle) && !isCinematicAutoNextHandle(edge.sourceHandle),
+    );
+    const autoEdges = rebuildEdgesFromNodes(nodes).filter((edge) =>
+      isDialogueAutoNextHandle(edge.sourceHandle) || isCinematicAutoNextHandle(edge.sourceHandle),
+    );
+    return [...manualEdges, ...autoEdges];
+  }, [edges, nodes]);
+
   /** Map chapterId → chapter_start node (used to position folder nodes) */
   const chapterStartNodeMap = useMemo(() => {
     const map = new Map<string, EditorNode>();
@@ -492,44 +503,10 @@ export function AuthorStudioApp() {
    * are included but whose outgoing edges are NOT followed).
    * Returns Map<chapterId, Set<blockId>>.
    */
-  const chapterBlockSets = useMemo(() => {
-    const result = new Map<string, Set<string>>();
-    for (const chapter of project.chapters) {
-      const startNode = chapterStartNodeMap.get(chapter.id);
-      if (!startNode) continue;
-
-      const memberIds = new Set<string>();
-      const queue = [startNode.id];
-
-      while (queue.length > 0) {
-        const blockId = queue.shift()!;
-        if (memberIds.has(blockId)) continue;
-        memberIds.add(blockId);
-
-        const block = blockById.get(blockId);
-        if (!block) continue;
-
-        // chapter_end is included but don't follow past it
-        if (block.type === "chapter_end") continue;
-
-        // Follow all outgoing edges
-        for (const edge of edges) {
-          if (edge.source !== blockId) continue;
-          if (memberIds.has(edge.target)) continue;
-          const targetBlock = blockById.get(edge.target);
-          // Don't cross into another chapter's start
-          if (
-            targetBlock?.type === "chapter_start" &&
-            targetBlock.chapterId !== chapter.id
-          ) continue;
-          queue.push(edge.target);
-        }
-      }
-
-      result.set(chapter.id, memberIds);
-    }
-    return result;
-  }, [blockById, chapterStartNodeMap, edges, project.chapters]);
+  const chapterBlockSets = useMemo(
+    () => computeChapterBlockSets(nodes, edgesWithAutoDialogueLinks, project.chapters),
+    [edgesWithAutoDialogueLinks, nodes, project.chapters],
+  );
 
   /** Compute BFS-based block→chapter and build hidden set — both used below */
   const computeChapterContext = useCallback((chapId: string) => {
@@ -1852,16 +1829,6 @@ export function AuthorStudioApp() {
     }
     return map;
   }, [chapterBlockSets]);
-
-  const edgesWithAutoDialogueLinks = useMemo(() => {
-    const manualEdges = edges.filter(
-      (edge) => !isDialogueAutoNextHandle(edge.sourceHandle) && !isCinematicAutoNextHandle(edge.sourceHandle),
-    );
-    const autoEdges = rebuildEdgesFromNodes(nodes).filter((edge) =>
-      isDialogueAutoNextHandle(edge.sourceHandle) || isCinematicAutoNextHandle(edge.sourceHandle),
-    );
-    return [...manualEdges, ...autoEdges];
-  }, [edges, nodes]);
 
   const displayEdges = useMemo(
     () => {

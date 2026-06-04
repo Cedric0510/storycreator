@@ -3,6 +3,7 @@ import { Edge, MarkerType, Node } from "@xyflow/react";
 import { StoryNodeData } from "@/components/StoryNode";
 import {
   AssetRef,
+  Chapter,
   CharacterLayer,
   ChoiceLabel,
   DEFAULT_CHARACTER_LAYOUT,
@@ -179,6 +180,61 @@ export function blockToNode(block: StoryBlock): EditorNode {
       hasWarning: false,
     },
   };
+}
+
+export function computeChapterBlockSets(
+  nodes: EditorNode[],
+  edges: Array<Pick<EditorEdge, "source" | "target">>,
+  chapters: Chapter[],
+): Map<string, Set<string>> {
+  const result = new Map<string, Set<string>>();
+  const blockById = new Map(
+    nodes.map((node) => [node.id, node.data.block as StoryBlock] as const),
+  );
+  const chapterStartNodeMap = new Map<string, EditorNode>();
+
+  for (const node of nodes) {
+    const block = node.data.block as StoryBlock;
+    if (block.type === "chapter_start" && block.chapterId) {
+      chapterStartNodeMap.set(block.chapterId, node);
+    }
+  }
+
+  for (const chapter of chapters) {
+    const startNode = chapterStartNodeMap.get(chapter.id);
+    if (!startNode) continue;
+
+    const memberIds = new Set<string>();
+    const queue = [startNode.id];
+
+    while (queue.length > 0) {
+      const blockId = queue.shift()!;
+      if (memberIds.has(blockId)) continue;
+      memberIds.add(blockId);
+
+      const block = blockById.get(blockId);
+      if (!block) continue;
+
+      if (block.type === "chapter_end") continue;
+
+      for (const edge of edges) {
+        if (edge.source !== blockId) continue;
+        if (memberIds.has(edge.target)) continue;
+        const targetBlock = blockById.get(edge.target);
+        if (
+          targetBlock?.type === "chapter_start" &&
+          targetBlock.chapterId !== chapter.id
+        ) {
+          continue;
+        }
+        queue.push(edge.target);
+      }
+    }
+
+    result.set(chapter.id, memberIds);
+  }
+
+  return result;
 }
 
 export function rebuildEdgesFromNodes(nodes: EditorNode[]): EditorEdge[] {
