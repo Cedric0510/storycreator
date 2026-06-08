@@ -2,7 +2,7 @@
  * assetStore
  *
  * IndexedDB-backed asset storage with:
- * - SHA-256 blob deduplication
+ * - content-hash blob deduplication
  * - ref-counted blob lifecycle
  * - LRU Object URL cache
  *
@@ -154,20 +154,40 @@ async function clearLegacyBlobs(db: IDBDatabase): Promise<void> {
   await done;
 }
 
-async function computeAssetBlobSha256(blob: Blob): Promise<string> {
-  if (!globalThis.crypto?.subtle) {
-    throw new Error("Web Crypto API unavailable: cannot compute SHA-256.");
+function computeFallbackBlobHash(arrayBuffer: ArrayBuffer): string {
+  // Fallback for environments where Web Crypto is unavailable.
+  // This keeps local asset caching functional, even if dedup is no longer cryptographic.
+  const bytes = new Uint8Array(arrayBuffer);
+  let forwardHash = 0x811c9dc5;
+  for (const byte of bytes) {
+    forwardHash ^= byte;
+    forwardHash = Math.imul(forwardHash, 0x01000193) >>> 0;
   }
 
+  let reverseHash = 0x811c9dc5;
+  for (let index = bytes.length - 1; index >= 0; index -= 1) {
+    reverseHash ^= bytes[index];
+    reverseHash = Math.imul(reverseHash, 0x01000193) >>> 0;
+  }
+
+  return `fnv1a32x2-${arrayBuffer.byteLength.toString(16)}-${forwardHash.toString(16).padStart(8, "0")}${reverseHash.toString(16).padStart(8, "0")}`;
+}
+
+async function computeAssetBlobHash(blob: Blob): Promise<string> {
   const arrayBuffer = await blob.arrayBuffer();
+  if (!globalThis.crypto?.subtle) {
+    return computeFallbackBlobHash(arrayBuffer);
+  }
+
   const digest = await globalThis.crypto.subtle.digest("SHA-256", arrayBuffer);
-  return Array.from(new Uint8Array(digest))
+  const sha256 = Array.from(new Uint8Array(digest))
     .map((byte) => byte.toString(16).padStart(2, "0"))
     .join("");
+  return `sha256-${sha256}`;
 }
 
 async function putAssetBlobWithDb(db: IDBDatabase, assetId: string, blob: Blob): Promise<void> {
-  const hash = await computeAssetBlobSha256(blob);
+  const hash = await computeAssetBlobHash(blob);
 
   const transaction = db.transaction([ASSET_REFS_STORE, BLOBS_BY_HASH_STORE], "readwrite");
   const refs = transaction.objectStore(ASSET_REFS_STORE);
@@ -350,7 +370,7 @@ async function waitForAllPendingWrites(): Promise<void> {
   await Promise.allSettled(pending);
 }
 
-/** Store a Blob/File in IndexedDB under the given assetId (deduplicated by SHA-256 hash). */
+/** Store a Blob/File in IndexedDB under the given assetId (deduplicated by content hash). */
 export async function putAssetBlob(assetId: string, blob: Blob): Promise<void> {
   return queueAssetWrite(assetId, async () => {
     await withReadyDb((db) => putAssetBlobWithDb(db, assetId, blob));

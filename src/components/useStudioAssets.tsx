@@ -191,7 +191,9 @@ export function useStudioAssets({
       return next;
     });
     // Store file in IndexedDB (fire-and-forget — non-blocking for the UI)
-    void putAssetBlob(assetId, file);
+    void putAssetBlob(assetId, file).catch((error) => {
+      console.error("[useStudioAssets] asset cache write failed:", assetId, error);
+    });
     return assetId;
   }, []);
 
@@ -386,7 +388,9 @@ export function useStudioAssets({
             const { data, error } = await supabase.storage.from(bucket).download(ref.storagePath);
             if (error || !data) return { assetId, error: error?.message ?? "unknown" } as const;
             // Cache the downloaded blob in IndexedDB for future use
-            void putAssetBlob(assetId, data);
+            void putAssetBlob(assetId, data).catch((cacheError) => {
+              console.error("[exportZip] asset cache write failed:", assetId, cacheError);
+            });
             return { assetId, data } as const;
           }),
         );

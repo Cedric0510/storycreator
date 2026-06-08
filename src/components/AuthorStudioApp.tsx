@@ -1,6 +1,8 @@
 "use client";
 
 import {
+  type MouseEvent as ReactMouseEvent,
+  type PointerEvent as ReactPointerEvent,
   useCallback,
   useEffect,
   useMemo,
@@ -70,6 +72,11 @@ import {
   switchCaseIdFromHandle,
 } from "@/components/author-studio-core";
 import {
+  duplicateClipboardBlocks,
+  filterClipboardEligibleBlocks,
+  sortBlocksForClipboard,
+} from "@/components/author-studio-clipboard-utils";
+import {
   PlatformRole,
 } from "@/components/author-studio-types";
 import {
@@ -104,6 +111,39 @@ import type { ZipImportMergeMaps } from "@/components/author-studio-merge-utils"
 
 const nodeTypes: NodeTypes = { storyBlock: StoryNode, chapterFolder: ChapterFolderNode };
 const edgeTypes: EdgeTypes = { deletable: DeletableEdge };
+const DUPLICATE_POSITION_STEP = { x: 60, y: 60 };
+
+interface ClipboardBlockSelection {
+  blocks: StoryBlock[];
+}
+
+function prepareClipboardBlocks(blocks: StoryBlock[]) {
+  const eligibleBlocks = sortBlocksForClipboard(filterClipboardEligibleBlocks(blocks));
+  return {
+    eligibleBlocks,
+    ignoredCount: blocks.length - eligibleBlocks.length,
+  };
+}
+
+function getSelectedBlockIdsFromNodes(candidateNodes: EditorNode[]) {
+  return candidateNodes
+    .filter((node) => node.type !== "chapterFolder" && node.selected)
+    .map((node) => node.id);
+}
+
+function resolveFocusedBlockId(
+  currentFocusedId: string | null,
+  nextSelectedIds: string[],
+  preferredFocusedId?: string | null,
+) {
+  if (preferredFocusedId && nextSelectedIds.includes(preferredFocusedId)) {
+    return preferredFocusedId;
+  }
+  if (currentFocusedId && nextSelectedIds.includes(currentFocusedId)) {
+    return currentFocusedId;
+  }
+  return nextSelectedIds[0] ?? null;
+}
 
 export function AuthorStudioApp() {
   const router = useRouter();
@@ -148,6 +188,7 @@ export function AuthorStudioApp() {
   const [adminCreateUserEmailInput, setAdminCreateUserEmailInput] = useState("");
   const [adminCreateUserPasswordInput, setAdminCreateUserPasswordInput] = useState("");
   const [adminCreateUserRole, setAdminCreateUserRole] = useState<PlatformRole>("reader");
+  const [hoverSelectionActive, setHoverSelectionActive] = useState(false);
   const {
     supabase,
     authLoading,
@@ -192,12 +233,70 @@ export function AuthorStudioApp() {
     buildStudioChangeFingerprint(initialProject, seed.nodes, seed.edges, {}),
   );
   const rfInstanceRef = useRef<{ screenToFlowPosition: (pos: { x: number; y: number }) => { x: number; y: number } } | null>(null);
+  const clipboardRef = useRef<ClipboardBlockSelection | null>(null);
+  const clipboardPasteCountRef = useRef(0);
+  const hoverSelectionRef = useRef<{
+    active: boolean;
+    additive: boolean;
+    baseSelectedIds: Set<string>;
+    hoveredIds: Set<string>;
+  }>({
+    active: false,
+    additive: false,
+    baseSelectedIds: new Set<string>(),
+    hoveredIds: new Set<string>(),
+  });
 
   const blocks = useMemo(() => nodes.filter((n) => n.type !== "chapterFolder").map((node) => blockFromNode(node)), [nodes]);
   const blockById = useMemo(
     () => new Map(blocks.map((block) => [block.id, block])),
     [blocks],
   );
+  const selectedBlockIds = useMemo(
+    () => getSelectedBlockIdsFromNodes(nodes),
+    [nodes],
+  );
+  const selectedBlocks = useMemo(
+    () =>
+      selectedBlockIds
+        .map((blockId) => blockById.get(blockId) ?? null)
+        .filter((block): block is StoryBlock => Boolean(block)),
+    [blockById, selectedBlockIds],
+  );
+  const replaceSelectedBlocks = useCallback((blockIds: string[], preferredFocusedId?: string | null) => {
+    const nextSelectedIds = Array.from(new Set(blockIds));
+    const nextSelectedIdSet = new Set(nextSelectedIds);
+
+    setNodes((current) =>
+      current.map((node) => {
+        const shouldSelect =
+          node.type !== "chapterFolder" && nextSelectedIdSet.has(node.id);
+        return node.selected === shouldSelect ? node : { ...node, selected: shouldSelect };
+      }),
+    );
+    setSelectedBlockId((currentFocusedId) =>
+      resolveFocusedBlockId(currentFocusedId, nextSelectedIds, preferredFocusedId),
+    );
+  }, []);
+
+  const removeSelectedBlocks = useCallback((blockIds: Iterable<string>) => {
+    const blockedIds = new Set(blockIds);
+    setNodes((current) => {
+      const next = current.map((node) => {
+        if (node.type === "chapterFolder" || !blockedIds.has(node.id) || !node.selected) {
+          return node;
+        }
+        return { ...node, selected: false };
+      });
+      const nextSelectedIds = getSelectedBlockIdsFromNodes(next);
+      setSelectedBlockId((currentFocusedId) =>
+        currentFocusedId && blockedIds.has(currentFocusedId)
+          ? resolveFocusedBlockId(null, nextSelectedIds)
+          : resolveFocusedBlockId(currentFocusedId, nextSelectedIds),
+      );
+      return next;
+    });
+  }, []);
   const {
     previewOpen,
     setPreviewOpen,
@@ -309,6 +408,63 @@ export function AuthorStudioApp() {
   const authInitial = (authUser?.email?.trim().charAt(0) ?? "?").toUpperCase();
   const adminCount = platformProfiles.filter((profile) => profile.platform_role === "admin").length;
 
+  const stopHoverSelection = useCallback(() => {
+    hoverSelectionRef.current = {
+      active: false,
+      additive: false,
+      baseSelectedIds: new Set<string>(),
+      hoveredIds: new Set<string>(),
+    };
+    setHoverSelectionActive(false);
+  }, []);
+
+  const handleCanvasPointerDownCapture = useCallback((event: ReactPointerEvent<HTMLElement>) => {
+    if (!canEdit || event.button !== 0) return;
+    if (!event.shiftKey) return;
+
+    const target = event.target as HTMLElement | null;
+    if (!target) return;
+    if (target.closest(".react-flow__node, .react-flow__edge, button, input, textarea, select, a")) {
+      return;
+    }
+    if (!target.closest(".react-flow__pane")) {
+      return;
+    }
+
+    hoverSelectionRef.current = {
+      active: true,
+      additive: event.ctrlKey || event.metaKey,
+      baseSelectedIds: new Set(selectedBlockIds),
+      hoveredIds: new Set<string>(),
+    };
+    setHoverSelectionActive(true);
+  }, [canEdit, selectedBlockIds]);
+
+  const handleHoverSelectionEnter = useCallback((_: ReactMouseEvent, node: EditorNode) => {
+    if (node.type === "chapterFolder") return;
+
+    const session = hoverSelectionRef.current;
+    if (!session.active || session.hoveredIds.has(node.id)) return;
+
+    session.hoveredIds.add(node.id);
+    const nextSelectedIds = session.additive
+      ? [...session.baseSelectedIds, ...session.hoveredIds]
+      : [...session.hoveredIds];
+    const nextSelectedIdSet = new Set(nextSelectedIds);
+    setNodes((current) =>
+      current.map((candidateNode) => {
+        const shouldSelect =
+          candidateNode.type !== "chapterFolder" && nextSelectedIdSet.has(candidateNode.id);
+        return candidateNode.selected === shouldSelect
+          ? candidateNode
+          : { ...candidateNode, selected: shouldSelect };
+      }),
+    );
+    setSelectedBlockId((currentFocusedId) =>
+      resolveFocusedBlockId(currentFocusedId, nextSelectedIds, node.id),
+    );
+  }, []);
+
   useEffect(() => {
     if (!authUser) return;
 
@@ -332,6 +488,18 @@ export function AuthorStudioApp() {
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
   }, [authUser]);
+
+  useEffect(() => {
+    const handlePointerUp = () => stopHoverSelection();
+    const handleWindowBlur = () => stopHoverSelection();
+
+    window.addEventListener("pointerup", handlePointerUp);
+    window.addEventListener("blur", handleWindowBlur);
+    return () => {
+      window.removeEventListener("pointerup", handlePointerUp);
+      window.removeEventListener("blur", handleWindowBlur);
+    };
+  }, [stopHoverSelection]);
 
   useEffect(() => {
     if (!accountModalOpen && !adminModalOpen && !validationModalOpen) return;
@@ -572,13 +740,12 @@ export function AuthorStudioApp() {
         },
       };
       setNodes((current) => [...current, folderNode]);
-      // Deselect if selection is inside this chapter
-      setSelectedBlockId((cur) => (cur && memberIds.has(cur) ? null : cur));
+      removeSelectedBlocks(memberIds);
     } else {
       // Remove the folder node
       setNodes((current) => current.filter((n) => n.id !== `folder-${chapterId}`));
     }
-  }, [chapterStartNodeMap, computeChapterContext, project.chapters]);
+  }, [chapterStartNodeMap, computeChapterContext, project.chapters, removeSelectedBlocks]);
 
   /** Set of block IDs hidden because their chapter is collapsed or validated/archived. */
   const hiddenBlockIds = useMemo(() => {
@@ -741,13 +908,13 @@ export function AuthorStudioApp() {
       setOpenedValidatedChapterIds((current) => current.filter((id) => id !== chapterId));
       setNodes((current) => current.filter((node) => node.id !== `folder-${chapterId}`));
       const memberIds = computeChapterContext(chapterId);
-      setSelectedBlockId((current) => (current && memberIds.has(current) ? null : current));
+      removeSelectedBlocks(memberIds);
       setStatusMessage(`Chapitre "${chapter.name}" valide et archive dans la liste.`);
       return;
     }
 
     setStatusMessage(`Chapitre "${chapter.name}" remis en edition sur le whiteboard.`);
-  }, [blockById, canEdit, computeChapterContext, project.chapters, resolveChapterIdForBlock, setStatusMessage]);
+  }, [blockById, canEdit, computeChapterContext, project.chapters, removeSelectedBlocks, resolveChapterIdForBlock, setStatusMessage]);
 
   const toggleValidatedChapterVisibility = useCallback((chapterId: string) => {
     const chapter = project.chapters.find((candidate) => candidate.id === chapterId);
@@ -757,7 +924,7 @@ export function AuthorStudioApp() {
     if (isOpen) {
       setOpenedValidatedChapterIds((current) => current.filter((id) => id !== chapterId));
       const memberIds = computeChapterContext(chapterId);
-      setSelectedBlockId((current) => (current && memberIds.has(current) ? null : current));
+      removeSelectedBlocks(memberIds);
       setStatusMessage(`Chapitre "${chapter.name}" masque du whiteboard.`);
       return;
     }
@@ -765,7 +932,7 @@ export function AuthorStudioApp() {
     setOpenedValidatedChapterIds((current) => [...current, chapterId]);
     const chapterStartNode = chapterStartNodeMap.get(chapterId);
     if (chapterStartNode) {
-      setSelectedBlockId(chapterStartNode.id);
+      replaceSelectedBlocks([chapterStartNode.id], chapterStartNode.id);
     }
     setStatusMessage(`Chapitre "${chapter.name}" reouvert sur le whiteboard.`);
   }, [
@@ -773,6 +940,8 @@ export function AuthorStudioApp() {
     computeChapterContext,
     openedValidatedChapterIdSet,
     project.chapters,
+    removeSelectedBlocks,
+    replaceSelectedBlocks,
     setStatusMessage,
   ]);
 
@@ -1203,7 +1372,26 @@ export function AuthorStudioApp() {
   }, []);
 
   const onNodesChange = useCallback((changes: NodeChange<EditorNode>[]) => {
-    setNodes((current) => applyNodeChanges(changes, current));
+    const selectionChanges = changes.filter(
+      (change): change is Extract<NodeChange<EditorNode>, { type: "select" }> => change.type === "select",
+    );
+
+    setNodes((current) => {
+      const next = applyNodeChanges(changes, current);
+      if (selectionChanges.length === 0) {
+        return next;
+      }
+
+      const nextSelectedIds = getSelectedBlockIdsFromNodes(next);
+      const preferredFocusedId = [...selectionChanges]
+        .reverse()
+        .find((change) => change.selected && next.some((node) => node.id === change.id && node.type !== "chapterFolder"))
+        ?.id ?? null;
+      setSelectedBlockId((currentFocusedId) =>
+        resolveFocusedBlockId(currentFocusedId, nextSelectedIds, preferredFocusedId),
+      );
+      return next;
+    });
   }, []);
 
   const onEdgesChange = useCallback((changes: EdgeChange<EditorEdge>[]) => {
@@ -1585,12 +1773,12 @@ export function AuthorStudioApp() {
       }
 
       setNodes((current) => [...current, blockToNode(block)]);
-      setSelectedBlockId(block.id);
+      replaceSelectedBlocks([block.id], block.id);
 
       logAction("add_block", `${BLOCK_LABELS[type]} (${block.id})`);
       setStatusMessage(`${BLOCK_LABELS[type]} ajoute.`);
     },
-    [canEdit, logAction, nodes.length, project.info.startBlockId],
+    [canEdit, logAction, nodes.length, project.info.startBlockId, replaceSelectedBlocks],
   );
 
   const deleteBlock = useCallback((blockId: string) => {
@@ -1655,144 +1843,143 @@ export function AuthorStudioApp() {
       setOpenedValidatedChapterIds((current) => current.filter((chapterId) => chapterId !== deletedChapterId));
     }
 
-    if (selectedBlockId === blockId) setSelectedBlockId(null);
+    removeSelectedBlocks([blockId]);
     logAction("delete_block", `${deleted.name} (${deleted.id})`);
     setStatusMessage(`Bloc ${deleted.name} supprime.`);
-  }, [blockById, canEdit, logAction, selectedBlockId]);
+  }, [blockById, canEdit, logAction, removeSelectedBlocks]);
   deleteBlockRef.current = deleteBlock;
 
   const deleteSelectedBlock = useCallback(() => {
     if (selectedBlockId) deleteBlock(selectedBlockId);
   }, [deleteBlock, selectedBlockId]);
 
+  const copySelectedBlocks = useCallback(() => {
+    const blocksToCopy =
+      selectedBlocks.length > 0
+        ? selectedBlocks
+        : selectedBlock
+          ? [selectedBlock]
+          : [];
+
+    if (blocksToCopy.length === 0) {
+      setStatusMessage("Aucun bloc selectionne a copier.");
+      return;
+    }
+
+    const { eligibleBlocks, ignoredCount } = prepareClipboardBlocks(blocksToCopy);
+    if (eligibleBlocks.length === 0) {
+      setStatusMessage("Les blocs de chapitre ne sont pas duplicables.");
+      return;
+    }
+
+    clipboardRef.current = {
+      blocks: eligibleBlocks.map((block) => structuredClone(block)),
+    };
+    clipboardPasteCountRef.current = 0;
+    let statusMessage =
+      eligibleBlocks.length === 1
+        ? `Bloc copie: ${eligibleBlocks[0].name || BLOCK_LABELS[eligibleBlocks[0].type]}.`
+        : `${eligibleBlocks.length} blocs copies.`;
+    if (ignoredCount > 0) {
+      statusMessage += ` ${ignoredCount} bloc${ignoredCount > 1 ? "s" : ""} de chapitre ignore${ignoredCount > 1 ? "s" : ""}.`;
+    }
+    setStatusMessage(statusMessage);
+  }, [selectedBlock, selectedBlocks]);
+
+  const pasteCopiedBlocks = useCallback(() => {
+    if (!canEdit) return;
+
+    const clipboard = clipboardRef.current;
+    if (!clipboard || clipboard.blocks.length === 0) {
+      setStatusMessage("Aucun bloc en memoire a coller.");
+      return;
+    }
+
+    clipboardPasteCountRef.current += 1;
+    const offsetMultiplier = clipboardPasteCountRef.current;
+    const duplicatedBlocks = duplicateClipboardBlocks(clipboard.blocks, {
+      x: DUPLICATE_POSITION_STEP.x * offsetMultiplier,
+      y: DUPLICATE_POSITION_STEP.y * offsetMultiplier,
+    });
+    if (duplicatedBlocks.length === 0) {
+      setStatusMessage("Les blocs en memoire ne sont pas duplicables.");
+      return;
+    }
+    const duplicatedNodes = duplicatedBlocks.map((block) => blockToNode(block));
+    const duplicatedEdges = rebuildEdgesFromNodes(duplicatedNodes).filter(
+      (edge) =>
+        !isDialogueAutoNextHandle(edge.sourceHandle) &&
+        !isCinematicAutoNextHandle(edge.sourceHandle),
+    );
+
+    setNodes((current) => [...current, ...duplicatedNodes]);
+    setEdges((current) => [...current, ...duplicatedEdges]);
+    replaceSelectedBlocks(
+      duplicatedBlocks.map((block) => block.id),
+      duplicatedBlocks[duplicatedBlocks.length - 1]?.id ?? null,
+    );
+    logAction(
+      duplicatedBlocks.length === 1 ? "duplicate_block" : "duplicate_blocks",
+      duplicatedBlocks.map((block) => `${BLOCK_LABELS[block.type]} (${block.id})`).join(", "),
+    );
+    setStatusMessage(
+      duplicatedBlocks.length === 1
+        ? `Bloc duplique: ${duplicatedBlocks[0].name}`
+        : `${duplicatedBlocks.length} blocs dupliques.`,
+    );
+  }, [canEdit, logAction, replaceSelectedBlocks]);
+
   const duplicateSelectedBlock = useCallback(() => {
-    if (!canEdit || !selectedBlock) return;
+    const blocksToDuplicate =
+      selectedBlocks.length > 0
+        ? selectedBlocks
+        : selectedBlock
+          ? [selectedBlock]
+          : [];
 
-    // Deep-clone the block and assign fresh IDs
-    const clone = structuredClone(selectedBlock) as unknown as Record<string, unknown>;
-    const newId = createId(selectedBlock.type);
-    clone.id = newId;
-    clone.name = `${selectedBlock.name || BLOCK_LABELS[selectedBlock.type]} (copie)`;
+    if (!canEdit || blocksToDuplicate.length === 0) return;
 
-    // Offset position so the duplicate doesn't overlap
-    const pos = selectedBlock.position;
-    clone.position = { x: pos.x + 60, y: pos.y + 60 };
-
-    // Regenerate internal IDs for dialogue lines/responses
-    if (selectedBlock.type === "dialogue") {
-      const lines = clone.lines as Array<Record<string, unknown>>;
-      const lineIdMap = new Map<string, string>();
-      for (const line of lines) {
-        const oldLineId = line.id as string;
-        const newLineId = createId("line");
-        lineIdMap.set(oldLineId, newLineId);
-        line.id = newLineId;
-        line.continueTargetBlockId = null;
-        const responses = line.responses as Array<Record<string, unknown>>;
-        for (const resp of responses) {
-          resp.id = createId("resp");
-          // Clear outgoing block connections — the user will re-wire them
-          resp.targetBlockId = null;
-        }
-      }
-      // Remap internal line-to-line navigation
-      for (const line of lines) {
-        const responses = line.responses as Array<Record<string, unknown>>;
-        for (const resp of responses) {
-          if (resp.targetLineId && lineIdMap.has(resp.targetLineId as string)) {
-            resp.targetLineId = lineIdMap.get(resp.targetLineId as string)!;
-          } else {
-            resp.targetLineId = null;
-          }
-        }
-      }
-      // Update startLineId to match the new first line
-      const oldStart = clone.startLineId as string;
-      clone.startLineId = lineIdMap.get(oldStart) ?? (lines[0]?.id ?? "");
+    const { eligibleBlocks } = prepareClipboardBlocks(blocksToDuplicate);
+    if (eligibleBlocks.length === 0) {
+      setStatusMessage("Les blocs de chapitre ne sont pas duplicables.");
+      return;
     }
 
-    if (selectedBlock.type === "cinematic") {
-      const narrations = clone.narrations as Array<Record<string, unknown>>;
-      const narrationIdMap = new Map<string, string>();
-      for (const narration of narrations) {
-        const oldNarrationId = narration.id as string;
-        const freshNarrationId = createId("cnarr");
-        narrationIdMap.set(oldNarrationId, freshNarrationId);
-        narration.id = freshNarrationId;
-        const oldTargetBlockId = narration.continueTargetBlockId as string | null | undefined;
-        narration.continueTargetBlockId =
-          oldTargetBlockId === selectedBlock.id ? newId : null;
-      }
-      for (const narration of narrations) {
-        const oldTargetNarrationId = narration.continueTargetNarrationId as string | null | undefined;
-        narration.continueTargetNarrationId =
-          oldTargetNarrationId && narrationIdMap.has(oldTargetNarrationId)
-            ? narrationIdMap.get(oldTargetNarrationId)!
-            : null;
-        if (narration.continueTargetNarrationId && !narration.continueTargetBlockId) {
-          narration.continueTargetBlockId = newId;
-        }
-      }
-      const oldStartNarrationId = clone.startNarrationId as string;
-      clone.startNarrationId =
-        narrationIdMap.get(oldStartNarrationId) ?? (narrations[0]?.id ?? "");
-    }
+    clipboardRef.current = {
+      blocks: eligibleBlocks.map((block) => structuredClone(block)),
+    };
+    clipboardPasteCountRef.current = 0;
+    pasteCopiedBlocks();
+  }, [canEdit, pasteCopiedBlocks, selectedBlock, selectedBlocks]);
 
-    // Regenerate IDs for choice options
-    if (selectedBlock.type === "choice") {
-      const choices = clone.choices as Array<Record<string, unknown>>;
-      for (const opt of choices) {
-        opt.id = createId("opt");
-        opt.targetBlockId = null;
-      }
-    }
+  useEffect(() => {
+    if (!authUser) return;
 
-    if (selectedBlock.type === "switch") {
-      const cases = clone.cases as Array<Record<string, unknown>>;
-      for (const item of cases) {
-        item.id = createId("switch_case");
-        item.targetBlockId = null;
-      }
-    }
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (!(event.ctrlKey || event.metaKey) || event.altKey) return;
 
-    // Regenerate IDs for gameplay objects
-    if (selectedBlock.type === "gameplay") {
-      const objects = clone.objects as Array<Record<string, unknown>>;
-      const idMap = new Map<string, string>();
-      for (const obj of objects) {
-        const oldId = obj.id as string;
-        const freshId = createId("gobj");
-        idMap.set(oldId, freshId);
-        obj.id = freshId;
-        obj.targetBlockId = null;
-      }
-      // Remap linkedKeyId references
-      for (const obj of objects) {
-        if (obj.linkedKeyId && idMap.has(obj.linkedKeyId as string)) {
-          obj.linkedKeyId = idMap.get(obj.linkedKeyId as string)!;
-        }
-      }
-      if (Array.isArray(clone.buttonSequence)) {
-        clone.buttonSequence = (clone.buttonSequence as string[])
-          .map((buttonId) => idMap.get(buttonId) ?? null)
-          .filter((buttonId): buttonId is string => Boolean(buttonId));
-      }
-      clone.buttonSequenceSuccessBlockId = null;
-      clone.buttonSequenceFailureBlockId = null;
-      clone.nextBlockId = null;
-    }
+      const target = event.target as HTMLElement | null;
+      const tagName = target?.tagName?.toLowerCase();
+      const isTypingTarget =
+        Boolean(target?.isContentEditable) ||
+        tagName === "input" ||
+        tagName === "textarea" ||
+        tagName === "select";
+      if (isTypingTarget) return;
 
-    // Clear nextBlockId for block types that have one
-    if ("nextBlockId" in clone) {
-      clone.nextBlockId = null;
-    }
+      const normalizedKey = event.key.toLowerCase();
+      if (normalizedKey === "c") {
+        event.preventDefault();
+        copySelectedBlocks();
+      } else if (normalizedKey === "v") {
+        event.preventDefault();
+        pasteCopiedBlocks();
+      }
+    };
 
-    const newBlock = normalizeStoryBlock(clone as unknown as StoryBlock);
-    setNodes((current) => [...current, blockToNode(newBlock)]);
-    setSelectedBlockId(newBlock.id);
-    logAction("duplicate_block", `${BLOCK_LABELS[newBlock.type]} (${newBlock.id})`);
-    setStatusMessage(`Bloc duplique: ${newBlock.name}`);
-  }, [canEdit, selectedBlock, logAction]);
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [authUser, copySelectedBlocks, pasteCopiedBlocks]);
 
   const deleteEdge = useCallback(
     (sourceId: string, sourceHandle: string) => {
@@ -2272,7 +2459,12 @@ export function AuthorStudioApp() {
     setCloudLatestUpdatedAt(null);
     setCloudProfiles({});
     setOpenedValidatedChapterIds([]);
-    setSelectedBlockId(normalizedProject.info.startBlockId ?? null);
+    clipboardRef.current = null;
+    clipboardPasteCountRef.current = 0;
+    replaceSelectedBlocks(
+      normalizedProject.info.startBlockId ? [normalizedProject.info.startBlockId] : [],
+      normalizedProject.info.startBlockId ?? null,
+    );
     setLastValidation([]);
     markStudioClean(
       buildStudioChangeFingerprint(
@@ -2285,6 +2477,7 @@ export function AuthorStudioApp() {
   }, [
     hydrateAssetRefs,
     markStudioClean,
+    replaceSelectedBlocks,
     resetGameplayState,
     setCloudEditingLockUserId,
     setCloudLatestUpdatedAt,
@@ -2533,7 +2726,12 @@ export function AuthorStudioApp() {
     clearAllAssetState();
     resetGameplayState();
     setOpenedValidatedChapterIds([]);
-    setSelectedBlockId(normalizedFreshProject.info.startBlockId ?? null);
+    clipboardRef.current = null;
+    clipboardPasteCountRef.current = 0;
+    replaceSelectedBlocks(
+      normalizedFreshProject.info.startBlockId ? [normalizedFreshProject.info.startBlockId] : [],
+      normalizedFreshProject.info.startBlockId ?? null,
+    );
     setLastValidation([]);
     resetPreview();
     setCloudProjectId(null);
@@ -3388,7 +3586,10 @@ export function AuthorStudioApp() {
 
         {authUser ? (
           <>
-            <main className="panel panel-canvas">
+            <main
+              className="panel panel-canvas"
+              onPointerDownCapture={handleCanvasPointerDownCapture}
+            >
               <ReactFlow
                 nodes={displayNodes}
                 edges={displayEdges}
@@ -3403,9 +3604,11 @@ export function AuthorStudioApp() {
                   if (node.type === "chapterFolder") return;
                   setSelectedBlockId(node.id);
                 }}
+                onNodeMouseEnter={handleHoverSelectionEnter}
                 nodesDraggable={canEdit}
                 nodesConnectable={canEdit}
                 elementsSelectable
+                panOnDrag={hoverSelectionActive ? false : true}
                 fitView
                 deleteKeyCode={null}
               >
