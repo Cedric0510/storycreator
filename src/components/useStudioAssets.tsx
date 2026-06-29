@@ -2,7 +2,6 @@
 
 import { ChangeEvent, useCallback, useEffect, useRef, useState } from "react";
 import JSZip from "jszip";
-import { SupabaseClient, User } from "@supabase/supabase-js";
 
 import {
   EditorEdge,
@@ -38,8 +37,6 @@ import {
   validateStoryBlocks,
 } from "@/lib/story";
 
-const SUPABASE_ASSET_BUCKET = "author-assets";
-
 interface UseStudioAssetsParams {
   blocks: StoryBlock[];
   project: ProjectMeta;
@@ -47,8 +44,6 @@ interface UseStudioAssetsParams {
   variableNameById: Map<string, string>;
   openedValidatedChapterIds: string[];
   canEdit: boolean;
-  supabase: SupabaseClient | null;
-  authUser: User | null;
   setLastValidation: (issues: ValidationIssue[]) => void;
   setStatusMessage: (message: string) => void;
   logAction: (action: string, details: string) => void;
@@ -63,8 +58,6 @@ export function useStudioAssets({
   variableNameById,
   openedValidatedChapterIds,
   canEdit,
-  supabase,
-  authUser,
   setLastValidation,
   setStatusMessage,
   logAction,
@@ -138,28 +131,10 @@ export function useStudioAssets({
             return objectUrl;
           }
         } catch {
-          // IndexedDB unavailable - fall through to cloud.
+          // IndexedDB unavailable or asset missing.
         }
 
-        // Fallback: fetch from Supabase Storage via signed URL.
-        const ref = assetRefsRef.current[assetId];
-        if (!ref?.storagePath || !supabase || !authUser) return null;
-
-        const bucket = ref.storageBucket ?? SUPABASE_ASSET_BUCKET;
-        const { data, error } = await supabase.storage
-          .from(bucket)
-          .createSignedUrl(ref.storagePath, 60 * 60);
-        if (error || !data?.signedUrl) return null;
-
-        if (isMountedRef.current) {
-          setAssetPreviewSrcById((current) => {
-            if (current[assetId] === data.signedUrl) return current;
-            const next = { ...current, [assetId]: data.signedUrl };
-            assetPreviewSrcByIdRef.current = next;
-            return next;
-          });
-        }
-        return data.signedUrl;
+        return null;
       })().catch(() => null);
 
       inFlightPreviewByIdRef.current.set(assetId, loadPreviewPromise);
@@ -170,7 +145,7 @@ export function useStudioAssets({
       });
       return loadPreviewPromise;
     },
-    [authUser, supabase],
+    [],
   );
 
   const registerAsset = useCallback((file: File) => {
@@ -251,14 +226,14 @@ export function useStudioAssets({
       setStatusMessage(
         `Export bloque: ${errors.length} erreur(s). ${errors[0]?.message ?? "Corrige les erreurs bloquantes avant export."}`,
       );
-      return;
+      return false;
     }
 
     const referencedAssetIds = collectProjectReferencedAssetIds(project, blocks);
     for (const assetId of referencedAssetIds) {
       if (!assetRefs[assetId]) {
         setStatusMessage(`Asset reference introuvable (${assetId}).`);
-        return;
+        return false;
       }
     }
 
@@ -334,78 +309,17 @@ export function useStudioAssets({
     const zip = new JSZip();
     zip.file("story.json", JSON.stringify(payload, null, 2));
 
-    // Sort assets: local IndexedDB files first (fast), cloud downloads after.
-    const localAssets: string[] = [];
-    const cloudAssets: string[] = [];
     for (const assetId of referencedAssetIds) {
       const ref = assetRefs[assetId];
       if (!ref) continue;
-      // We'll try IndexedDB first; if missing there, fall back to cloud
-      if (ref.storagePath) {
-        cloudAssets.push(assetId);
-      } else {
-        localAssets.push(assetId);
-      }
-    }
-
-    // Pack IndexedDB blobs
-    for (const assetId of localAssets) {
       const blob = await getAssetBlob(assetId);
       if (blob) {
-        zip.file(assetRefs[assetId].packagePath, blob);
+        zip.file(ref.packagePath, blob);
       } else {
-        setStatusMessage(`Asset manquant en local (${assetRefs[assetId]?.fileName}). Reimporte-le.`);
-        return;
-      }
-    }
-
-    // For cloud assets: try IndexedDB cache first, then download.
-    if (cloudAssets.length > 0) {
-      if (!supabase || !authUser) {
         setStatusMessage(
-          "Connexion cloud requise pour telecharger les assets depuis Supabase Storage.",
+          `Asset manquant en local (${ref.fileName}). Reimporte-le depuis un ZIP complet avant d'exporter.`,
         );
-        return;
-      }
-
-      const BATCH_SIZE = 5;
-      let downloaded = 0;
-      for (let i = 0; i < cloudAssets.length; i += BATCH_SIZE) {
-        const batch = cloudAssets.slice(i, i + BATCH_SIZE);
-        setStatusMessage(
-          `Export: telechargement assets ${downloaded + 1}-${Math.min(downloaded + batch.length, cloudAssets.length)}/${cloudAssets.length}...`,
-        );
-
-        const results = await Promise.all(
-          batch.map(async (assetId) => {
-            // Try IndexedDB cache first (asset may already be cached locally)
-            const cached = await getAssetBlob(assetId);
-            if (cached) return { assetId, data: cached } as const;
-
-            const ref = assetRefs[assetId];
-            if (!ref.storagePath) return { assetId, error: "storagePath manquant" } as const;
-            const bucket = ref.storageBucket ?? SUPABASE_ASSET_BUCKET;
-            const { data, error } = await supabase.storage.from(bucket).download(ref.storagePath);
-            if (error || !data) return { assetId, error: error?.message ?? "unknown" } as const;
-            // Cache the downloaded blob in IndexedDB for future use
-            void putAssetBlob(assetId, data).catch((cacheError) => {
-              console.error("[exportZip] asset cache write failed:", assetId, cacheError);
-            });
-            return { assetId, data } as const;
-          }),
-        );
-
-        for (const result of results) {
-          if ("error" in result) {
-            const ref = assetRefs[result.assetId];
-            setStatusMessage(
-              `Erreur telechargement asset (${ref?.fileName ?? result.assetId}): ${result.error}`,
-            );
-            return;
-          }
-          zip.file(assetRefs[result.assetId].packagePath, result.data);
-        }
-        downloaded += batch.length;
+        return false;
       }
     }
 
@@ -419,14 +333,15 @@ export function useStudioAssets({
     downloadBlob(blob, `${project.info.slug || "story"}-bundle.zip`);
     setStatusMessage(`Export reussi: ${referencedAssetIds.size} asset(s) dans le ZIP.`);
     logAction("export_zip", `${referencedAssetIds.size} assets`);
+    return true;
    } catch (err: unknown) {
     const msg = err instanceof Error ? err.message : String(err);
     console.error("[exportZip] unhandled export error:", msg, err);
     setStatusMessage(`Erreur export: ${msg}`);
+    return false;
    }
   }, [
     assetRefs,
-    authUser,
     blocks,
     edges,
     logAction,
@@ -434,7 +349,6 @@ export function useStudioAssets({
     openedValidatedChapterIds,
     setLastValidation,
     setStatusMessage,
-    supabase,
     variableNameById,
   ]);
 
