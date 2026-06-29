@@ -112,6 +112,7 @@ import type { ZipImportMergeMaps } from "@/components/author-studio-merge-utils"
 const nodeTypes: NodeTypes = { storyBlock: StoryNode, chapterFolder: ChapterFolderNode };
 const edgeTypes: EdgeTypes = { deletable: DeletableEdge };
 const DUPLICATE_POSITION_STEP = { x: 60, y: 60 };
+const PROJECT_CLOUD_ENABLED = false;
 
 interface ClipboardBlockSelection {
   blocks: StoryBlock[];
@@ -383,15 +384,20 @@ export function AuthorStudioApp() {
   const canUseAuthorTools = isPlatformAdmin || platformRole === "author";
   const localCanEdit = true;
   const cloudCanWrite =
-    canUseAuthorTools &&
-    (isPlatformAdmin ||
-      !cloudProjectId ||
-      cloudAccessLevel === "owner" ||
-      cloudAccessLevel === "write");
+    !PROJECT_CLOUD_ENABLED ||
+    (canUseAuthorTools &&
+      (isPlatformAdmin ||
+        !cloudProjectId ||
+        cloudAccessLevel === "owner" ||
+        cloudAccessLevel === "write"));
   const cloudCanManageAccess = Boolean(
-    canUseAuthorTools && cloudProjectId && (isPlatformAdmin || cloudAccessLevel === "owner"),
+    PROJECT_CLOUD_ENABLED &&
+      canUseAuthorTools &&
+      cloudProjectId &&
+      (isPlatformAdmin || cloudAccessLevel === "owner"),
   );
   const cloudLockHeldByOther =
+    PROJECT_CLOUD_ENABLED &&
     Boolean(cloudProjectId) &&
     Boolean(cloudEditingLockUserId) &&
     cloudEditingLockUserId !== authUser?.id;
@@ -400,6 +406,7 @@ export function AuthorStudioApp() {
       ? cloudProfiles[cloudEditingLockUserId]?.display_name ?? cloudEditingLockUserId
       : "libre";
   const cloudRevisionDrift =
+    PROJECT_CLOUD_ENABLED &&
     Boolean(cloudProjectId) &&
     Boolean(cloudProjectUpdatedAt) &&
     Boolean(cloudLatestUpdatedAt) &&
@@ -558,6 +565,7 @@ export function AuthorStudioApp() {
     signUpWithPassword,
     signOutSupabase,
   } = useCloudProjectSession({
+    projectCloudEnabled: PROJECT_CLOUD_ENABLED,
     supabase,
     allowSelfSignup,
     authUser,
@@ -1120,8 +1128,6 @@ export function AuthorStudioApp() {
     variableNameById,
     openedValidatedChapterIds,
     canEdit,
-    supabase,
-    authUser,
     setLastValidation,
     setStatusMessage,
     logAction,
@@ -1215,6 +1221,13 @@ export function AuthorStudioApp() {
     },
     [currentFingerprint],
   );
+
+  const exportProjectZip = useCallback(async () => {
+    const exported = await exportZip();
+    if (exported) {
+      markStudioClean();
+    }
+  }, [exportZip, markStudioClean]);
 
   useEffect(() => {
     const timer = window.setTimeout(() => {
@@ -3183,14 +3196,6 @@ export function AuthorStudioApp() {
     resetStudioToBlank();
   };
 
-  const saveCloudAndCreateNewProject = async () => {
-    const saved = await saveCloudProject();
-    if (!saved) return;
-    setNewProjectWarningOpen(false);
-    resetStudioToBlank({ preserveStatusMessage: true });
-    setStatusMessage("Projet sauvegarde dans le cloud, puis nouveau projet initialise.");
-  };
-
   const handleImportZip = async (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
     if (!file) return;
@@ -3395,7 +3400,9 @@ export function AuthorStudioApp() {
           </button>
           <button
             className="button-primary nav-action-button nav-action-export"
-            onClick={exportZip}
+            onClick={() => {
+              void exportProjectZip();
+            }}
             disabled={!authUser}
           >
             Export ZIP
@@ -3454,6 +3461,7 @@ export function AuthorStudioApp() {
         <div className="panel-left-stack">
           <AuthorStudioCloudPanel
             studioMode
+            projectCloudEnabled={PROJECT_CLOUD_ENABLED}
             supabaseEnabled={Boolean(supabase)}
             allowSelfSignup={allowSelfSignup}
             authLoading={authLoading}
@@ -4016,8 +4024,8 @@ export function AuthorStudioApp() {
             <p>Tu vas fermer le projet en cours et ouvrir une page vierge.</p>
             <p className="confirm-warning">
               {hasUnsavedChanges
-                ? "Attention: des modifications ne sont pas encore sauvegardees."
-                : "Pense a sauvegarder si besoin avant de quitter ce projet."}
+                ? "Attention: exporte un ZIP si tu veux conserver les modifications avant de quitter."
+                : "Pense a exporter un ZIP si besoin avant de quitter ce projet."}
             </p>
             <div className="confirm-actions">
               <button
@@ -4035,15 +4043,6 @@ export function AuthorStudioApp() {
                 Quitter sans sauvegarder
               </button>
             </div>
-            <button
-              className="button-primary confirm-save-button"
-              onClick={() => {
-                void saveCloudAndCreateNewProject();
-              }}
-              disabled={cloudBusy || !authUser || !supabase}
-            >
-              Sauvegarder cloud
-            </button>
           </div>
         </div>
       )}

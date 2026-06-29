@@ -16,6 +16,7 @@ import { HelpHint } from "@/components/HelpHint";
 
 interface AuthorStudioCloudPanelProps {
   studioMode?: boolean;
+  projectCloudEnabled?: boolean;
   supabaseEnabled: boolean;
   allowSelfSignup: boolean;
   authLoading: boolean;
@@ -81,6 +82,7 @@ interface AuthorStudioCloudPanelProps {
 
 export function AuthorStudioCloudPanel({
   studioMode = false,
+  projectCloudEnabled = true,
   supabaseEnabled,
   allowSelfSignup,
   authLoading,
@@ -241,78 +243,94 @@ export function AuthorStudioCloudPanel({
                   Connecte: <strong>{displayEmail(authUser.email) ?? authUser.id}</strong>{" "}
                   <span className="chip chip-start">{platformRole}</span>
                 </p>
-                <div className="cloud-auth-actions">
-                  <div className="cloud-auth-top-row">
+                {!projectCloudEnabled ? (
+                  <div className="subsection">
+                    <p className="empty-placeholder">
+                      Sauvegarde en ligne desactivee. Les projets se sauvegardent avec
+                      Export ZIP et se reprennent avec Import ZIP.
+                    </p>
                     {!studioMode && (
                       <button className="button-secondary" onClick={onSignOut} disabled={cloudBusy}>
                         Se deconnecter
                       </button>
                     )}
-                    <button
-                      className="button-secondary"
-                      onClick={onRefreshProjects}
-                      disabled={cloudBusy}
-                    >
-                      Refresh liste
-                    </button>
                   </div>
-                  <button
-                    className="button-primary cloud-save-button"
-                    onClick={onSaveProject}
-                    disabled={cloudBusy || !cloudCanWrite}
-                  >
-                    {cloudBusy
-                      ? "Sauvegarde en cours..."
-                      : cloudProjectId
-                        ? "Sauvegarder cloud"
-                        : "Creer + sauvegarder"}
-                  </button>
-                  {!cloudCanWrite && (
-                    <small className="cloud-save-disabled-hint">
-                      Sauvegarde desactivee: verifie que ton compte a le role auteur
-                      et que tu as les droits write/owner sur ce projet.
-                    </small>
-                  )}
-                  {cloudProjectId && (
-                    <div className="cloud-auth-top-row">
+                ) : (
+                  <>
+                    <div className="cloud-auth-actions">
+                      <div className="cloud-auth-top-row">
+                        {!studioMode && (
+                          <button className="button-secondary" onClick={onSignOut} disabled={cloudBusy}>
+                            Se deconnecter
+                          </button>
+                        )}
+                        <button
+                          className="button-secondary"
+                          onClick={onRefreshProjects}
+                          disabled={cloudBusy}
+                        >
+                          Refresh liste
+                        </button>
+                      </div>
                       <button
-                        className="button-secondary"
-                        onClick={onAcquireLock}
-                        disabled={
-                          cloudBusy || !cloudCanWrite || cloudEditingLockUserId === authUser.id
-                        }
+                        className="button-primary cloud-save-button"
+                        onClick={onSaveProject}
+                        disabled={cloudBusy || !cloudCanWrite}
                       >
-                        Prendre verrou cloud
+                        {cloudBusy
+                          ? "Sauvegarde en cours..."
+                          : cloudProjectId
+                            ? "Sauvegarder cloud"
+                            : "Creer + sauvegarder"}
                       </button>
-                      <button
-                        className="button-secondary"
-                        onClick={onReleaseLock}
-                        disabled={
-                          cloudBusy || !cloudProjectId || cloudEditingLockUserId !== authUser.id
-                        }
-                      >
-                        Liberer verrou cloud
-                      </button>
+                      {!cloudCanWrite && (
+                        <small className="cloud-save-disabled-hint">
+                          Sauvegarde desactivee: verifie que ton compte a le role auteur
+                          et que tu as les droits write/owner sur ce projet.
+                        </small>
+                      )}
+                      {cloudProjectId && (
+                        <div className="cloud-auth-top-row">
+                          <button
+                            className="button-secondary"
+                            onClick={onAcquireLock}
+                            disabled={
+                              cloudBusy || !cloudCanWrite || cloudEditingLockUserId === authUser.id
+                            }
+                          >
+                            Prendre verrou cloud
+                          </button>
+                          <button
+                            className="button-secondary"
+                            onClick={onReleaseLock}
+                            disabled={
+                              cloudBusy || !cloudProjectId || cloudEditingLockUserId !== authUser.id
+                            }
+                          >
+                            Liberer verrou cloud
+                          </button>
+                        </div>
+                      )}
+                      {cloudProjectId && cloudAccessLevel === "owner" && cloudLockHeldByOther && (
+                        <button
+                          className="button-danger"
+                          onClick={onForceTakeoverLock}
+                          disabled={cloudBusy}
+                        >
+                          Reprendre verrou (owner)
+                        </button>
+                      )}
                     </div>
-                  )}
-                  {cloudProjectId && cloudAccessLevel === "owner" && cloudLockHeldByOther && (
-                    <button
-                      className="button-danger"
-                      onClick={onForceTakeoverLock}
-                      disabled={cloudBusy}
-                    >
-                      Reprendre verrou (owner)
-                    </button>
-                  )}
-                </div>
-                {cloudProjectId && (
-                  <small>
-                    Projet cloud actif: <strong>{cloudProjectId}</strong> ({cloudAccessLevel ?? "none"})
-                    {cloudProjectUpdatedAt && (
-                      <> - rev. {new Date(cloudProjectUpdatedAt).toLocaleString("fr-FR")}</>
+                    {cloudProjectId && (
+                      <small>
+                        Projet cloud actif: <strong>{cloudProjectId}</strong> ({cloudAccessLevel ?? "none"})
+                        {cloudProjectUpdatedAt && (
+                          <> - rev. {new Date(cloudProjectUpdatedAt).toLocaleString("fr-FR")}</>
+                        )}
+                        {cloudEditingLockUserId && <> - lock {cloudLockHolderName}</>}
+                      </small>
                     )}
-                    {cloudEditingLockUserId && <> - lock {cloudLockHolderName}</>}
-                  </small>
+                  </>
                 )}
                 {!studioMode && (
                   <div className="subsection">
@@ -376,7 +394,7 @@ export function AuthorStudioCloudPanel({
         </CollapsibleSection>
       )}
 
-      {authUser && (
+      {authUser && projectCloudEnabled && (
         <CollapsibleSection
           storageKey="cloud-projects"
           title="Mes projets"
@@ -570,7 +588,7 @@ export function AuthorStudioCloudPanel({
         </CollapsibleSection>
       )}
 
-      {isPlatformAdmin && !studioMode && (
+      {isPlatformAdmin && !studioMode && projectCloudEnabled && (
         <CollapsibleSection
           storageKey="cloud-maintenance"
           title="Maintenance assets"
@@ -605,7 +623,7 @@ export function AuthorStudioCloudPanel({
         </CollapsibleSection>
       )}
 
-      {cloudProjectId && (cloudCanManageAccess || isPlatformAdmin) && (
+      {projectCloudEnabled && cloudProjectId && (cloudCanManageAccess || isPlatformAdmin) && (
         <CollapsibleSection
           storageKey="cloud-share"
           title="Partager le projet"
@@ -676,7 +694,7 @@ export function AuthorStudioCloudPanel({
         </CollapsibleSection>
       )}
 
-      {cloudProjectId && cloudLogs.length > 0 && !studioMode && (
+      {projectCloudEnabled && cloudProjectId && cloudLogs.length > 0 && !studioMode && (
         <CollapsibleSection
           storageKey="cloud-logs"
           title="Logs cloud"
@@ -706,7 +724,7 @@ export function AuthorStudioCloudPanel({
         </CollapsibleSection>
       )}
 
-      {pendingDeleteProject && (
+      {projectCloudEnabled && pendingDeleteProject && (
         <div className="confirm-overlay">
           <div className="confirm-modal">
             <h2>Supprimer le projet</h2>

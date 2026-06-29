@@ -15,6 +15,7 @@ import {
 } from "@/components/author-studio-types";
 
 interface UseCloudProjectSessionParams {
+  projectCloudEnabled?: boolean;
   supabase: SupabaseClient | null;
   allowSelfSignup: boolean;
   authUser: User | null;
@@ -44,6 +45,7 @@ interface UseCloudProjectSessionParams {
 }
 
 export function useCloudProjectSession({
+  projectCloudEnabled = true,
   supabase,
   allowSelfSignup,
   authUser,
@@ -73,6 +75,7 @@ export function useCloudProjectSession({
 }: UseCloudProjectSessionParams) {
   const fetchCloudProfiles = useCallback(
     async (projectId: string) => {
+      if (!projectCloudEnabled) return;
       if (!supabase) return;
 
       try {
@@ -94,11 +97,12 @@ export function useCloudProjectSession({
         // Swallow — profile fetch failure is non-critical.
       }
     },
-    [setCloudProfiles, setStatusMessage, supabase],
+    [projectCloudEnabled, setCloudProfiles, setStatusMessage, supabase],
   );
 
   const refreshCloudSideData = useCallback(
     async (projectId: string, ownerId: string | null) => {
+      if (!projectCloudEnabled) return;
       if (!supabase) return;
 
       try {
@@ -177,12 +181,14 @@ export function useCloudProjectSession({
       setCloudOwnerId,
       setStatusMessage,
       platformRole,
+      projectCloudEnabled,
       supabase,
     ],
   );
 
   const appendCloudLog = useCallback(
     async (projectId: string, action: string, details: string) => {
+      if (!projectCloudEnabled) return;
       if (!supabase || !authUser) return;
 
       try {
@@ -200,11 +206,12 @@ export function useCloudProjectSession({
         // Swallow — log failure should not block the main operation.
       }
     },
-    [authUser, setStatusMessage, supabase],
+    [authUser, projectCloudEnabled, setStatusMessage, supabase],
   );
 
   const acquireCloudLock = useCallback(
     async (options?: { forceTakeover?: boolean; silent?: boolean }) => {
+      if (!projectCloudEnabled) return false;
       if (!supabase || !authUser || !cloudProjectId) return false;
       if (!cloudCanWrite) return false;
 
@@ -254,12 +261,14 @@ export function useCloudProjectSession({
       refreshCloudSideData,
       setCloudEditingLockUserId,
       setStatusMessage,
+      projectCloudEnabled,
       supabase,
     ],
   );
 
   const releaseCloudLock = useCallback(
     async (options?: { forceRelease?: boolean; silent?: boolean }) => {
+      if (!projectCloudEnabled) return false;
       if (!supabase || !authUser || !cloudProjectId) return false;
 
       const { forceRelease = false, silent = false } = options ?? {};
@@ -307,11 +316,16 @@ export function useCloudProjectSession({
       refreshCloudSideData,
       setCloudEditingLockUserId,
       setStatusMessage,
+      projectCloudEnabled,
       supabase,
     ],
   );
 
   const refreshCloudProjects = useCallback(async () => {
+    if (!projectCloudEnabled) {
+      setCloudProjects([]);
+      return;
+    }
     if (!supabase || !authUser) {
       setCloudProjects([]);
       return;
@@ -375,7 +389,7 @@ export function useCloudProjectSession({
       const msg = err instanceof Error ? err.message : String(err);
       setStatusMessage(`Erreur projets cloud: ${msg}`);
     }
-  }, [authUser, platformRole, setCloudProjects, setStatusMessage, supabase]);
+  }, [authUser, platformRole, projectCloudEnabled, setCloudProjects, setStatusMessage, supabase]);
 
   const refreshPlatformProfiles = useCallback(async () => {
     if (!supabase || !authUser || platformRole !== "admin") {
@@ -578,7 +592,9 @@ export function useCloudProjectSession({
         }
 
         await refreshPlatformProfiles();
-        await refreshCloudProjects();
+        if (projectCloudEnabled) {
+          await refreshCloudProjects();
+        }
         setStatusMessage(`Role plateforme mis a jour: ${nextRole}.`);
         return true;
       } catch (err: unknown) {
@@ -592,6 +608,7 @@ export function useCloudProjectSession({
     [
       authUser,
       platformRole,
+      projectCloudEnabled,
       refreshCloudProjects,
       refreshPlatformProfiles,
       setCloudBusy,
@@ -604,7 +621,7 @@ export function useCloudProjectSession({
   const signOutSupabase = useCallback(async () => {
     if (!supabase) return;
     try {
-      if (cloudProjectId && authUser && cloudEditingLockUserId === authUser.id) {
+      if (projectCloudEnabled && cloudProjectId && authUser && cloudEditingLockUserId === authUser.id) {
         await releaseCloudLock({ silent: true });
       }
       await supabase.auth.signOut();
@@ -628,6 +645,7 @@ export function useCloudProjectSession({
     authUser,
     cloudEditingLockUserId,
     cloudProjectId,
+    projectCloudEnabled,
     releaseCloudLock,
     setCloudAccessLevel,
     setCloudAccessRows,

@@ -6,13 +6,6 @@ import { useCallback, useEffect, useState } from "react";
 import { PlatformProfileRow, PlatformRole } from "@/components/author-studio-types";
 import { usePortalAuth } from "@/components/usePortalAuth";
 
-interface AdminProjectRow {
-  id: string;
-  title: string;
-  updated_at: string;
-  owner_id: string;
-}
-
 function normalizePlatformRole(value: unknown): PlatformRole {
   if (value === "admin") return "admin";
   if (value === "author") return "author";
@@ -24,7 +17,6 @@ export default function AdminPage() {
   const [message, setMessage] = useState("");
   const [actionBusy, setActionBusy] = useState(false);
   const [profiles, setProfiles] = useState<PlatformProfileRow[]>([]);
-  const [projects, setProjects] = useState<AdminProjectRow[]>([]);
   const [createEmail, setCreateEmail] = useState("");
   const [createPassword, setCreatePassword] = useState("");
   const [createRole, setCreateRole] = useState<PlatformRole>("reader");
@@ -45,25 +37,10 @@ export default function AdminPage() {
     setProfiles(rows);
   }, [isAdmin, supabase]);
 
-  const refreshProjects = useCallback(async () => {
-    if (!supabase || !isAdmin) return;
-    const { data, error } = await supabase
-      .from("author_projects")
-      .select("id,title,updated_at,owner_id")
-      .order("updated_at", { ascending: false })
-      .limit(100);
-    if (error) {
-      setMessage(`Erreur chargement projets: ${error.message}`);
-      return;
-    }
-    setProjects((data ?? []) as AdminProjectRow[]);
-  }, [isAdmin, supabase]);
-
   useEffect(() => {
     if (!isAdmin) return;
     void refreshProfiles();
-    void refreshProjects();
-  }, [isAdmin, refreshProfiles, refreshProjects]);
+  }, [isAdmin, refreshProfiles]);
 
   const createUser = async () => {
     if (!supabase || !isAdmin) return;
@@ -159,42 +136,7 @@ export default function AdminPage() {
       }
 
       await refreshProfiles();
-      await refreshProjects();
       setMessage("Utilisateur supprime.");
-    } finally {
-      setActionBusy(false);
-    }
-  };
-
-  const deleteProject = async (projectId: string) => {
-    if (!supabase || !isAdmin) return;
-    setActionBusy(true);
-    try {
-      const {
-        data: { session },
-        error: sessionError,
-      } = await supabase.auth.refreshSession();
-      if (sessionError || !session?.access_token) {
-        setMessage(`Session invalide: ${sessionError?.message ?? "reconnecte-toi"}`);
-        return;
-      }
-
-      const response = await fetch("/api/admin/delete-project", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "x-supabase-access-token": session.access_token,
-        },
-        body: JSON.stringify({ projectId }),
-      });
-      const payload = (await response.json().catch(() => ({}))) as { error?: string };
-      if (!response.ok) {
-        setMessage(`Erreur suppression projet: ${payload.error ?? "unknown"}`);
-        return;
-      }
-
-      await refreshProjects();
-      setMessage("Projet supprime.");
     } finally {
       setActionBusy(false);
     }
@@ -232,7 +174,6 @@ export default function AdminPage() {
                 className="button-secondary"
                 onClick={() => {
                   void refreshProfiles();
-                  void refreshProjects();
                 }}
                 disabled={busy || actionBusy}
               >
@@ -326,32 +267,10 @@ export default function AdminPage() {
             )}
 
             <div className="portal-divider" />
-
-            <h2>Projets</h2>
-            {projects.length === 0 ? (
-              <p className="empty-placeholder">Aucun projet charge.</p>
-            ) : (
-              <ul className="list-compact">
-                {projects.map((project) => (
-                  <li key={project.id} className="cloud-project-row">
-                    <div>
-                      <strong>{project.title}</strong>
-                      <small>{project.id}</small>
-                      <small>{new Date(project.updated_at).toLocaleString("fr-FR")}</small>
-                    </div>
-                    <div className="row-inline">
-                      <button
-                        className="button-danger button-small"
-                        onClick={() => void deleteProject(project.id)}
-                        disabled={busy || actionBusy}
-                      >
-                        Supprimer
-                      </button>
-                    </div>
-                  </li>
-                ))}
-              </ul>
-            )}
+            <p className="empty-placeholder">
+              La sauvegarde projet en ligne est desactivee sur cette instance. Cette page ne gere
+              que les comptes et les roles.
+            </p>
           </div>
         )}
 

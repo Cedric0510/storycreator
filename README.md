@@ -38,6 +38,19 @@ SUPABASE_SERVICE_ROLE_KEY=...
 
 ## Setup Supabase
 
+Mode actuel recommande pour MVP sans sauvegarde cloud:
+
+- utiliser Supabase uniquement pour l'authentification et `author_profiles`;
+- ne pas creer les tables projet ni le bucket Storage;
+- executer uniquement `supabase/migrations/20260629_auth_profiles_only.sql`
+  sur un nouveau projet Supabase;
+- les projets se sauvegardent via `Export ZIP` et se reprennent via `Import ZIP`.
+
+La premiere personne inscrite apres cette migration devient `admin`. Les comptes suivants
+sont `reader` par defaut et peuvent etre passes `author` depuis l'administration.
+
+Ancien mode cloud complet (desactive dans l'application actuelle):
+
 Execute les migrations SQL dans cet ordre:
 
 - `supabase/migrations/20260224_author_studio.sql`
