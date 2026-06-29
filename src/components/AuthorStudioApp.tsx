@@ -3392,6 +3392,13 @@ export function AuthorStudioApp() {
             </button>
           )}
           <button
+            className="button-secondary nav-action-button"
+            onClick={requestNewProject}
+            disabled={!authUser || !canUseAuthorTools || isImportingZip}
+          >
+            Nouveau projet
+          </button>
+          <button
             className="button-secondary nav-action-button nav-action-preview"
             onClick={startPreview}
             disabled={!authUser || isImportingZip}
