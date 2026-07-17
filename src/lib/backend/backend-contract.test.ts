@@ -52,6 +52,12 @@ export function runBackendContractSuite(makeHarness: () => Promise<ContractHarne
       if (!result.ok) expect(result.error.kind).toBe("invalid_request");
     });
 
+    it("repond succes a une demande de reset meme pour un email inconnu (regle 13)", async () => {
+      const { backend } = await makeHarness();
+      const result = await backend.auth.requestPasswordReset("inconnu@studio.com");
+      expect(result.ok).toBe(true);
+    });
+
     it("efface le flag must_change_password apres changement (regle 10)", async () => {
       const { backend, signInAsAdmin } = await makeHarness();
       await signInAsAdmin();

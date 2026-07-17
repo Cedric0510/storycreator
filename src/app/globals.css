@@ -303,6 +303,25 @@ label {
   padding: 10px;
 }
 
+.portal-forgot-link {
+  align-self: flex-start;
+  color: #4d6178;
+  font-size: 13px;
+  text-decoration: underline;
+}
+
+.portal-forgot-link:hover {
+  color: #0d4463;
+}
+
+.portal-crystal-card .portal-forgot-link {
+  color: #cbcec6;
+}
+
+.portal-crystal-card .portal-forgot-link:hover {
+  color: #f3f8ee;
+}
+
 .portal-message {
   border: 1px solid #9ec6d6;
   background: #eef9ff;

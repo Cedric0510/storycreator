@@ -44,6 +44,7 @@ Un compte `reader` voit le studio mais ne peut pas editer (bandeau explicatif).
 | getSession          | -                     | session courante ou null | rafraichissement auto des tokens |
 | onSessionChange     | callback              | abonnement               | evenements: connexion, deconnexion, refresh token |
 | changePassword      | newPassword (>= 8)    | ok / erreur              | efface le flag `must_change_password` des metadata |
+| requestPasswordReset | email                | ok (toujours)            | envoie un email avec lien vers `/reinitialisation`; reponse neutre que le compte existe ou non (anti-enumeration) |
 | getAccessToken      | -                     | JWT                      | utilise pour authentifier les appels BFF |
 
 Transport du token vers le BFF: header `x-supabase-access-token` (historique).
@@ -105,6 +106,13 @@ les policies RLS et les triggers. Un backend maison DOIT les reimplementer.
     (jamais de confiance dans le client).
 12. **RLS profils**: un utilisateur ne peut lire que son propre profil; le
     listing complet passe par la RPC `platform_list_profiles` (security definer).
+13. **Reinitialisation mot de passe**: la demande repond toujours succes
+    (anti-enumeration). Le lien recu par email ouvre une session de
+    recuperation sur `/reinitialisation`, ou l'utilisateur saisit son nouveau
+    mot de passe (>= 8). La validite/expiration du lien est geree par le
+    fournisseur d'auth. Config Supabase requise: ajouter
+    `https://<domaine>/reinitialisation` dans Authentication > URL
+    Configuration > Redirect URLs.
 
 ## Erreurs
 

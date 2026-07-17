@@ -18,6 +18,8 @@ export type AuthEvent =
   | "signed_in"
   | "signed_out"
   | "token_refreshed"
+  /** Session ouverte via un lien de reinitialisation de mot de passe. */
+  | "password_recovery"
   | "other";
 
 export type RoleFetchOutcome =
@@ -41,6 +43,11 @@ export interface AuthPort {
   signUp(email: string, password: string): Promise<BackendResult<SignUpOutcome>>;
   signOut(): Promise<void>;
   changePassword(newPassword: string): Promise<BackendResult>;
+  /**
+   * Envoie l'email de reinitialisation. Reponse volontairement neutre:
+   * succes meme si l'email est inconnu (anti-enumeration de comptes).
+   */
+  requestPasswordReset(email: string): Promise<BackendResult>;
   fetchMyRole(userId: string): Promise<RoleFetchOutcome>;
   /** Jeton d'acces frais pour authentifier les appels BFF. */
   getAccessToken(): Promise<string | null>;

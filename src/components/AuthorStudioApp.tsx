@@ -2904,8 +2904,16 @@ export function AuthorStudioApp() {
         onChange={(event) => void handleImportZip(event)}
       />
 
-      {/* ── Inline warnings (edit block) ── */}
+      {/* ── Inline warnings (edit block / provisional password) ── */}
       {editBlockReason && <div className="warning-banner">{editBlockReason}</div>}
+      {authUser?.mustChangePassword && (
+        <div className="warning-banner">
+          Ton mot de passe provisoire doit etre change.{" "}
+          <button className="button-secondary button-small" onClick={openAccountModal}>
+            Changer maintenant
+          </button>
+        </div>
+      )}
 
       {/* ── Toast notifications ── */}
       {toasts.length > 0 && (

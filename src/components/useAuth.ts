@@ -25,6 +25,7 @@ export interface UseAuthResult {
   signUp: (email: string, password: string) => Promise<BackendResult<SignUpOutcome>>;
   signOut: () => Promise<void>;
   changePassword: (newPassword: string) => Promise<BackendResult>;
+  requestPasswordReset: (email: string) => Promise<BackendResult>;
 }
 
 /**
@@ -54,7 +55,12 @@ export function useAuth(options: UseAuthOptions = {}): UseAuthResult {
     }
 
     let cancelled = false;
-    let currentUserId: string | null = null;
+    // Cle d'identite incluant les metadonnees affichees: un changement de
+    // mustChangePassword (apres updateUser) doit rafraichir l'etat React
+    // meme si l'utilisateur reste le meme.
+    let currentUserKey: string | null = null;
+    const userKey = (candidate: AuthorUser | null) =>
+      candidate ? `${candidate.id}:${candidate.email ?? ""}:${candidate.mustChangePassword}` : null;
 
     const applyRole = (next: PlatformRole) => {
       setRole(next);
@@ -96,7 +102,7 @@ export function useAuth(options: UseAuthOptions = {}): UseAuthResult {
       .getCurrentUser()
       .then(async (initialUser) => {
         if (cancelled) return;
-        currentUserId = initialUser?.id ?? null;
+        currentUserKey = userKey(initialUser);
         setUser(initialUser);
         await refreshRole(initialUser, true);
       })
@@ -106,13 +112,13 @@ export function useAuth(options: UseAuthOptions = {}): UseAuthResult {
       });
 
     const unsubscribe = backend.auth.onAuthStateChange((nextUser, event) => {
-      const nextUserId = nextUser?.id ?? null;
+      const nextUserKey = userKey(nextUser);
 
       // Ne mettre a jour l'etat React que si l'utilisateur change reellement:
       // un refresh de token renvoie le meme utilisateur avec une nouvelle
       // reference objet, inutile de propager un re-render en cascade.
-      if (nextUserId !== currentUserId) {
-        currentUserId = nextUserId;
+      if (nextUserKey !== currentUserKey) {
+        currentUserKey = nextUserKey;
         setUser(nextUser);
       }
 
@@ -121,7 +127,7 @@ export function useAuth(options: UseAuthOptions = {}): UseAuthResult {
         return;
       }
 
-      if (event === "signed_in" || event === "initial") {
+      if (event === "signed_in" || event === "initial" || event === "password_recovery") {
         void refreshRole(nextUser, event === "initial");
       }
     });
@@ -185,6 +191,19 @@ export function useAuth(options: UseAuthOptions = {}): UseAuthResult {
     [backend],
   );
 
+  const requestPasswordReset = useCallback(
+    async (email: string): Promise<BackendResult> => {
+      if (!backend) return fail("server", "Backend non configure.");
+      setBusy(true);
+      try {
+        return await backend.auth.requestPasswordReset(email);
+      } finally {
+        setBusy(false);
+      }
+    },
+    [backend],
+  );
+
   return {
     backend,
     backendReady: Boolean(backend),
@@ -198,5 +217,6 @@ export function useAuth(options: UseAuthOptions = {}): UseAuthResult {
     signUp,
     signOut,
     changePassword,
+    requestPasswordReset,
   };
 }

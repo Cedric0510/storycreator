@@ -112,6 +112,9 @@ export default function Home() {
                 Creer un compte
               </Link>
             </div>
+            <Link className="portal-forgot-link" href="/mot-de-passe-oublie">
+              Mot de passe oublie ?
+            </Link>
             {!allowSelfSignup && (
               <small>
                 L&apos;inscription automatique est desactivee sur cette instance.

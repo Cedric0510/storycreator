@@ -45,6 +45,7 @@ function toAuthEvent(event: string): AuthEvent {
   if (event === "SIGNED_IN") return "signed_in";
   if (event === "SIGNED_OUT") return "signed_out";
   if (event === "TOKEN_REFRESHED") return "token_refreshed";
+  if (event === "PASSWORD_RECOVERY") return "password_recovery";
   return "other";
 }
 
@@ -114,6 +115,23 @@ function createAuthPort(client: SupabaseClient): AuthPort {
           password: newPassword,
           data: { must_change_password: false },
         });
+        if (error) return fail("server", error.message);
+        return ok();
+      } catch (err: unknown) {
+        return fail("network", err instanceof Error ? err.message : String(err));
+      }
+    },
+
+    async requestPasswordReset(email) {
+      try {
+        const redirectTo =
+          typeof window !== "undefined"
+            ? `${window.location.origin}/reinitialisation`
+            : undefined;
+        const { error } = await client.auth.resetPasswordForEmail(
+          email.trim(),
+          redirectTo ? { redirectTo } : undefined,
+        );
         if (error) return fail("server", error.message);
         return ok();
       } catch (err: unknown) {

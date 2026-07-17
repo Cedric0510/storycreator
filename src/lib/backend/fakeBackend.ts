@@ -205,6 +205,11 @@ export function createFakeBackend(options: FakeBackendOptions = {}): FakeBackend
       return ok();
     },
 
+    async requestPasswordReset() {
+      // Reponse neutre quelle que soit l'existence du compte (anti-enumeration).
+      return ok();
+    },
+
     async fetchMyRole(userId) {
       const record = users.get(userId);
       if (!record) return { status: "missing" };
