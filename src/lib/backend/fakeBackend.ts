@@ -16,6 +16,7 @@ import {
 } from "./ports";
 import {
   AuthorUser,
+  BackendError,
   PlatformProfile,
   PlatformRole,
   fail,
@@ -215,7 +216,9 @@ export function createFakeBackend(options: FakeBackendOptions = {}): FakeBackend
     },
   };
 
-  function requireAdmin() {
+  function requireAdmin():
+    | { error: { ok: false; error: BackendError } }
+    | { requester: FakeUserRecord } {
     const record = currentUser();
     if (!record) {
       return { error: fail("unauthorized", "Session invalide. Reconnecte-toi puis reessaie.") };

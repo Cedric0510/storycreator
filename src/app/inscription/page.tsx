@@ -4,12 +4,12 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 
-import { usePortalAuth } from "@/components/usePortalAuth";
+import { useAuth } from "@/components/useAuth";
 import { allowSelfSignup } from "@/lib/runtimeFlags";
 
 export default function SignupPage() {
   const router = useRouter();
-  const { authLoading, authUser, busy, signUpWithPassword } = usePortalAuth();
+  const { authLoading, user, busy, signUp } = useAuth();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
@@ -35,18 +35,18 @@ export default function SignupPage() {
       return;
     }
 
-    const result = await signUpWithPassword(cleanEmail, password);
+    const result = await signUp(cleanEmail, password);
     if (!result.ok) {
-      setMessage(`Erreur inscription: ${result.error}`);
+      setMessage(`Erreur inscription: ${result.error.message}`);
       return;
     }
 
     setMessage(
-      result.needsEmailConfirmation
+      result.value.needsEmailConfirmation
         ? "Compte cree. Verifie ton email de confirmation puis connecte-toi."
         : "Compte cree et connecte.",
     );
-    if (!result.needsEmailConfirmation) {
+    if (!result.value.needsEmailConfirmation) {
       router.push("/studio");
     }
   };
@@ -61,10 +61,10 @@ export default function SignupPage() {
 
         {authLoading ? (
           <p>Chargement session...</p>
-        ) : authUser ? (
+        ) : user ? (
           <div className="portal-stack">
             <p>
-              Deja connecte: <strong>{authUser.email ?? authUser.id}</strong>
+              Deja connecte: <strong>{user.email ?? user.id}</strong>
             </p>
             <div className="row-inline">
               <button className="button-primary" onClick={() => router.push("/studio")}>
@@ -124,4 +124,3 @@ export default function SignupPage() {
     </main>
   );
 }
-

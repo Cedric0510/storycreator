@@ -4,11 +4,11 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 
-import { usePortalAuth } from "@/components/usePortalAuth";
+import { useAuth } from "@/components/useAuth";
 
 export default function AccountPage() {
   const router = useRouter();
-  const { supabase, authLoading, authUser, platformRole, busy, signOut } = usePortalAuth();
+  const { backend, authLoading, user, role, busy, signOut, changePassword } = useAuth();
   const [newPassword, setNewPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
   const [deleteConfirmation, setDeleteConfirmation] = useState("");
@@ -16,7 +16,7 @@ export default function AccountPage() {
   const [actionBusy, setActionBusy] = useState(false);
 
   const handleChangePassword = async () => {
-    if (!supabase || !authUser) {
+    if (!user) {
       setMessage("Connecte-toi pour changer ton mot de passe.");
       return;
     }
@@ -31,14 +31,9 @@ export default function AccountPage() {
 
     setActionBusy(true);
     try {
-      const { error } = await supabase.auth.updateUser({
-        password: newPassword,
-        data: {
-          must_change_password: false,
-        },
-      });
-      if (error) {
-        setMessage(`Erreur changement mot de passe: ${error.message}`);
+      const result = await changePassword(newPassword);
+      if (!result.ok) {
+        setMessage(`Erreur changement mot de passe: ${result.error.message}`);
         return;
       }
       setNewPassword("");
@@ -50,7 +45,7 @@ export default function AccountPage() {
   };
 
   const handleDeleteAccount = async () => {
-    if (!supabase || !authUser) {
+    if (!backend || !user) {
       setMessage("Connecte-toi pour supprimer ton compte.");
       return;
     }
@@ -61,25 +56,9 @@ export default function AccountPage() {
 
     setActionBusy(true);
     try {
-      const {
-        data: { session },
-        error: sessionError,
-      } = await supabase.auth.refreshSession();
-      if (sessionError || !session?.access_token) {
-        setMessage(`Session invalide: ${sessionError?.message ?? "reconnecte-toi"}`);
-        return;
-      }
-
-      const response = await fetch("/api/account/delete", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "x-supabase-access-token": session.access_token,
-        },
-      });
-      const payload = (await response.json().catch(() => ({}))) as { error?: string };
-      if (!response.ok) {
-        setMessage(`Erreur suppression compte: ${payload.error ?? "unknown"}`);
+      const result = await backend.account.deleteMyAccount();
+      if (!result.ok) {
+        setMessage(`Erreur suppression compte: ${result.error.message}`);
         return;
       }
 
@@ -108,7 +87,7 @@ export default function AccountPage() {
 
         {authLoading ? (
           <p>Chargement session...</p>
-        ) : !authUser ? (
+        ) : !user ? (
           <div className="portal-stack">
             <p>Aucun compte connecte.</p>
             <Link className="button-primary" href="/">
@@ -118,8 +97,8 @@ export default function AccountPage() {
         ) : (
           <div className="portal-stack">
             <p>
-              Connecte: <strong>{authUser.email ?? authUser.id}</strong>{" "}
-              <span className="chip chip-start">{platformRole}</span>
+              Connecte: <strong>{user.email ?? user.id}</strong>{" "}
+              <span className="chip chip-start">{role}</span>
             </p>
 
             <div className="portal-divider" />

@@ -43,13 +43,14 @@ export type BackendResult<T = void> =
   | { ok: true; value: T }
   | { ok: false; error: BackendError };
 
-export function ok(): BackendResult<void>;
-export function ok<T>(value: T): BackendResult<T>;
-export function ok<T>(value?: T): BackendResult<T | void> {
-  return { ok: true, value: value as T };
+export function ok(): { ok: true; value: void };
+export function ok<T>(value: T): { ok: true; value: T };
+export function ok<T>(value?: T): { ok: true; value: T | undefined } {
+  return { ok: true, value };
 }
 
-export function fail<T = void>(kind: BackendErrorKind, message: string): BackendResult<T> {
+/** La branche d'echec est independante de T: assignable a tout BackendResult. */
+export function fail(kind: BackendErrorKind, message: string): { ok: false; error: BackendError } {
   return { ok: false, error: { kind, message } };
 }
 

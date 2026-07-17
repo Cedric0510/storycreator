@@ -38,8 +38,8 @@ import {
 } from "@/components/StudioLeftNavigation";
 import { useBlockEffectOperations } from "@/components/useBlockEffectOperations";
 import { useChoiceOperations } from "@/components/useChoiceOperations";
-import { useCloudProjectState } from "@/components/useCloudProjectState";
-import { useCloudProjectSession } from "@/components/useCloudProjectSession";
+import { useAuth } from "@/components/useAuth";
+import { usePlatformAdmin } from "@/components/usePlatformAdmin";
 import { useDialogueOperations } from "@/components/useDialogueOperations";
 import { useGameplayOperations } from "@/components/useGameplayOperations";
 import { usePreviewRuntime } from "@/components/usePreviewRuntime";
@@ -78,9 +78,7 @@ import {
   filterClipboardEligibleBlocks,
   sortBlocksForClipboard,
 } from "@/components/author-studio-clipboard-utils";
-import {
-  PlatformRole,
-} from "@/components/author-studio-types";
+import { PlatformRole } from "@/lib/backend/types";
 import {
   BLOCK_LABELS,
   BlockType,
@@ -189,16 +187,27 @@ export function AuthorStudioApp() {
   const [adminCreateUserRole, setAdminCreateUserRole] = useState<PlatformRole>("reader");
   const [hoverSelectionActive, setHoverSelectionActive] = useState(false);
   const {
-    supabase,
+    backend,
+    backendReady,
     authLoading,
-    authUser,
-    cloudBusy,
-    platformRole,
-    platformProfiles,
-    setCloudBusy,
-    setPlatformRole,
-    setPlatformProfiles,
-  } = useCloudProjectState(setStatusMessage);
+    user: authUser,
+    role: platformRole,
+    isAdmin: isPlatformAdmin,
+    canUseAuthorTools,
+    busy: authBusy,
+    signOut,
+    changePassword,
+  } = useAuth({ onNotice: setStatusMessage });
+  const {
+    profiles: platformProfiles,
+    adminBusy,
+    refreshProfiles: refreshPlatformProfiles,
+    setProfileRole,
+    createUser: adminCreateUser,
+    deleteUser: adminDeleteUser,
+  } = usePlatformAdmin({ backend, enabled: Boolean(authUser) && isPlatformAdmin });
+  const [accountBusy, setAccountBusy] = useState(false);
+  const actionBusy = authBusy || adminBusy || accountBusy;
   const [newProjectWarningOpen, setNewProjectWarningOpen] = useState(false);
   const [lastSavedFingerprint, setLastSavedFingerprint] = useState(() =>
     buildStudioChangeFingerprint(initialProject, seed.nodes, seed.edges, {}),
@@ -341,11 +350,9 @@ export function AuthorStudioApp() {
       .filter((item) => item.quantity > 0);
   }, [previewInventoryCatalog, previewState]);
 
-  const isPlatformAdmin = platformRole === "admin";
-  const canUseAuthorTools = isPlatformAdmin || platformRole === "author";
   const canEdit = canUseAuthorTools;
   const authInitial = (authUser?.email?.trim().charAt(0) ?? "?").toUpperCase();
-  const adminCount = platformProfiles.filter((profile) => profile.platform_role === "admin").length;
+  const adminCount = platformProfiles.filter((profile) => profile.platformRole === "admin").length;
 
   const stopHoverSelection = useCallback(() => {
     hoverSelectionRef.current = {
@@ -446,7 +453,7 @@ export function AuthorStudioApp() {
       if (event.key === "Escape") {
         event.preventDefault();
         setValidationModalOpen(false);
-        if (!cloudBusy) {
+        if (!actionBusy) {
           setAccountModalOpen(false);
           setAdminModalOpen(false);
         }
@@ -454,7 +461,7 @@ export function AuthorStudioApp() {
     };
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [accountModalOpen, adminModalOpen, cloudBusy, validationModalOpen]);
+  }, [accountModalOpen, adminModalOpen, actionBusy, validationModalOpen]);
 
   useEffect(() => {
     if (!authUser) {
@@ -474,30 +481,6 @@ export function AuthorStudioApp() {
     }
   }, [isPlatformAdmin]);
 
-  // ── Safety net: auto-reset cloudBusy if stuck for more than 120 s ──
-  useEffect(() => {
-    if (!cloudBusy) return;
-    const safety = window.setTimeout(() => {
-      console.error("[AuthorStudio] cloudBusy stuck — force-resetting after 120 s");
-      setCloudBusy(false);
-      setStatusMessage("Operation expiree (delai depasse). Reessaie ou recharge la page.");
-    }, 120_000);
-    return () => window.clearTimeout(safety);
-  }, [cloudBusy, setCloudBusy, setStatusMessage]);
-
-  const {
-    refreshPlatformProfiles,
-    setPlatformProfileRole,
-    signOutSupabase,
-  } = useCloudProjectSession({
-    supabase,
-    authUser,
-    platformRole,
-    setStatusMessage,
-    setCloudBusy,
-    setPlatformRole,
-    setPlatformProfiles,
-  });
   const editBlockReason = !authUser
     ? "Acces restreint: connecte-toi pour utiliser la plateforme."
     : !canUseAuthorTools
@@ -2592,12 +2575,12 @@ export function AuthorStudioApp() {
   };
 
   const closeAccountModal = () => {
-    if (cloudBusy) return;
+    if (actionBusy) return;
     setAccountModalOpen(false);
   };
 
   const changeOwnPasswordFromModal = async () => {
-    if (!supabase || !authUser) {
+    if (!backendReady || !authUser) {
       setAccountModalMessage("Connecte-toi pour changer ton mot de passe.");
       return;
     }
@@ -2610,14 +2593,11 @@ export function AuthorStudioApp() {
       return;
     }
 
-    setCloudBusy(true);
+    setAccountBusy(true);
     try {
-      const { error } = await supabase.auth.updateUser({
-        password: ownPasswordInput,
-        data: { must_change_password: false },
-      });
-      if (error) {
-        setAccountModalMessage(`Erreur changement mot de passe: ${error.message}`);
+      const result = await changePassword(ownPasswordInput);
+      if (!result.ok) {
+        setAccountModalMessage(`Erreur changement mot de passe: ${result.error.message}`);
         return;
       }
       setOwnPasswordInput("");
@@ -2625,7 +2605,7 @@ export function AuthorStudioApp() {
       setAccountModalMessage("Mot de passe mis a jour.");
       setStatusMessage("Mot de passe mis a jour.");
     } finally {
-      setCloudBusy(false);
+      setAccountBusy(false);
     }
   };
 
@@ -2635,18 +2615,18 @@ export function AuthorStudioApp() {
       return;
     }
 
-    setCloudBusy(true);
+    setAccountBusy(true);
     try {
-      await signOutSupabase();
+      await signOut();
       setAccountModalOpen(false);
       router.push("/");
     } finally {
-      setCloudBusy(false);
+      setAccountBusy(false);
     }
   };
 
   const deleteOwnAccountFromModal = async () => {
-    if (!supabase || !authUser) {
+    if (!backend || !authUser) {
       setAccountModalMessage("Connecte-toi pour supprimer ton compte.");
       return;
     }
@@ -2655,35 +2635,19 @@ export function AuthorStudioApp() {
       return;
     }
 
-    setCloudBusy(true);
+    setAccountBusy(true);
     try {
-      const {
-        data: { session },
-        error: sessionError,
-      } = await supabase.auth.refreshSession();
-      if (sessionError || !session?.access_token) {
-        setAccountModalMessage(`Session invalide: ${sessionError?.message ?? "reconnecte-toi"}`);
+      const result = await backend.account.deleteMyAccount();
+      if (!result.ok) {
+        setAccountModalMessage(`Erreur suppression compte: ${result.error.message}`);
         return;
       }
 
-      const response = await fetch("/api/account/delete", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "x-supabase-access-token": session.access_token,
-        },
-      });
-      const payload = (await response.json().catch(() => ({}))) as { error?: string };
-      if (!response.ok) {
-        setAccountModalMessage(`Erreur suppression compte: ${payload.error ?? "unknown"}`);
-        return;
-      }
-
-      await signOutSupabase();
+      await signOut();
       setAccountModalOpen(false);
       router.push("/");
     } finally {
-      setCloudBusy(false);
+      setAccountBusy(false);
     }
   };
 
@@ -2696,12 +2660,12 @@ export function AuthorStudioApp() {
   };
 
   const closeAdminModal = () => {
-    if (cloudBusy) return;
+    if (actionBusy) return;
     setAdminModalOpen(false);
   };
 
   const createUserFromAdminModal = async () => {
-    if (!supabase || !authUser || !isPlatformAdmin) {
+    if (!authUser || !isPlatformAdmin) {
       setAdminModalMessage("Action reservee aux admins connectes.");
       return;
     }
@@ -2716,99 +2680,46 @@ export function AuthorStudioApp() {
       return;
     }
 
-    setCloudBusy(true);
-    try {
-      const {
-        data: { session },
-        error: sessionError,
-      } = await supabase.auth.refreshSession();
-      if (sessionError || !session?.access_token) {
-        setAdminModalMessage(
-          `Session admin expiree: ${sessionError?.message ?? "reconnecte-toi puis reessaie"}`,
-        );
-        return;
-      }
-
-      const response = await fetch("/api/admin/create-user", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "x-supabase-access-token": session.access_token,
-        },
-        body: JSON.stringify({
-          email,
-          password: adminCreateUserPasswordInput,
-          role: adminCreateUserRole,
-        }),
-      });
-
-      const payload = (await response.json().catch(() => ({}))) as {
-        error?: string;
-        email?: string;
-        role?: string;
-      };
-      if (!response.ok) {
-        setAdminModalMessage(`Erreur creation compte: ${payload.error ?? "unknown"}`);
-        return;
-      }
-
-      setAdminCreateUserEmailInput("");
-      setAdminCreateUserPasswordInput("");
-      setAdminCreateUserRole("reader");
-      await refreshPlatformProfiles();
-      const feedback = `Compte cree: ${payload.email ?? email} (${payload.role ?? adminCreateUserRole}).`;
-      setAdminModalMessage(feedback);
-      setStatusMessage(feedback);
-    } finally {
-      setCloudBusy(false);
+    const result = await adminCreateUser({
+      email,
+      password: adminCreateUserPasswordInput,
+      role: adminCreateUserRole,
+    });
+    if (!result.ok) {
+      setAdminModalMessage(`Erreur creation compte: ${result.error.message}`);
+      return;
     }
+
+    setAdminCreateUserEmailInput("");
+    setAdminCreateUserPasswordInput("");
+    setAdminCreateUserRole("reader");
+    const feedback = `Compte cree: ${email} (${adminCreateUserRole}).`;
+    setAdminModalMessage(feedback);
+    setStatusMessage(feedback);
   };
 
   const deleteUserFromAdminModal = async (targetUserId: string) => {
-    if (!supabase || !authUser || !isPlatformAdmin) {
+    if (!authUser || !isPlatformAdmin) {
       setAdminModalMessage("Action reservee aux admins connectes.");
       return;
     }
 
-    setCloudBusy(true);
-    try {
-      const {
-        data: { session },
-        error: sessionError,
-      } = await supabase.auth.refreshSession();
-      if (sessionError || !session?.access_token) {
-        setAdminModalMessage(`Session invalide: ${sessionError?.message ?? "reconnecte-toi"}`);
-        return;
-      }
-
-      const response = await fetch("/api/admin/delete-user", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "x-supabase-access-token": session.access_token,
-        },
-        body: JSON.stringify({ userId: targetUserId }),
-      });
-      const payload = (await response.json().catch(() => ({}))) as { error?: string };
-      if (!response.ok) {
-        setAdminModalMessage(`Erreur suppression utilisateur: ${payload.error ?? "unknown"}`);
-        return;
-      }
-
-      await refreshPlatformProfiles();
-      setAdminModalMessage("Utilisateur supprime.");
-      setStatusMessage("Utilisateur supprime.");
-    } finally {
-      setCloudBusy(false);
+    const result = await adminDeleteUser(targetUserId);
+    if (!result.ok) {
+      setAdminModalMessage(`Erreur suppression utilisateur: ${result.error.message}`);
+      return;
     }
+
+    setAdminModalMessage("Utilisateur supprime.");
+    setStatusMessage("Utilisateur supprime.");
   };
 
   const setRoleFromAdminModal = async (targetUserId: string, role: PlatformRole) => {
-    const updated = await setPlatformProfileRole(targetUserId, role);
-    if (updated) {
+    const result = await setProfileRole(targetUserId, role);
+    if (result.ok) {
       setAdminModalMessage(`Role mis a jour: ${role}.`);
     } else {
-      setAdminModalMessage("Echec mise a jour role. Verifie les droits et reessaie.");
+      setAdminModalMessage(`Echec mise a jour role: ${result.error.message}`);
     }
   };
 
@@ -3027,7 +2938,7 @@ export function AuthorStudioApp() {
           <div className="panel-left-stack">
           {activeLeftSection === "cloud" && (
           <AuthorStudioAccountPanel
-            supabaseEnabled={Boolean(supabase)}
+            supabaseEnabled={backendReady}
             authLoading={authLoading}
             isAuthenticated={Boolean(authUser)}
             authEmail={authUser?.email ?? null}
@@ -3224,7 +3135,7 @@ export function AuthorStudioApp() {
           <section className="account-modal-card" role="dialog" aria-modal="true" aria-label="Mon compte">
             <div className="account-modal-head">
               <h2>Mon compte</h2>
-              <button className="button-secondary" onClick={closeAccountModal} disabled={cloudBusy}>
+              <button className="button-secondary" onClick={closeAccountModal} disabled={actionBusy}>
                 Fermer
               </button>
             </div>
@@ -3263,7 +3174,7 @@ export function AuthorStudioApp() {
                 onClick={() => {
                   void changeOwnPasswordFromModal();
                 }}
-                disabled={cloudBusy}
+                disabled={actionBusy}
               >
                 Changer mon mot de passe
               </button>
@@ -3272,7 +3183,7 @@ export function AuthorStudioApp() {
                 onClick={() => {
                   void logoutFromAccountModal();
                 }}
-                disabled={cloudBusy}
+                disabled={actionBusy}
               >
                 Se deconnecter
               </button>
@@ -3297,7 +3208,7 @@ export function AuthorStudioApp() {
               onClick={() => {
                 void deleteOwnAccountFromModal();
               }}
-              disabled={cloudBusy}
+              disabled={actionBusy}
             >
               Supprimer mon compte
             </button>
@@ -3318,11 +3229,11 @@ export function AuthorStudioApp() {
                   onClick={() => {
                     void refreshPlatformProfiles();
                   }}
-                  disabled={cloudBusy}
+                  disabled={actionBusy}
                 >
                   Refresh
                 </button>
-                <button className="button-secondary" onClick={closeAdminModal} disabled={cloudBusy}>
+                <button className="button-secondary" onClick={closeAdminModal} disabled={actionBusy}>
                   Fermer
                 </button>
               </div>
@@ -3368,7 +3279,7 @@ export function AuthorStudioApp() {
               onClick={() => {
                 void createUserFromAdminModal();
               }}
-              disabled={cloudBusy}
+              disabled={actionBusy}
             >
               Creer utilisateur
             </button>
@@ -3381,24 +3292,24 @@ export function AuthorStudioApp() {
             ) : (
               <ul className="list-compact admin-modal-list">
                 {platformProfiles.map((profile) => {
-                  const isSelf = profile.user_id === authUser.id;
-                  const isAdminProfile = profile.platform_role === "admin";
+                  const isSelf = profile.userId === authUser.id;
+                  const isAdminProfile = profile.platformRole === "admin";
                   return (
-                    <li key={profile.user_id} className="cloud-project-row">
+                    <li key={profile.userId} className="cloud-project-row">
                       <div>
-                        <strong>{profile.display_name}</strong>
-                        <small>{profile.email ?? profile.user_id}</small>
+                        <strong>{profile.displayName}</strong>
+                        <small>{profile.email ?? profile.userId}</small>
                       </div>
                       <div className="row-inline">
-                        <span className="chip chip-start">{profile.platform_role}</span>
+                        <span className="chip chip-start">{profile.platformRole}</span>
                         <button
                           className="button-secondary button-small"
                           onClick={() => {
-                            void setRoleFromAdminModal(profile.user_id, "reader");
+                            void setRoleFromAdminModal(profile.userId, "reader");
                           }}
                           disabled={
-                            cloudBusy ||
-                            profile.platform_role === "reader" ||
+                            actionBusy ||
+                            profile.platformRole === "reader" ||
                             (isAdminProfile && adminCount <= 1)
                           }
                         >
@@ -3407,11 +3318,11 @@ export function AuthorStudioApp() {
                         <button
                           className="button-secondary button-small"
                           onClick={() => {
-                            void setRoleFromAdminModal(profile.user_id, "author");
+                            void setRoleFromAdminModal(profile.userId, "author");
                           }}
                           disabled={
-                            cloudBusy ||
-                            profile.platform_role === "author" ||
+                            actionBusy ||
+                            profile.platformRole === "author" ||
                             (isAdminProfile && adminCount <= 1)
                           }
                         >
@@ -3420,18 +3331,18 @@ export function AuthorStudioApp() {
                         <button
                           className="button-secondary button-small"
                           onClick={() => {
-                            void setRoleFromAdminModal(profile.user_id, "admin");
+                            void setRoleFromAdminModal(profile.userId, "admin");
                           }}
-                          disabled={cloudBusy || profile.platform_role === "admin"}
+                          disabled={actionBusy || profile.platformRole === "admin"}
                         >
                           admin
                         </button>
                         <button
                           className="button-danger button-small"
                           onClick={() => {
-                            void deleteUserFromAdminModal(profile.user_id);
+                            void deleteUserFromAdminModal(profile.userId);
                           }}
-                          disabled={cloudBusy || isSelf}
+                          disabled={actionBusy || isSelf}
                           title={isSelf ? "Utilise la modale Compte pour ton propre compte" : "Supprimer utilisateur"}
                         >
                           Supprimer
@@ -3476,14 +3387,14 @@ export function AuthorStudioApp() {
               <button
                 className="button-secondary"
                 onClick={() => setNewProjectWarningOpen(false)}
-                disabled={cloudBusy}
+                disabled={actionBusy}
               >
                 Annuler
               </button>
               <button
                 className="button-danger"
                 onClick={confirmNewProjectWithoutSave}
-                disabled={cloudBusy}
+                disabled={actionBusy}
               >
                 Quitter sans sauvegarder
               </button>

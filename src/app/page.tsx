@@ -4,14 +4,14 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
 
-import { usePortalAuth } from "@/components/usePortalAuth";
+import { useAuth } from "@/components/useAuth";
 import { allowSelfSignup } from "@/lib/runtimeFlags";
 
 const INTRO_VIDEO_SRC = "/ui-assets/video/ok.mp4";
 
 export default function Home() {
   const router = useRouter();
-  const { authLoading, authUser, platformRole, busy, signInWithPassword } = usePortalAuth();
+  const { authLoading, user, role, busy, signIn } = useAuth();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [message, setMessage] = useState("");
@@ -36,9 +36,9 @@ export default function Home() {
       setMessage("Email et mot de passe requis.");
       return;
     }
-    const result = await signInWithPassword(cleanEmail, password);
+    const result = await signIn(cleanEmail, password);
     if (!result.ok) {
-      setMessage(`Erreur connexion: ${result.error}`);
+      setMessage(`Erreur connexion: ${result.error.message}`);
       return;
     }
     setMessage("Connexion reussie.");
@@ -62,11 +62,11 @@ export default function Home() {
       <section className={`portal-card portal-card-intro portal-crystal-card portal-login-card${introDone ? " portal-card-visible" : ""}`}>
         {authLoading ? (
           <p>Chargement session...</p>
-        ) : authUser ? (
+        ) : user ? (
           <div className="portal-stack">
             <p>
-              Connecte: <strong>{authUser.email ?? authUser.id}</strong>{" "}
-              <span className="chip chip-start">{platformRole}</span>
+              Connecte: <strong>{user.email ?? user.id}</strong>{" "}
+              <span className="chip chip-start">{role}</span>
             </p>
             <div className="row-inline">
               <button

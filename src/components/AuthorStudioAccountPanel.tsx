@@ -1,6 +1,6 @@
 import Link from "next/link";
 
-import { PlatformRole } from "@/components/author-studio-types";
+import { PlatformRole } from "@/lib/backend/types";
 import { CollapsibleSection } from "@/components/CollapsibleSection";
 import { HelpHint } from "@/components/HelpHint";
 

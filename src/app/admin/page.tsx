@@ -1,156 +1,80 @@
 "use client";
 
 import Link from "next/link";
-import { useCallback, useEffect, useState } from "react";
+import { useState } from "react";
 
-import { PlatformProfileRow, PlatformRole } from "@/components/author-studio-types";
-import { usePortalAuth } from "@/components/usePortalAuth";
-
-function normalizePlatformRole(value: unknown): PlatformRole {
-  if (value === "admin") return "admin";
-  if (value === "author") return "author";
-  return "reader";
-}
+import { useAuth } from "@/components/useAuth";
+import { usePlatformAdmin } from "@/components/usePlatformAdmin";
+import { PlatformRole } from "@/lib/backend/types";
 
 export default function AdminPage() {
-  const { supabase, authLoading, authUser, platformRole, busy } = usePortalAuth();
+  const { backend, authLoading, user, isAdmin, busy } = useAuth();
   const [message, setMessage] = useState("");
-  const [actionBusy, setActionBusy] = useState(false);
-  const [profiles, setProfiles] = useState<PlatformProfileRow[]>([]);
   const [createEmail, setCreateEmail] = useState("");
   const [createPassword, setCreatePassword] = useState("");
   const [createRole, setCreateRole] = useState<PlatformRole>("reader");
 
-  const isAdmin = Boolean(authUser && platformRole === "admin");
+  const {
+    profiles,
+    adminBusy,
+    refreshProfiles,
+    setProfileRole,
+    createUser,
+    deleteUser,
+  } = usePlatformAdmin({ backend, enabled: Boolean(user) && isAdmin });
 
-  const refreshProfiles = useCallback(async () => {
-    if (!supabase || !isAdmin) return;
-    const { data, error } = await supabase.rpc("platform_list_profiles");
-    if (error) {
-      setMessage(`Erreur chargement utilisateurs: ${error.message}`);
-      return;
+  const handleRefresh = async () => {
+    const result = await refreshProfiles();
+    if (!result.ok) {
+      setMessage(`Erreur chargement utilisateurs: ${result.error.message}`);
     }
-    const rows = ((data ?? []) as PlatformProfileRow[]).map((row) => ({
-      ...row,
-      platform_role: normalizePlatformRole(row.platform_role),
-    }));
-    setProfiles(rows);
-  }, [isAdmin, supabase]);
+  };
 
-  useEffect(() => {
-    if (!isAdmin) return;
-    void refreshProfiles();
-  }, [isAdmin, refreshProfiles]);
-
-  const createUser = async () => {
-    if (!supabase || !isAdmin) return;
+  const handleCreateUser = async () => {
     const email = createEmail.trim().toLowerCase();
     if (!email || createPassword.length < 8) {
       setMessage("Email + mot de passe provisoire (min 8) requis.");
       return;
     }
 
-    setActionBusy(true);
-    try {
-      const {
-        data: { session },
-        error: sessionError,
-      } = await supabase.auth.refreshSession();
-      if (sessionError || !session?.access_token) {
-        setMessage(`Session invalide: ${sessionError?.message ?? "reconnecte-toi"}`);
-        return;
-      }
-
-      const response = await fetch("/api/admin/create-user", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "x-supabase-access-token": session.access_token,
-        },
-        body: JSON.stringify({
-          email,
-          password: createPassword,
-          role: createRole,
-        }),
-      });
-      const payload = (await response.json().catch(() => ({}))) as { error?: string };
-      if (!response.ok) {
-        setMessage(`Erreur creation utilisateur: ${payload.error ?? "unknown"}`);
-        return;
-      }
-
-      setCreateEmail("");
-      setCreatePassword("");
-      setCreateRole("reader");
-      await refreshProfiles();
-      setMessage("Utilisateur cree.");
-    } finally {
-      setActionBusy(false);
+    const result = await createUser({ email, password: createPassword, role: createRole });
+    if (!result.ok) {
+      setMessage(`Erreur creation utilisateur: ${result.error.message}`);
+      return;
     }
+    setCreateEmail("");
+    setCreatePassword("");
+    setCreateRole("reader");
+    setMessage("Utilisateur cree.");
   };
 
-  const setRole = async (userId: string, role: PlatformRole) => {
-    if (!supabase || !isAdmin) return;
-    setActionBusy(true);
-    try {
-      const { data, error } = await supabase.rpc("platform_set_profile_role", {
-        target_user: userId,
-        next_role: role,
-      });
-      if (error || !data) {
-        setMessage(`Erreur mise a jour role: ${error?.message ?? "operation refusee"}`);
-        return;
-      }
-      await refreshProfiles();
-      setMessage(`Role mis a jour: ${role}.`);
-    } finally {
-      setActionBusy(false);
+  const handleSetRole = async (userId: string, role: PlatformRole) => {
+    const result = await setProfileRole(userId, role);
+    if (!result.ok) {
+      setMessage(`Erreur mise a jour role: ${result.error.message}`);
+      return;
     }
+    setMessage(`Role mis a jour: ${role}.`);
   };
 
-  const deleteUser = async (userId: string) => {
-    if (!supabase || !isAdmin) return;
-    setActionBusy(true);
-    try {
-      const {
-        data: { session },
-        error: sessionError,
-      } = await supabase.auth.refreshSession();
-      if (sessionError || !session?.access_token) {
-        setMessage(`Session invalide: ${sessionError?.message ?? "reconnecte-toi"}`);
-        return;
-      }
-
-      const response = await fetch("/api/admin/delete-user", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "x-supabase-access-token": session.access_token,
-        },
-        body: JSON.stringify({ userId }),
-      });
-      const payload = (await response.json().catch(() => ({}))) as { error?: string };
-      if (!response.ok) {
-        setMessage(`Erreur suppression utilisateur: ${payload.error ?? "unknown"}`);
-        return;
-      }
-
-      await refreshProfiles();
-      setMessage("Utilisateur supprime.");
-    } finally {
-      setActionBusy(false);
+  const handleDeleteUser = async (userId: string) => {
+    const result = await deleteUser(userId);
+    if (!result.ok) {
+      setMessage(`Erreur suppression utilisateur: ${result.error.message}`);
+      return;
     }
+    setMessage("Utilisateur supprime.");
   };
 
   return (
     <main className="portal-root">
       <section className="portal-card portal-card-wide">
         <h1>Administration</h1>
-        <p className="portal-subtitle">Gestion utilisateurs et base de projets.</p>
+        <p className="portal-subtitle">Gestion des comptes et des roles.</p>
 
         {authLoading ? (
           <p>Chargement session...</p>
-        ) : !authUser ? (
+        ) : !user ? (
           <div className="portal-stack">
             <p>Acces refuse: compte non connecte.</p>
             <Link className="button-primary" href="/">
@@ -173,9 +97,9 @@ export default function AdminPage() {
               <button
                 className="button-secondary"
                 onClick={() => {
-                  void refreshProfiles();
+                  void handleRefresh();
                 }}
-                disabled={busy || actionBusy}
+                disabled={busy || adminBusy}
               >
                 Refresh
               </button>
@@ -213,7 +137,7 @@ export default function AdminPage() {
                 <option value="admin">admin</option>
               </select>
             </label>
-            <button className="button-primary button-brand-blue" onClick={() => void createUser()} disabled={busy || actionBusy}>
+            <button className="button-primary button-brand-blue" onClick={() => void handleCreateUser()} disabled={busy || adminBusy}>
               Creer utilisateur
             </button>
 
@@ -225,38 +149,38 @@ export default function AdminPage() {
             ) : (
               <ul className="list-compact">
                 {profiles.map((profile) => (
-                  <li key={profile.user_id} className="cloud-project-row">
+                  <li key={profile.userId} className="cloud-project-row">
                     <div>
-                      <strong>{profile.display_name}</strong>
-                      <small>{profile.email ?? profile.user_id}</small>
+                      <strong>{profile.displayName}</strong>
+                      <small>{profile.email ?? profile.userId}</small>
                     </div>
                     <div className="row-inline">
-                      <span className="chip chip-start">{profile.platform_role}</span>
+                      <span className="chip chip-start">{profile.platformRole}</span>
                       <button
                         className="button-secondary button-small"
-                        onClick={() => void setRole(profile.user_id, "reader")}
-                        disabled={busy || actionBusy || profile.platform_role === "reader"}
+                        onClick={() => void handleSetRole(profile.userId, "reader")}
+                        disabled={busy || adminBusy || profile.platformRole === "reader"}
                       >
                         reader
                       </button>
                       <button
                         className="button-secondary button-small"
-                        onClick={() => void setRole(profile.user_id, "author")}
-                        disabled={busy || actionBusy || profile.platform_role === "author"}
+                        onClick={() => void handleSetRole(profile.userId, "author")}
+                        disabled={busy || adminBusy || profile.platformRole === "author"}
                       >
                         author
                       </button>
                       <button
                         className="button-secondary button-small"
-                        onClick={() => void setRole(profile.user_id, "admin")}
-                        disabled={busy || actionBusy || profile.platform_role === "admin"}
+                        onClick={() => void handleSetRole(profile.userId, "admin")}
+                        disabled={busy || adminBusy || profile.platformRole === "admin"}
                       >
                         admin
                       </button>
                       <button
                         className="button-danger button-small"
-                        onClick={() => void deleteUser(profile.user_id)}
-                        disabled={busy || actionBusy}
+                        onClick={() => void handleDeleteUser(profile.userId)}
+                        disabled={busy || adminBusy}
                       >
                         Supprimer
                       </button>
