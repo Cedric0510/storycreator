@@ -19,7 +19,6 @@ import {
   getAssetBlob,
   getAssetObjectURL,
   isCachedAssetObjectURL,
-  deleteAssetBlobs,
   clearAllAssetBlobs,
   revokeAllObjectURLs,
 } from "@/lib/assetStore";
@@ -157,8 +156,6 @@ export function useStudioAssets({
       size: file.size,
       packagePath: `assets/${assetId}-${sanitizeFileName(file.name)}`,
       uploadedAt: new Date().toISOString(),
-      storageBucket: null,
-      storagePath: null,
     };
     setAssetRefs((current) => {
       const next = { ...current, [assetId]: ref };
@@ -205,16 +202,6 @@ export function useStudioAssets({
     void clearAllAssetBlobs();
   }, []);
 
-  const hydrateAssetRefs = useCallback((nextRefs: Record<string, AssetRef>) => {
-    assetRefsRef.current = nextRefs;
-    assetPreviewSrcByIdRef.current = {};
-    inFlightPreviewByIdRef.current.clear();
-    setAssetRefs(nextRefs);
-    setAssetPreviewSrcById({});
-    // Don't clear IndexedDB - cloud assets will be fetched on demand
-    // and locally cached blobs may still be valid.
-    revokeAllObjectURLs();
-  }, []);
 
   const exportZip = useCallback(async () => {
    try {
@@ -352,50 +339,6 @@ export function useStudioAssets({
     variableNameById,
   ]);
 
-  const removeAssetIdsFromState = useCallback((assetIds: string[]) => {
-    if (assetIds.length === 0) return 0;
-    const staleIds = new Set(assetIds);
-
-    setAssetRefs((current) => {
-      const next = { ...current };
-      for (const assetId of staleIds) {
-        delete next[assetId];
-      }
-      assetRefsRef.current = next;
-      return next;
-    });
-
-    setAssetPreviewSrcById((current) => {
-      const next = { ...current };
-      for (const assetId of staleIds) {
-        delete next[assetId];
-        inFlightPreviewByIdRef.current.delete(assetId);
-      }
-      assetPreviewSrcByIdRef.current = next;
-      return next;
-    });
-
-    void deleteAssetBlobs(assetIds);
-
-    return staleIds.size;
-  }, []);
-
-  const cleanupLocalOrphanAssetRefs = useCallback(() => {
-    const referencedAssetIds = collectProjectReferencedAssetIds(project, blocks);
-    const staleAssetIds = Object.keys(assetRefs).filter(
-      (assetId) => !referencedAssetIds.has(assetId),
-    );
-
-    if (staleAssetIds.length === 0) {
-      setStatusMessage("Aucune reference asset orpheline en local.");
-      return;
-    }
-
-    const removedCount = removeAssetIdsFromState(staleAssetIds);
-    setStatusMessage(`Nettoyage local termine: ${removedCount} reference(s) asset supprimee(s).`);
-    logAction("asset_cleanup_local", `${removedCount} reference(s) supprimee(s)`);
-  }, [assetRefs, blocks, logAction, project, removeAssetIdsFromState, setStatusMessage]);
-
   /**
    * Import a previously-exported ZIP bundle and decode its payload:
    * project metadata, blocks/nodes/edges, asset refs (files stored in IndexedDB).
@@ -451,8 +394,6 @@ export function useStudioAssets({
           size: blob.size,
           packagePath,
           uploadedAt: new Date().toISOString(),
-          storageBucket: null,
-          storagePath: null,
         };
 
         importedAssetRefs[assetId] = ref;
@@ -610,11 +551,8 @@ export function useStudioAssets({
     createAssetInputHandler,
     getAssetFileName,
     clearAllAssetState,
-    hydrateAssetRefs,
     exportZip,
-    cleanupLocalOrphanAssetRefs,
     importFromZip,
-    getAssetBlob,
   };
 }
 

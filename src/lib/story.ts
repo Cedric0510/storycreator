@@ -257,8 +257,6 @@ export interface AssetRef {
   size: number;
   packagePath: string;
   uploadedAt: string;
-  storageBucket?: string | null;
-  storagePath?: string | null;
 }
 
 interface BaseBlock {

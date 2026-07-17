@@ -38,13 +38,6 @@ export interface InitialStudio {
   project: ProjectMeta;
 }
 
-export interface CloudPayload {
-  project: ProjectMeta;
-  nodes: EditorNode[];
-  edges: EditorEdge[];
-  assetRefs: Record<string, AssetRef>;
-}
-
 export function choiceLabelFromHandle(handle: string | null | undefined) {
   if (!handle) return null;
   const match = /^choice-([A-D])$/.exec(handle);
@@ -406,31 +399,6 @@ export function toSlug(input: string) {
     .replace(/[^a-z0-9\s-]/g, "")
     .replace(/\s+/g, "-")
     .replace(/-+/g, "-");
-}
-
-export function generateUuid() {
-  if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
-    return crypto.randomUUID();
-  }
-
-  return "xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx".replace(/[xy]/g, (token) => {
-    const random = Math.floor(Math.random() * 16);
-    const value = token === "x" ? random : (random & 0x3) | 0x8;
-    return value.toString(16);
-  });
-}
-
-export function formatDbError(
-  prefix: string,
-  error: { message: string; code?: string | null; details?: string | null; hint?: string | null } | null,
-) {
-  if (!error) return `${prefix}: unknown`;
-
-  const parts = [error.message];
-  if (error.code) parts.push(`code=${error.code}`);
-  if (error.details) parts.push(`details=${error.details}`);
-  if (error.hint) parts.push(`hint=${error.hint}`);
-  return `${prefix}: ${parts.join(" | ")}`;
 }
 
 export function blockFromNode(node: EditorNode): StoryBlock {
@@ -1626,17 +1594,6 @@ function deserializeHotspotAction(raw: Record<string, unknown>): GameplayHotspot
   return { id, type: "message", message: (raw.message as string) ?? "" };
 }
 
-export function isCloudPayload(value: unknown): value is CloudPayload {
-  if (!value || typeof value !== "object") return false;
-  const candidate = value as Partial<CloudPayload>;
-  return (
-    Boolean(candidate.project) &&
-    Array.isArray(candidate.nodes) &&
-    Array.isArray(candidate.edges) &&
-    Boolean(candidate.assetRefs)
-  );
-}
-
 export function buildStudioChangeFingerprint(
   project: ProjectMeta,
   nodes: EditorNode[],
@@ -1656,7 +1613,7 @@ export function buildStudioChangeFingerprint(
     .map((assetId) => {
       const ref = assetRefs[assetId];
       if (!ref) return assetId;
-      return `${assetId}:${ref.packagePath}:${ref.storagePath ?? ""}:${ref.size}`;
+      return `${assetId}:${ref.packagePath}:${ref.size}`;
     })
     .join("|");
 

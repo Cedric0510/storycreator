@@ -10,7 +10,6 @@ type MenuIconName = "account" | "admin" | "new" | "preview" | "export" | "import
 interface StudioHeaderProps {
   hasUnsavedChanges: boolean;
   validationControl: ReactNode;
-  lockHolderName: string | null;
   authInitial: string;
   authEmail: string | null;
   showAccount: boolean;
@@ -31,7 +30,6 @@ interface StudioHeaderProps {
 export function StudioHeader({
   hasUnsavedChanges,
   validationControl,
-  lockHolderName,
   authInitial,
   authEmail,
   showAccount,
@@ -90,7 +88,6 @@ export function StudioHeader({
             {hasUnsavedChanges ? "Non sauvegarde" : "A jour"}
           </span>
           {validationControl}
-          {lockHolderName && <span className="nav-indicator nav-indicator-lock">Verrou : {lockHolderName}</span>}
         </div>
 
         <span className={`nav-user-avatar${authEmail ? " nav-user-avatar-active" : ""}`} title={authEmail ?? "Aucun compte connecte"}>

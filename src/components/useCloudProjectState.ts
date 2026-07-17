@@ -1,15 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { User } from "@supabase/supabase-js";
 
-import {
-  CloudAccessLevel,
-  CloudAccessRow,
-  CloudLogRow,
-  PlatformProfileRow,
-  PlatformRole,
-  CloudProfileRow,
-  CloudProjectRow,
-} from "@/components/author-studio-types";
+import { PlatformProfileRow, PlatformRole } from "@/components/author-studio-types";
 import { getSupabaseBrowserClient } from "@/lib/supabaseClient";
 
 export function useCloudProjectState(setStatusMessage: (message: string) => void) {
@@ -17,23 +9,9 @@ export function useCloudProjectState(setStatusMessage: (message: string) => void
 
   const [authLoading, setAuthLoading] = useState(Boolean(supabase));
   const [authUser, setAuthUser] = useState<User | null>(null);
-  const [authEmailInput, setAuthEmailInput] = useState("");
-  const [authPasswordInput, setAuthPasswordInput] = useState("");
   const [cloudBusy, setCloudBusy] = useState(false);
-  const [cloudProjectId, setCloudProjectId] = useState<string | null>(null);
-  const [cloudOwnerId, setCloudOwnerId] = useState<string | null>(null);
-  const [cloudEditingLockUserId, setCloudEditingLockUserId] = useState<string | null>(null);
-  const [cloudProjectUpdatedAt, setCloudProjectUpdatedAt] = useState<string | null>(null);
-  const [cloudLatestUpdatedAt, setCloudLatestUpdatedAt] = useState<string | null>(null);
-  const [cloudAccessLevel, setCloudAccessLevel] = useState<CloudAccessLevel | null>(null);
-  const [cloudAccessRows, setCloudAccessRows] = useState<CloudAccessRow[]>([]);
-  const [cloudProfiles, setCloudProfiles] = useState<Record<string, CloudProfileRow>>({});
-  const [cloudLogs, setCloudLogs] = useState<CloudLogRow[]>([]);
-  const [cloudProjects, setCloudProjects] = useState<CloudProjectRow[]>([]);
   const [platformRole, setPlatformRole] = useState<PlatformRole>("reader");
   const [platformProfiles, setPlatformProfiles] = useState<PlatformProfileRow[]>([]);
-  const [shareEmailInput, setShareEmailInput] = useState("");
-  const [shareAccessLevel, setShareAccessLevel] = useState<"read" | "write">("write");
 
   // Ref used to keep the last known good role so that a transient network
   // failure (timeout, offline, ...) does NOT demote the user to "reader" and
@@ -166,8 +144,8 @@ export function useCloudProjectState(setStatusMessage: (message: string) => void
     // Restart / pause the auto-refresh timer when the tab visibility changes.
     // Using startAutoRefresh/stopAutoRefresh (non-blocking) instead of
     // refreshSession() avoids holding Supabase's internal auth lock, which
-    // would otherwise block user-initiated operations (e.g. save) that also
-    // call refreshSession() — causing cloudBusy to appear stuck.
+    // would otherwise block user-initiated operations that also call
+    // refreshSession() — causing cloudBusy to appear stuck.
     const handleVisibilityChange = () => {
       if (document.visibilityState === "visible") {
         supabase.auth.startAutoRefresh();
@@ -188,39 +166,11 @@ export function useCloudProjectState(setStatusMessage: (message: string) => void
     supabase,
     authLoading,
     authUser,
-    authEmailInput,
-    authPasswordInput,
     cloudBusy,
-    cloudProjectId,
-    cloudOwnerId,
-    cloudEditingLockUserId,
-    cloudProjectUpdatedAt,
-    cloudLatestUpdatedAt,
-    cloudAccessLevel,
-    cloudAccessRows,
-    cloudProfiles,
-    cloudLogs,
-    cloudProjects,
     platformRole,
     platformProfiles,
-    shareEmailInput,
-    shareAccessLevel,
-    setAuthEmailInput,
-    setAuthPasswordInput,
     setCloudBusy,
-    setCloudProjectId,
-    setCloudOwnerId,
-    setCloudEditingLockUserId,
-    setCloudProjectUpdatedAt,
-    setCloudLatestUpdatedAt,
-    setCloudAccessLevel,
-    setCloudAccessRows,
-    setCloudProfiles,
-    setCloudLogs,
-    setCloudProjects,
     setPlatformRole,
     setPlatformProfiles,
-    setShareEmailInput,
-    setShareAccessLevel,
   };
 }

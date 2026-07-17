@@ -25,7 +25,7 @@ import {
   applyNodeChanges,
 } from "@xyflow/react";
 
-import { AuthorStudioCloudPanel } from "@/components/AuthorStudioCloudPanel";
+import { AuthorStudioAccountPanel } from "@/components/AuthorStudioAccountPanel";
 import { AuthorStudioBlockEditorPanel } from "@/components/AuthorStudioBlockEditorPanel";
 import { AuthorStudioProjectPanel } from "@/components/AuthorStudioProjectPanel";
 import { ValidationModal, ValidationStatusButton } from "@/components/AuthorStudioValidation";
@@ -38,7 +38,6 @@ import {
 } from "@/components/StudioLeftNavigation";
 import { useBlockEffectOperations } from "@/components/useBlockEffectOperations";
 import { useChoiceOperations } from "@/components/useChoiceOperations";
-import { useCloudProjectActions } from "@/components/useCloudProjectActions";
 import { useCloudProjectState } from "@/components/useCloudProjectState";
 import { useCloudProjectSession } from "@/components/useCloudProjectSession";
 import { useDialogueOperations } from "@/components/useDialogueOperations";
@@ -46,7 +45,6 @@ import { useGameplayOperations } from "@/components/useGameplayOperations";
 import { usePreviewRuntime } from "@/components/usePreviewRuntime";
 import { useStudioAssets } from "@/components/useStudioAssets";
 import {
-  CloudPayload,
   EditorEdge,
   EditorNode,
   InitialStudio,
@@ -94,10 +92,8 @@ import {
   blockTypeColor,
   createBlock,
   createId,
-  normalizeStoryBlock,
   validateStoryBlocks,
 } from "@/lib/story";
-import { allowSelfSignup } from "@/lib/runtimeFlags";
 import {
   allocateUniqueId,
   mergeChaptersForZipImport,
@@ -105,8 +101,6 @@ import {
   mergeItemsForZipImport,
   mergeVariablesForZipImport,
   normalizeProjectChapters,
-  normalizeProjectHero,
-  normalizeProjectItems,
   placeImportedNodes,
   remapBlockForZipImport,
   withCollapsedChapterFolders,
@@ -116,7 +110,6 @@ import type { ZipImportMergeMaps } from "@/components/author-studio-merge-utils"
 const nodeTypes: NodeTypes = { storyBlock: StoryNode, chapterFolder: ChapterFolderNode };
 const edgeTypes: EdgeTypes = { deletable: DeletableEdge };
 const DUPLICATE_POSITION_STEP = { x: 60, y: 60 };
-const PROJECT_CLOUD_ENABLED = false;
 
 interface ClipboardBlockSelection {
   blocks: StoryBlock[];
@@ -199,40 +192,12 @@ export function AuthorStudioApp() {
     supabase,
     authLoading,
     authUser,
-    authEmailInput,
-    authPasswordInput,
     cloudBusy,
-    cloudProjectId,
-    cloudOwnerId,
-    cloudEditingLockUserId,
-    cloudProjectUpdatedAt,
-    cloudLatestUpdatedAt,
-    cloudAccessLevel,
-    cloudAccessRows,
-    cloudProfiles,
-    cloudLogs,
-    cloudProjects,
     platformRole,
     platformProfiles,
-    shareEmailInput,
-    shareAccessLevel,
-    setAuthEmailInput,
-    setAuthPasswordInput,
     setCloudBusy,
-    setCloudProjectId,
-    setCloudOwnerId,
-    setCloudEditingLockUserId,
-    setCloudProjectUpdatedAt,
-    setCloudLatestUpdatedAt,
-    setCloudAccessLevel,
-    setCloudAccessRows,
-    setCloudProfiles,
-    setCloudLogs,
-    setCloudProjects,
     setPlatformRole,
     setPlatformProfiles,
-    setShareEmailInput,
-    setShareAccessLevel,
   } = useCloudProjectState(setStatusMessage);
   const [newProjectWarningOpen, setNewProjectWarningOpen] = useState(false);
   const [lastSavedFingerprint, setLastSavedFingerprint] = useState(() =>
@@ -376,47 +341,9 @@ export function AuthorStudioApp() {
       .filter((item) => item.quantity > 0);
   }, [previewInventoryCatalog, previewState]);
 
-  const lockHolder = useMemo(
-    () =>
-      project.members.find((member) => member.id === project.editingLockMemberId) ?? null,
-    [project.editingLockMemberId, project.members],
-  );
-  const accountMustChangePassword = Boolean(
-    (authUser?.user_metadata as Record<string, unknown> | undefined)?.must_change_password,
-  );
-
   const isPlatformAdmin = platformRole === "admin";
   const canUseAuthorTools = isPlatformAdmin || platformRole === "author";
-  const localCanEdit = true;
-  const cloudCanWrite =
-    !PROJECT_CLOUD_ENABLED ||
-    (canUseAuthorTools &&
-      (isPlatformAdmin ||
-        !cloudProjectId ||
-        cloudAccessLevel === "owner" ||
-        cloudAccessLevel === "write"));
-  const cloudCanManageAccess = Boolean(
-    PROJECT_CLOUD_ENABLED &&
-      canUseAuthorTools &&
-      cloudProjectId &&
-      (isPlatformAdmin || cloudAccessLevel === "owner"),
-  );
-  const cloudLockHeldByOther =
-    PROJECT_CLOUD_ENABLED &&
-    Boolean(cloudProjectId) &&
-    Boolean(cloudEditingLockUserId) &&
-    cloudEditingLockUserId !== authUser?.id;
-  const cloudLockHolderName =
-    cloudEditingLockUserId
-      ? cloudProfiles[cloudEditingLockUserId]?.display_name ?? cloudEditingLockUserId
-      : "libre";
-  const cloudRevisionDrift =
-    PROJECT_CLOUD_ENABLED &&
-    Boolean(cloudProjectId) &&
-    Boolean(cloudProjectUpdatedAt) &&
-    Boolean(cloudLatestUpdatedAt) &&
-    cloudProjectUpdatedAt !== cloudLatestUpdatedAt;
-  const canEdit = canUseAuthorTools && localCanEdit && cloudCanWrite && !cloudLockHeldByOther;
+  const canEdit = canUseAuthorTools;
   const authInitial = (authUser?.email?.trim().charAt(0) ?? "?").toUpperCase();
   const adminCount = platformProfiles.filter((profile) => profile.platform_role === "admin").length;
 
@@ -553,62 +480,29 @@ export function AuthorStudioApp() {
     const safety = window.setTimeout(() => {
       console.error("[AuthorStudio] cloudBusy stuck — force-resetting after 120 s");
       setCloudBusy(false);
-      setStatusMessage("Operation cloud expiree (delai depasse). Reessaie ou recharge la page.");
+      setStatusMessage("Operation expiree (delai depasse). Reessaie ou recharge la page.");
     }, 120_000);
     return () => window.clearTimeout(safety);
   }, [cloudBusy, setCloudBusy, setStatusMessage]);
 
   const {
-    refreshCloudSideData,
-    appendCloudLog,
-    acquireCloudLock,
-    releaseCloudLock,
-    refreshCloudProjects,
     refreshPlatformProfiles,
     setPlatformProfileRole,
-    signInWithPassword,
-    signUpWithPassword,
     signOutSupabase,
   } = useCloudProjectSession({
-    projectCloudEnabled: PROJECT_CLOUD_ENABLED,
     supabase,
-    allowSelfSignup,
     authUser,
-    authEmailInput,
-    authPasswordInput,
     platformRole,
-    cloudProjectId,
-    cloudOwnerId,
-    cloudCanWrite,
-    cloudEditingLockUserId,
-    cloudProjects,
     setStatusMessage,
     setCloudBusy,
-    setCloudAccessLevel,
-    setCloudProjectId,
-    setCloudOwnerId,
-    setCloudEditingLockUserId,
-    setCloudProjectUpdatedAt,
-    setCloudLatestUpdatedAt,
-    setCloudAccessRows,
-    setCloudLogs,
-    setCloudProjects,
-    setCloudProfiles,
     setPlatformRole,
     setPlatformProfiles,
-    setShareEmailInput,
   });
   const editBlockReason = !authUser
     ? "Acces restreint: connecte-toi pour utiliser la plateforme."
     : !canUseAuthorTools
       ? "Compte lecteur: un admin doit te passer en auteur pour activer les outils de creation."
-      : !localCanEdit
-        ? `Edition verrouillee. Seul ${lockHolder?.name ?? "un editeur"} peut modifier le graphe.`
-        : cloudLockHeldByOther
-          ? `Verrou cloud actif par ${cloudLockHolderName}.`
-          : cloudProjectId && !cloudCanWrite
-            ? "Droit cloud insuffisant: il faut un acces write ou owner pour modifier ce projet."
-            : null;
+      : null;
 
   const deleteBlockRef = useRef<(blockId: string) => void>(() => {});
   const stableDeleteBlock = useCallback((blockId: string) => {
@@ -1121,11 +1015,8 @@ export function AuthorStudioApp() {
     createAssetInputHandler,
     getAssetFileName,
     clearAllAssetState,
-    hydrateAssetRefs,
     exportZip,
-    cleanupLocalOrphanAssetRefs,
     importFromZip,
-    getAssetBlob,
   } = useStudioAssets({
     blocks,
     project,
@@ -2436,73 +2327,6 @@ export function AuthorStudioApp() {
     projectVariables: project.variables,
   });
 
-  const hydrateStudioFromPayload = useCallback((payload: CloudPayload) => {
-    const normalizedNodes = payload.nodes.map((node) => {
-      const block = node.data.block as StoryBlock;
-      const normalizedBlock = normalizeStoryBlock(block);
-      return {
-        ...node,
-        data: {
-          ...node.data,
-          block: normalizedBlock,
-        },
-      } as EditorNode;
-    });
-
-    const normalizedProject: ProjectMeta = {
-      ...payload.project,
-      items: normalizeProjectItems((payload.project as ProjectMeta & { items?: unknown }).items),
-      chapters: normalizeProjectChapters(
-        (payload.project as ProjectMeta & { chapters?: unknown }).chapters,
-      ),
-    };
-    normalizedProject.hero = normalizeProjectHero(
-      (payload.project as ProjectMeta & { hero?: unknown }).hero,
-      normalizedProject.variables,
-      normalizedProject.items,
-    );
-
-    const hydratedNodes = withCollapsedChapterFolders(normalizedNodes, normalizedProject.chapters);
-    const hydratedEdges = rebuildEdgesFromNodes(normalizedNodes).filter(
-      (edge) => !isDialogueAutoNextHandle(edge.sourceHandle) && !isCinematicAutoNextHandle(edge.sourceHandle),
-    );
-
-    setProject(normalizedProject);
-    setNodes(hydratedNodes);
-    setEdges(hydratedEdges);
-    hydrateAssetRefs(payload.assetRefs ?? {});
-    resetGameplayState();
-    setCloudEditingLockUserId(null);
-    setCloudProjectUpdatedAt(null);
-    setCloudLatestUpdatedAt(null);
-    setCloudProfiles({});
-    setOpenedValidatedChapterIds([]);
-    clipboardRef.current = null;
-    clipboardPasteCountRef.current = 0;
-    replaceSelectedBlocks(
-      normalizedProject.info.startBlockId ? [normalizedProject.info.startBlockId] : [],
-      normalizedProject.info.startBlockId ?? null,
-    );
-    setLastValidation([]);
-    markStudioClean(
-      buildStudioChangeFingerprint(
-        normalizedProject,
-        hydratedNodes,
-        hydratedEdges,
-        payload.assetRefs ?? {},
-      ),
-    );
-  }, [
-    hydrateAssetRefs,
-    markStudioClean,
-    replaceSelectedBlocks,
-    resetGameplayState,
-    setCloudEditingLockUserId,
-    setCloudLatestUpdatedAt,
-    setCloudProfiles,
-    setCloudProjectUpdatedAt,
-  ]);
-
   const onDialogueLineVoiceInput = useCallback(
     (lineId: string) =>
       createAssetInputHandler("voiceAssetId", (_, assetId) => {
@@ -2752,99 +2576,9 @@ export function AuthorStudioApp() {
     );
     setLastValidation([]);
     resetPreview();
-    setCloudProjectId(null);
-    setCloudOwnerId(null);
-    setCloudEditingLockUserId(null);
-    setCloudProjectUpdatedAt(null);
-    setCloudLatestUpdatedAt(null);
-    setCloudAccessLevel(null);
-    setCloudAccessRows([]);
-    setCloudLogs([]);
-    setCloudProfiles({});
-    setShareEmailInput("");
     markStudioClean(buildStudioChangeFingerprint(normalizedFreshProject, fresh.nodes, freshEdges, {}));
     if (!options?.preserveStatusMessage) {
       setStatusMessage("Nouveau projet initialise.");
-    }
-  };
-
-  const {
-    saveCloudProject,
-    loadCloudProject,
-    downloadCloudProjectBundle,
-    grantCloudAccess,
-    revokeCloudAccess,
-    cleanupCloudOrphanAssets,
-    deleteCloudProject,
-  } = useCloudProjectActions({
-    supabase,
-    authUser,
-    project,
-    nodes,
-    edges,
-    blocks,
-    assetRefs,
-    getAssetBlob,
-    cloudProjectId,
-    cloudOwnerId,
-    cloudCanWrite,
-    cloudCanManageAccess,
-    cloudEditingLockUserId,
-    cloudProjectUpdatedAt,
-    cloudRevisionDrift,
-    shareEmailInput,
-    shareAccessLevel,
-    cloudLockHeldByOther,
-    hasUnsavedChanges,
-    isPlatformAdmin,
-    setStatusMessage,
-    setCloudBusy,
-    setAssetRefs,
-    setCloudProjectId,
-    setCloudOwnerId,
-    setCloudEditingLockUserId,
-    setCloudProjectUpdatedAt,
-    setCloudLatestUpdatedAt,
-    setCloudAccessLevel,
-    setShareEmailInput,
-    markStudioClean,
-    refreshCloudSideData,
-    refreshCloudProjects,
-    appendCloudLog,
-    acquireCloudLock,
-    hydrateStudioFromPayload,
-  });
-
-  const changeOwnPassword = async () => {
-    if (!supabase || !authUser) {
-      setStatusMessage("Connecte-toi pour changer ton mot de passe.");
-      return;
-    }
-    if (ownPasswordInput.length < 8) {
-      setStatusMessage("Le nouveau mot de passe doit contenir au moins 8 caracteres.");
-      return;
-    }
-    if (ownPasswordInput !== ownPasswordConfirmInput) {
-      setStatusMessage("La confirmation du mot de passe ne correspond pas.");
-      return;
-    }
-
-    setCloudBusy(true);
-    try {
-      const { error } = await supabase.auth.updateUser({
-        password: ownPasswordInput,
-        data: { must_change_password: false },
-      });
-      if (error) {
-        setStatusMessage(`Erreur changement mot de passe: ${error.message}`);
-        return;
-      }
-
-      setOwnPasswordInput("");
-      setOwnPasswordConfirmInput("");
-      setStatusMessage("Mot de passe mis a jour.");
-    } finally {
-      setCloudBusy(false);
     }
   };
 
@@ -2959,7 +2693,6 @@ export function AuthorStudioApp() {
     setAdminModalMessage("");
     setAdminModalOpen(true);
     void refreshPlatformProfiles();
-    void refreshCloudProjects();
   };
 
   const closeAdminModal = () => {
@@ -3063,57 +2796,8 @@ export function AuthorStudioApp() {
       }
 
       await refreshPlatformProfiles();
-      await refreshCloudProjects();
       setAdminModalMessage("Utilisateur supprime.");
       setStatusMessage("Utilisateur supprime.");
-    } finally {
-      setCloudBusy(false);
-    }
-  };
-
-  const deleteProjectFromAdminModal = async (projectId: string) => {
-    if (!supabase || !authUser || !isPlatformAdmin) {
-      setAdminModalMessage("Action reservee aux admins connectes.");
-      return;
-    }
-
-    setCloudBusy(true);
-    try {
-      const {
-        data: { session },
-        error: sessionError,
-      } = await supabase.auth.refreshSession();
-      if (sessionError || !session?.access_token) {
-        setAdminModalMessage(`Session invalide: ${sessionError?.message ?? "reconnecte-toi"}`);
-        return;
-      }
-
-      const response = await fetch("/api/admin/delete-project", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "x-supabase-access-token": session.access_token,
-        },
-        body: JSON.stringify({ projectId }),
-      });
-      const payload = (await response.json().catch(() => ({}))) as { error?: string };
-      if (!response.ok) {
-        setAdminModalMessage(`Erreur suppression projet: ${payload.error ?? "unknown"}`);
-        return;
-      }
-
-      if (cloudProjectId === projectId) {
-        setCloudProjectId(null);
-        setCloudOwnerId(null);
-        setCloudEditingLockUserId(null);
-        setCloudProjectUpdatedAt(null);
-        setCloudLatestUpdatedAt(null);
-        setCloudAccessLevel(null);
-      }
-
-      await refreshCloudProjects();
-      setAdminModalMessage("Projet supprime.");
-      setStatusMessage("Projet supprime.");
     } finally {
       setCloudBusy(false);
     }
@@ -3125,70 +2809,6 @@ export function AuthorStudioApp() {
       setAdminModalMessage(`Role mis a jour: ${role}.`);
     } else {
       setAdminModalMessage("Echec mise a jour role. Verifie les droits et reessaie.");
-    }
-  };
-
-  const createUserFromAdminPanel = async () => {
-    if (!supabase || !authUser || !isPlatformAdmin) {
-      setStatusMessage("Action reservee aux admins connectes.");
-      return;
-    }
-
-    const email = adminCreateUserEmailInput.trim().toLowerCase();
-    if (!email) {
-      setStatusMessage("Saisis un email utilisateur.");
-      return;
-    }
-    if (adminCreateUserPasswordInput.length < 8) {
-      setStatusMessage("Le mot de passe provisoire doit contenir au moins 8 caracteres.");
-      return;
-    }
-
-    setCloudBusy(true);
-    try {
-      const {
-        data: { session },
-        error: sessionError,
-      } = await supabase.auth.refreshSession();
-      if (sessionError || !session?.access_token) {
-        setStatusMessage(
-          `Session admin expiree: ${sessionError?.message ?? "reconnecte-toi puis reessaie"}`,
-        );
-        return;
-      }
-
-      const response = await fetch("/api/admin/create-user", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "x-supabase-access-token": session.access_token,
-        },
-        body: JSON.stringify({
-          email,
-          password: adminCreateUserPasswordInput,
-          role: adminCreateUserRole,
-        }),
-      });
-
-      const payload = (await response.json().catch(() => ({}))) as {
-        error?: string;
-        email?: string;
-        role?: string;
-      };
-      if (!response.ok) {
-        setStatusMessage(`Erreur creation compte: ${payload.error ?? "unknown"}`);
-        return;
-      }
-
-      setAdminCreateUserEmailInput("");
-      setAdminCreateUserPasswordInput("");
-      setAdminCreateUserRole("reader");
-      await refreshPlatformProfiles();
-      setStatusMessage(
-        `Compte cree: ${payload.email ?? email} (${payload.role ?? adminCreateUserRole}).`,
-      );
-    } finally {
-      setCloudBusy(false);
     }
   };
 
@@ -3349,7 +2969,6 @@ export function AuthorStudioApp() {
             onOpen={() => setValidationModalOpen(true)}
           />
         }
-        lockHolderName={cloudLockHeldByOther ? cloudLockHolderName : null}
         authInitial={authInitial}
         authEmail={authUser?.email ?? null}
         showAccount={Boolean(authUser)}
@@ -3374,14 +2993,8 @@ export function AuthorStudioApp() {
         onChange={(event) => void handleImportZip(event)}
       />
 
-      {/* ── Inline warnings (edit block / revision drift) ── */}
+      {/* ── Inline warnings (edit block) ── */}
       {editBlockReason && <div className="warning-banner">{editBlockReason}</div>}
-      {cloudRevisionDrift && (
-        <div className="warning-banner">
-          Une version cloud plus recente est disponible ({new Date(cloudLatestUpdatedAt ?? "").toLocaleString("fr-FR")}).
-          Recharge le projet avant de sauvegarder pour eviter d&apos;ecraser le travail d&apos;un collaborateur.
-        </div>
-      )}
 
       {/* ── Toast notifications ── */}
       {toasts.length > 0 && (
@@ -3413,106 +3026,12 @@ export function AuthorStudioApp() {
           />
           <div className="panel-left-stack">
           {activeLeftSection === "cloud" && (
-          <AuthorStudioCloudPanel
-            studioMode
-            projectCloudEnabled={PROJECT_CLOUD_ENABLED}
+          <AuthorStudioAccountPanel
             supabaseEnabled={Boolean(supabase)}
-            allowSelfSignup={allowSelfSignup}
             authLoading={authLoading}
-            authUser={authUser}
-            authEmailInput={authEmailInput}
-            authPasswordInput={authPasswordInput}
+            isAuthenticated={Boolean(authUser)}
+            authEmail={authUser?.email ?? null}
             platformRole={platformRole}
-            isPlatformAdmin={isPlatformAdmin}
-            onAuthEmailInputChange={setAuthEmailInput}
-            onAuthPasswordInputChange={setAuthPasswordInput}
-            onSignIn={() => {
-              void signInWithPassword();
-            }}
-            onSignUp={() => {
-              void signUpWithPassword();
-            }}
-            onSignOut={() => {
-              void signOutSupabase();
-            }}
-            ownPasswordInput={ownPasswordInput}
-            ownPasswordConfirmInput={ownPasswordConfirmInput}
-            accountMustChangePassword={accountMustChangePassword}
-            onOwnPasswordInputChange={setOwnPasswordInput}
-            onOwnPasswordConfirmInputChange={setOwnPasswordConfirmInput}
-            onChangeOwnPassword={() => {
-              void changeOwnPassword();
-            }}
-            onRefreshProjects={() => {
-              void refreshCloudProjects();
-            }}
-            onRequestNewProject={requestNewProject}
-            onSaveProject={() => {
-              void saveCloudProject();
-            }}
-            onAcquireLock={() => {
-              void acquireCloudLock();
-            }}
-            onReleaseLock={() => {
-              void releaseCloudLock();
-            }}
-            onForceTakeoverLock={() => {
-              void acquireCloudLock({ forceTakeover: true });
-            }}
-            cloudBusy={cloudBusy}
-            canUseAuthorTools={canUseAuthorTools}
-            cloudCanWrite={cloudCanWrite}
-            cloudProjectId={cloudProjectId}
-            cloudAccessLevel={cloudAccessLevel}
-            cloudProjectUpdatedAt={cloudProjectUpdatedAt}
-            cloudEditingLockUserId={cloudEditingLockUserId}
-            cloudLockHolderName={cloudLockHolderName}
-            cloudLockHeldByOther={cloudLockHeldByOther}
-            cloudProjects={cloudProjects}
-            onOpenProject={(projectId) => {
-              void loadCloudProject(projectId);
-            }}
-            onDownloadProjectBundle={(projectId) => {
-              void downloadCloudProjectBundle(projectId);
-            }}
-            onDeleteProject={(projectId) => {
-              void deleteCloudProject(projectId);
-            }}
-            canEdit={canEdit}
-            onCleanupLocalOrphanAssetRefs={cleanupLocalOrphanAssetRefs}
-            onCleanupCloudOrphanAssets={() => {
-              void cleanupCloudOrphanAssets();
-            }}
-            cloudCanManageAccess={cloudCanManageAccess}
-            shareEmailInput={shareEmailInput}
-            onShareEmailInputChange={setShareEmailInput}
-            shareAccessLevel={shareAccessLevel}
-            onShareAccessLevelChange={setShareAccessLevel}
-            onGrantAccess={() => {
-              void grantCloudAccess();
-            }}
-            cloudAccessRows={cloudAccessRows}
-            cloudProfiles={cloudProfiles}
-            onRevokeAccess={(userId) => {
-              void revokeCloudAccess(userId);
-            }}
-            cloudLogs={cloudLogs}
-            platformProfiles={platformProfiles}
-            adminCreateUserEmailInput={adminCreateUserEmailInput}
-            adminCreateUserPasswordInput={adminCreateUserPasswordInput}
-            adminCreateUserRole={adminCreateUserRole}
-            onAdminCreateUserEmailInputChange={setAdminCreateUserEmailInput}
-            onAdminCreateUserPasswordInputChange={setAdminCreateUserPasswordInput}
-            onAdminCreateUserRoleChange={setAdminCreateUserRole}
-            onAdminCreateUser={() => {
-              void createUserFromAdminPanel();
-            }}
-            onRefreshPlatformProfiles={() => {
-              void refreshPlatformProfiles();
-            }}
-            onSetPlatformProfileRole={(userId, role) => {
-              void setPlatformProfileRole(userId, role);
-            }}
           />
           )}
 
@@ -3798,7 +3317,6 @@ export function AuthorStudioApp() {
                   className="button-secondary"
                   onClick={() => {
                     void refreshPlatformProfiles();
-                    void refreshCloudProjects();
                   }}
                   disabled={cloudBusy}
                 >
@@ -3810,7 +3328,7 @@ export function AuthorStudioApp() {
               </div>
             </div>
             <p className="account-modal-subtitle">
-              Gere les comptes, roles et projets sans quitter la page de travail.
+              Gere les comptes et les roles sans quitter la page de travail.
             </p>
 
             <div className="portal-divider" />
@@ -3922,36 +3440,6 @@ export function AuthorStudioApp() {
                     </li>
                   );
                 })}
-              </ul>
-            )}
-
-            <div className="portal-divider" />
-
-            <h3>Projets</h3>
-            {cloudProjects.length === 0 ? (
-              <p className="empty-placeholder">Aucun projet charge.</p>
-            ) : (
-              <ul className="list-compact admin-modal-list">
-                {cloudProjects.map((projectRow) => (
-                  <li key={projectRow.id} className="cloud-project-row">
-                    <div>
-                      <strong>{projectRow.title}</strong>
-                      <small>{projectRow.id}</small>
-                      <small>{new Date(projectRow.updated_at).toLocaleString("fr-FR")}</small>
-                    </div>
-                    <div className="row-inline">
-                      <button
-                        className="button-danger button-small"
-                        onClick={() => {
-                          void deleteProjectFromAdminModal(projectRow.id);
-                        }}
-                        disabled={cloudBusy}
-                      >
-                        Supprimer
-                      </button>
-                    </div>
-                  </li>
-                ))}
               </ul>
             )}
 

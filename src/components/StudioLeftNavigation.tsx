@@ -21,9 +21,9 @@ const NAV_ITEMS: ReadonlyArray<{
 }> = [
   {
     id: "cloud",
-    label: "Supabase Cloud",
+    label: "Compte",
     color: "#34c7a1",
-    icon: <path d="M7 15.5A4.5 4.5 0 0 1 8.4 6.7a5.5 5.5 0 0 1 10.3 2A3.7 3.7 0 0 1 18 16H7Z" />,
+    icon: <path d="M12 5a3.2 3.2 0 1 1 0 6.4A3.2 3.2 0 0 1 12 5Zm-6.5 14c.9-4 3.1-6 6.5-6s5.6 2 6.5 6" />,
   },
   {
     id: "chapters",
