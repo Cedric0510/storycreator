@@ -44,3 +44,6 @@ next-env.d.ts
 
 .vercel
 .env*.local
+
+# Fichiers temporaires de debug export/import
+tmp-*
