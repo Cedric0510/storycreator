@@ -1,6 +1,7 @@
 import { ChangeEvent, ReactNode } from "react";
 
 import { HelpHint } from "@/components/HelpHint";
+import { EditorGroup } from "@/components/EditorGroup";
 import { PlayerTextInput } from "@/components/PlayerTextFormatting";
 import { SceneComposer } from "@/components/AuthorStudioSceneComposer";
 import {
@@ -101,6 +102,7 @@ export function ChoiceEditorSection({
           option peut modifier des variables et brancher vers un bloc different.
         </HelpHint>
       </div>
+      <EditorGroup title="Contenu" icon="T">
       <label>
         Type de choix
         <select
@@ -129,6 +131,8 @@ export function ChoiceEditorSection({
         rows={3}
         placeholder="Que fais-tu ?"
       />
+      </EditorGroup>
+      <EditorGroup title="Scene et medias" icon="◫" kind="scene">
       <label>
         Image fond
         <input
@@ -340,7 +344,9 @@ export function ChoiceEditorSection({
           }
         />
       )}
+      </EditorGroup>
 
+      <EditorGroup title="Options et interactions" icon="◇" kind="logic">
       <div className="section-title-row">
         <div className="title-with-help">
           <h3>Options (max 4)</h3>
@@ -561,6 +567,8 @@ export function ChoiceEditorSection({
           </div>
         </div>
       ))}
+
+      </EditorGroup>
 
     </div>
   );

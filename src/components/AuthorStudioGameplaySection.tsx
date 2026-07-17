@@ -13,6 +13,7 @@ import {
 } from "@/components/author-studio-core";
 import { GameplayPlacementTarget } from "@/components/author-studio-types";
 import { HelpHint } from "@/components/HelpHint";
+import { EditorGroup } from "@/components/EditorGroup";
 import {
   SceneComposer,
   SceneCopyPaste,
@@ -174,6 +175,7 @@ export function GameplayEditorSection({
         </HelpHint>
       </div>
 
+      <EditorGroup title="Contenu" icon="T">
       <label>
         Objectif
         <textarea
@@ -183,7 +185,9 @@ export function GameplayEditorSection({
           disabled={!canEdit}
         />
       </label>
+      </EditorGroup>
 
+      <EditorGroup title="Scene et medias" icon="◫" kind="scene">
       {/* --- Scene clipboard: copy / paste images + layout --- */}
       <SceneCopyPaste
         block={block}
@@ -282,7 +286,9 @@ export function GameplayEditorSection({
         <input type="file" accept="audio/*" onChange={onAssetInput("voiceAssetId")} disabled={!canEdit} />
       </label>
       {renderAssetAttachment("voiceAssetId", block.voiceAssetId)}
+      </EditorGroup>
 
+      <EditorGroup title="Objets et interactions" icon="◇" kind="logic">
       <div className="section-title-row">
         <div className="title-with-help">
           <h3>Objets</h3>
@@ -825,6 +831,7 @@ export function GameplayEditorSection({
           </div>
         ))}
       </div>
+      </EditorGroup>
     </div>
   );
 }

@@ -5,6 +5,7 @@ import {
   normalizeDelta,
 } from "@/components/author-studio-core";
 import { HelpHint } from "@/components/HelpHint";
+import { EditorGroup } from "@/components/EditorGroup";
 import { NextBlockSelect } from "@/components/AuthorStudioNextBlockSelect";
 import { PlayerTextInput } from "@/components/PlayerTextFormatting";
 import {
@@ -52,6 +53,7 @@ export function TitleEditorSection({
           boutons.
         </HelpHint>
       </div>
+      <EditorGroup title="Contenu" icon="T">
       <PlayerTextInput
         label="Titre histoire"
         value={block.storyTitle}
@@ -64,6 +66,8 @@ export function TitleEditorSection({
         onChange={(value) => onSetSelectedDynamicField("subtitle", value)}
         disabled={!canEdit}
       />
+      </EditorGroup>
+      <EditorGroup title="Scene et medias" icon="◫" kind="scene">
       <label>
         Image de fond
         <input
@@ -74,7 +78,9 @@ export function TitleEditorSection({
         />
       </label>
       {renderAssetAttachment("backgroundAssetId", block.backgroundAssetId)}
+      </EditorGroup>
 
+      <EditorGroup title="Apparence" icon="◈" kind="appearance">
       <div className="grid-two">
         <label>
           Bouton BG
@@ -145,7 +151,9 @@ export function TitleEditorSection({
           />
         </label>
       </div>
+      </EditorGroup>
 
+      <EditorGroup title="Navigation" icon="→" kind="navigation">
       <NextBlockSelect
         selectedBlockId={block.id}
         nextBlockId={block.nextBlockId}
@@ -153,6 +161,7 @@ export function TitleEditorSection({
         canEdit={canEdit}
         onChange={(targetId) => onSetConnection(block.id, "next", targetId)}
       />
+      </EditorGroup>
     </div>
   );
 }

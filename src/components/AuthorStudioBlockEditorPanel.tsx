@@ -3,6 +3,8 @@ import { ChangeEvent, MouseEvent, PointerEvent as ReactPointerEvent, ReactNode, 
 import { normalizeDelta } from "@/components/author-studio-core";
 import { GameplayPlacementTarget } from "@/components/author-studio-types";
 import { HelpHint } from "@/components/HelpHint";
+import { InspectorSection } from "@/components/InspectorSection";
+import { EditorGroup } from "@/components/EditorGroup";
 import { NextBlockSelect } from "@/components/AuthorStudioNextBlockSelect";
 import { PlayerTextInput } from "@/components/PlayerTextFormatting";
 import {
@@ -182,6 +184,7 @@ function CinematicEditorSection({
           meme scene image/video/voix. Tu peux aussi composer une scene multi-personnages.
         </HelpHint>
       </div>
+      <EditorGroup title="Contenu" icon="T">
       <label>
         Auto avance (secondes)
         <input
@@ -315,7 +318,9 @@ function CinematicEditorSection({
           />
         </div>
       ))}
+      </EditorGroup>
 
+      <EditorGroup title="Scene et medias" icon="◫" kind="scene">
       {/* --- Scene clipboard: copy / paste images + layout --- */}
       <SceneCopyPaste
         block={block}
@@ -521,7 +526,9 @@ function CinematicEditorSection({
         />
       </label>
       {renderAssetAttachment("voiceAssetId", block.voiceAssetId)}
+      </EditorGroup>
 
+      <EditorGroup title="Navigation" icon="→" kind="navigation">
       <NextBlockSelect
         selectedBlockId={block.id}
         nextBlockId={block.nextBlockId}
@@ -529,6 +536,7 @@ function CinematicEditorSection({
         canEdit={canEdit}
         onChange={(targetId) => onSetConnection(block.id, "next", targetId)}
       />
+      </EditorGroup>
     </div>
   );
 }
@@ -599,8 +607,8 @@ export function AuthorStudioBlockEditorPanel({
 }: AuthorStudioBlockEditorPanelProps) {
   return (
     <aside className="panel panel-right">
-      <section className="panel-section">
-        <div className="section-title-row">
+      <section className="panel-section inspector-panel-root">
+        <div className="section-title-row inspector-panel-header">
           <div className="title-with-help">
             <h2>Proprietes bloc</h2>
             <HelpHint title="Edition du bloc">
@@ -608,7 +616,7 @@ export function AuthorStudioBlockEditorPanel({
               branchements et effets.
             </HelpHint>
           </div>
-          <div style={{ display: "flex", gap: 6 }}>
+          <div className="inspector-panel-actions">
             <button
               className="button-secondary"
               onClick={onDuplicateSelectedBlock}
@@ -633,7 +641,9 @@ export function AuthorStudioBlockEditorPanel({
         )}
 
         {selectedBlock && (
-          <div className="form-stack">
+          <div className="inspector-stack">
+            <InspectorSection title="Identite du bloc" icon="◆">
+              <div className="form-stack">
             <label>
               Nom bloc
               <input
@@ -676,57 +686,10 @@ export function AuthorStudioBlockEditorPanel({
                 <span className="chip chip-start">Bloc de depart</span>
               )}
             </div>
-
-            <div className="effect-list">
-              <div className="section-title-row">
-                <div className="title-with-help">
-                  <span>Effets a l entree du bloc</span>
-                  <HelpHint title="Effets d'entree">
-                    Effets executes automatiquement quand le joueur entre dans ce bloc.
-                  </HelpHint>
-                </div>
-                <button
-                  className="button-secondary"
-                  onClick={onAddBlockEntryEffect}
-                  disabled={!canEdit || project.variables.length === 0}
-                >
-                  + effet
-                </button>
               </div>
-              {(selectedBlock.entryEffects ?? []).length === 0 && (
-                <small className="empty-placeholder">
-                  Optionnel: applique des points (energie, amitie...) quand ce bloc est atteint.
-                </small>
-              )}
-              {(selectedBlock.entryEffects ?? []).map((effect, index) => (
-                <div key={`entry-effect-${index}`} className="effect-row">
-                  <select
-                    value={effect.variableId}
-                    onChange={(event) => onUpdateBlockEntryEffect(index, "variableId", event.target.value)}
-                    disabled={!canEdit}
-                  >
-                    {project.variables.map((variable) => (
-                      <option key={variable.id} value={variable.id}>
-                        {variable.name}
-                      </option>
-                    ))}
-                  </select>
-                  <input
-                    type="number"
-                    value={effect.delta}
-                    onChange={(event) => onUpdateBlockEntryEffect(index, "delta", event.target.value)}
-                    disabled={!canEdit}
-                  />
-                  <button
-                    className="button-danger"
-                    onClick={() => onRemoveBlockEntryEffect(index)}
-                    disabled={!canEdit}
-                  >
-                    x
-                  </button>
-                </div>
-              ))}
-            </div>
+            </InspectorSection>
+
+            <div className="inspector-block-editor">
 
             {selectedBlock.type === "title" && (
               <TitleEditorSection
@@ -902,6 +865,61 @@ export function AuthorStudioBlockEditorPanel({
                 onSetChapterValidationFromEnd={onSetChapterValidationFromEnd}
               />
             )}
+            </div>
+            <InspectorSection title="Effets d'entree" icon="✦" defaultOpen={false}>
+              <div className="effect-list">
+              <div className="section-title-row">
+                <div className="title-with-help">
+                  <span>Effets a l entree du bloc</span>
+                  <HelpHint title="Effets d'entree">
+                    Effets executes automatiquement quand le joueur entre dans ce bloc.
+                  </HelpHint>
+                </div>
+                <button
+                  className="button-secondary"
+                  onClick={onAddBlockEntryEffect}
+                  disabled={!canEdit || project.variables.length === 0}
+                >
+                  + effet
+                </button>
+              </div>
+              {(selectedBlock.entryEffects ?? []).length === 0 && (
+                <small className="empty-placeholder">
+                  Optionnel: applique des points (energie, amitie...) quand ce bloc est atteint.
+                </small>
+              )}
+              {(selectedBlock.entryEffects ?? []).map((effect, index) => (
+                <div key={`entry-effect-${index}`} className="effect-row">
+                  <select
+                    value={effect.variableId}
+                    onChange={(event) => onUpdateBlockEntryEffect(index, "variableId", event.target.value)}
+                    disabled={!canEdit}
+                  >
+                    {project.variables.map((variable) => (
+                      <option key={variable.id} value={variable.id}>
+                        {variable.name}
+                      </option>
+                    ))}
+                  </select>
+                  <input
+                    type="number"
+                    value={effect.delta}
+                    onChange={(event) => onUpdateBlockEntryEffect(index, "delta", event.target.value)}
+                    disabled={!canEdit}
+                  />
+                  <button
+                    className="button-danger"
+                    onClick={() => onRemoveBlockEntryEffect(index)}
+                    disabled={!canEdit}
+                  >
+                    x
+                  </button>
+                </div>
+              ))}
+              </div>
+            </InspectorSection>
+
+
           </div>
         )}
       </section>

@@ -1,6 +1,7 @@
 import { ChangeEvent, ReactNode } from "react";
 
 import { HelpHint } from "@/components/HelpHint";
+import { EditorGroup } from "@/components/EditorGroup";
 import { PlayerTextInput } from "@/components/PlayerTextFormatting";
 import {
   SceneComposer,
@@ -109,6 +110,7 @@ export function DialogueEditorSection({
         </HelpHint>
       </div>
 
+      <EditorGroup title="Scene et medias" icon="◫" kind="scene">
       {/* --- Block-level NPC link --- */}
       {linkedNpcBlock ? (
         <div className="asset-line">
@@ -323,6 +325,9 @@ export function DialogueEditorSection({
         );
       })()}
 
+      </EditorGroup>
+
+      <EditorGroup title="Dialogues et interactions" icon="T" kind="logic">
       {/* --- Start line selector --- */}
       <label>
         Ligne de depart
@@ -884,6 +889,7 @@ export function DialogueEditorSection({
 
         </div>
       ))}
+      </EditorGroup>
     </div>
   );
 }

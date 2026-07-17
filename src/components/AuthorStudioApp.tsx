@@ -29,9 +29,13 @@ import { AuthorStudioCloudPanel } from "@/components/AuthorStudioCloudPanel";
 import { AuthorStudioBlockEditorPanel } from "@/components/AuthorStudioBlockEditorPanel";
 import { AuthorStudioProjectPanel } from "@/components/AuthorStudioProjectPanel";
 import { ValidationModal, ValidationStatusButton } from "@/components/AuthorStudioValidation";
-import { HelpHint } from "@/components/HelpHint";
 import { PreviewOverlay } from "@/components/PreviewOverlay";
 import { StoryNode, StoryNodeData, DeletableEdge, ChapterFolderNode } from "@/components/StoryNode";
+import { StudioHeader } from "@/components/StudioHeader";
+import {
+  StudioLeftNavigation,
+  type StudioLeftSection,
+} from "@/components/StudioLeftNavigation";
 import { useBlockEffectOperations } from "@/components/useBlockEffectOperations";
 import { useChoiceOperations } from "@/components/useChoiceOperations";
 import { useCloudProjectActions } from "@/components/useCloudProjectActions";
@@ -177,6 +181,7 @@ export function AuthorStudioApp() {
   const importZipInputRef = useRef<HTMLInputElement | null>(null);
   const [isImportingZip, setIsImportingZip] = useState(false);
   const [rightPanelHidden, setRightPanelHidden] = useState(false);
+  const [activeLeftSection, setActiveLeftSection] = useState<StudioLeftSection>("blocks");
   const [validationModalOpen, setValidationModalOpen] = useState(false);
   const [accountModalOpen, setAccountModalOpen] = useState(false);
   const [accountModalMessage, setAccountModalMessage] = useState("");
@@ -3333,105 +3338,41 @@ export function AuthorStudioApp() {
 
   return (
     <div className="studio-root">
-      <header className="studio-header">
-        <div className="studio-header-title">
-          {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img
-            src="/ui-assets/logo/crlogo.png"
-            alt="CadaRium"
-            className="studio-brand-icon"
+      <StudioHeader
+        hasUnsavedChanges={hasUnsavedChanges}
+        validationControl={
+          <ValidationStatusButton
+            validationLevel={validationLevel}
+            totalErrors={totalErrors}
+            totalWarnings={totalWarnings}
+            validationSummary={validationSummary}
+            onOpen={() => setValidationModalOpen(true)}
           />
-          <h1 className="studio-brand-name">
-            CadaRium <em>Studio</em>
-          </h1>
-          <HelpHint title="Studio auteur">
-            Espace de creation de light novel: construis les blocs, relie-les dans le graphe,
-            valide puis exporte JSON + assets.
-          </HelpHint>
-        </div>
-        <div className="studio-header-actions">
-          {/* ── Navbar status indicators ── */}
-          <div className="nav-indicators">
-            <span className="nav-indicator" title={hasUnsavedChanges ? "Modifications non sauvegardees" : "Projet a jour"}>
-              <span className={`nav-indicator-dot ${hasUnsavedChanges ? "nav-indicator-dot-unsaved" : "nav-indicator-dot-saved"}`} />
-              {hasUnsavedChanges ? "Non sauvé" : "À jour"}
-            </span>
-            <ValidationStatusButton
-              validationLevel={validationLevel}
-              totalErrors={totalErrors}
-              totalWarnings={totalWarnings}
-              validationSummary={validationSummary}
-              onOpen={() => setValidationModalOpen(true)}
-            />
-            {cloudLockHeldByOther && (
-              <span className="nav-indicator nav-indicator-lock" title={`Verrou: ${cloudLockHolderName}`}>
-                🔒 {cloudLockHolderName}
-              </span>
-            )}
-          </div>
-          <span
-            className={`nav-user-avatar${authUser ? " nav-user-avatar-active" : ""}`}
-            title={authUser?.email ?? "Aucun compte connecte"}
-          >
-            {authInitial}
-          </span>
-          {authUser && (
-            <button
-              className="button-secondary nav-action-button nav-action-account"
-              onClick={openAccountModal}
-            >
-              Compte
-            </button>
-          )}
-          {isPlatformAdmin && (
-            <button
-              className="button-secondary nav-action-button nav-action-admin"
-              onClick={openAdminModal}
-            >
-              Admin
-            </button>
-          )}
-          <button
-            className="button-secondary nav-action-button"
-            onClick={requestNewProject}
-            disabled={!authUser || !canUseAuthorTools || isImportingZip}
-          >
-            Nouveau projet
-          </button>
-          <button
-            className="button-secondary nav-action-button nav-action-preview"
-            onClick={startPreview}
-            disabled={!authUser || isImportingZip}
-          >
-            Preview
-          </button>
-          <button
-            className="button-primary nav-action-button nav-action-export"
-            onClick={() => {
-              void exportProjectZip();
-            }}
-            disabled={!authUser}
-          >
-            Export ZIP
-          </button>
-          <button
-            className="button-secondary nav-action-button nav-action-import"
-            onClick={() => importZipInputRef.current?.click()}
-            disabled={!authUser || !canUseAuthorTools || isImportingZip}
-          >
-            {isImportingZip ? "Import en cours..." : "Import ZIP"}
-          </button>
-          <input
-            ref={importZipInputRef}
-            type="file"
-            accept=".zip"
-            style={{ display: "none" }}
-            onChange={(event) => {
-              void handleImportZip(event);
-            }}
-          />
-        </div>
-      </header>
+        }
+        lockHolderName={cloudLockHeldByOther ? cloudLockHolderName : null}
+        authInitial={authInitial}
+        authEmail={authUser?.email ?? null}
+        showAccount={Boolean(authUser)}
+        showAdmin={isPlatformAdmin}
+        canCreateProject={Boolean(authUser && canUseAuthorTools && !isImportingZip)}
+        canPreview={Boolean(authUser && !isImportingZip)}
+        canExport={Boolean(authUser)}
+        canImport={Boolean(authUser && canUseAuthorTools && !isImportingZip)}
+        isImporting={isImportingZip}
+        onOpenAccount={openAccountModal}
+        onOpenAdmin={openAdminModal}
+        onNewProject={requestNewProject}
+        onPreview={startPreview}
+        onExport={() => void exportProjectZip()}
+        onImport={() => importZipInputRef.current?.click()}
+      />
+      <input
+        ref={importZipInputRef}
+        type="file"
+        accept=".zip"
+        className="visually-hidden-file-input"
+        onChange={(event) => void handleImportZip(event)}
+      />
 
       {/* ── Inline warnings (edit block / revision drift) ── */}
       {editBlockReason && <div className="warning-banner">{editBlockReason}</div>}
@@ -3465,7 +3406,13 @@ export function AuthorStudioApp() {
       )}
 
       <div className={`studio-grid${rightPanelHidden ? " studio-grid-right-hidden" : ""}`}>
-        <div className="panel-left-stack">
+        <div className="studio-left-workspace">
+          <StudioLeftNavigation
+            activeSection={activeLeftSection}
+            onSectionChange={setActiveLeftSection}
+          />
+          <div className="panel-left-stack">
+          {activeLeftSection === "cloud" && (
           <AuthorStudioCloudPanel
             studioMode
             projectCloudEnabled={PROJECT_CLOUD_ENABLED}
@@ -3567,9 +3514,11 @@ export function AuthorStudioApp() {
               void setPlatformProfileRole(userId, role);
             }}
           />
+          )}
 
           {authUser ? (
             <AuthorStudioProjectPanel
+              activeSection={activeLeftSection === "cloud" ? "project" : activeLeftSection}
               project={project}
               setProject={setProject}
               canEdit={canEdit}
@@ -3597,6 +3546,7 @@ export function AuthorStudioApp() {
               </section>
             </aside>
           )}
+          </div>
         </div>
 
         {authUser ? (

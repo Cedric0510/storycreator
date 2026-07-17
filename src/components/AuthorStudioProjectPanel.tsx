@@ -1,11 +1,26 @@
-import { Dispatch, SetStateAction, useState } from "react";
+import { Dispatch, SetStateAction, useState, type CSSProperties } from "react";
 
 import { normalizeDelta, toSlug } from "@/components/author-studio-core";
 import { CollapsibleSection } from "@/components/CollapsibleSection";
 import { HelpHint } from "@/components/HelpHint";
-import { BlockType, ProjectMeta } from "@/lib/story";
+import type { StudioLeftSection } from "@/components/StudioLeftNavigation";
+import { BlockType, ProjectMeta, blockTypeColor } from "@/lib/story";
+
+const BLOCK_LIBRARY_ITEMS: ReadonlyArray<{ type: BlockType; label: string }> = [
+  { type: "title", label: "Ecran titre" },
+  { type: "cinematic", label: "Cinematique" },
+  { type: "dialogue", label: "Dialogue" },
+  { type: "gameplay", label: "Gameplay" },
+  { type: "choice", label: "Choix" },
+  { type: "switch", label: "Switch" },
+  { type: "hero_profile", label: "Fiche Hero" },
+  { type: "npc_profile", label: "Fiche PNJ" },
+  { type: "chapter_start", label: "Debut chapitre" },
+  { type: "chapter_end", label: "Fin chapitre" },
+];
 
 interface AuthorStudioProjectPanelProps {
+  activeSection: Exclude<StudioLeftSection, "cloud"> | "project";
   project: ProjectMeta;
   setProject: Dispatch<SetStateAction<ProjectMeta>>;
   canEdit: boolean;
@@ -25,6 +40,7 @@ interface AuthorStudioProjectPanelProps {
 }
 
 export function AuthorStudioProjectPanel({
+  activeSection,
   project,
   setProject,
   canEdit,
@@ -58,6 +74,7 @@ export function AuthorStudioProjectPanel({
 
   return (
     <aside className="panel panel-left">
+      {activeSection === "project" && (
       <CollapsibleSection
         storageKey="project-info"
         title="Projet"
@@ -121,7 +138,9 @@ export function AuthorStudioProjectPanel({
           />
         </label>
       </CollapsibleSection>
+      )}
 
+      {activeSection === "chapters" && (
       <CollapsibleSection
         storageKey="project-validated-chapters"
         title="Chapitres valides"
@@ -155,7 +174,9 @@ export function AuthorStudioProjectPanel({
           </ul>
         )}
       </CollapsibleSection>
+      )}
 
+      {activeSection === "blocks" && (
       <CollapsibleSection
         storageKey="project-blocks"
         title="Bibliotheque de blocs"
@@ -167,39 +188,24 @@ export function AuthorStudioProjectPanel({
         }
       >
         <div className="block-buttons">
-          <button className="button-soft" onClick={() => onAddBlock("title")} disabled={!canEdit}>
-            + Ecran titre
-          </button>
-          <button className="button-soft" onClick={() => onAddBlock("cinematic")} disabled={!canEdit}>
-            + Cinematique
-          </button>
-          <button className="button-soft" onClick={() => onAddBlock("dialogue")} disabled={!canEdit}>
-            + Dialogue
-          </button>
-          <button className="button-soft" onClick={() => onAddBlock("gameplay")} disabled={!canEdit}>
-            + Gameplay
-          </button>
-          <button className="button-soft" onClick={() => onAddBlock("choice")} disabled={!canEdit}>
-            + Choix
-          </button>
-          <button className="button-soft" onClick={() => onAddBlock("switch")} disabled={!canEdit}>
-            + Switch
-          </button>
-          <button className="button-soft" onClick={() => onAddBlock("hero_profile")} disabled={!canEdit}>
-            + Fiche Hero
-          </button>
-          <button className="button-soft" onClick={() => onAddBlock("npc_profile")} disabled={!canEdit}>
-            + Fiche PNJ
-          </button>
-          <button className="button-soft" onClick={() => onAddBlock("chapter_start")} disabled={!canEdit}>
-            + Debut chapitre
-          </button>
-          <button className="button-soft" onClick={() => onAddBlock("chapter_end")} disabled={!canEdit}>
-            + Fin chapitre
-          </button>
+          {BLOCK_LIBRARY_ITEMS.map((item) => (
+            <button
+              key={item.type}
+              className="block-library-button"
+              style={{ "--block-color": blockTypeColor(item.type) } as CSSProperties}
+              onClick={() => onAddBlock(item.type)}
+              disabled={!canEdit}
+            >
+              <span className="block-library-button-marker" aria-hidden="true" />
+              <span>{item.label}</span>
+              <span className="block-library-button-add" aria-hidden="true">+</span>
+            </button>
+          ))}
         </div>
       </CollapsibleSection>
+      )}
 
+      {activeSection === "variables" && (
       <CollapsibleSection
         storageKey="project-variables"
         title="Variables globales"
@@ -272,7 +278,9 @@ export function AuthorStudioProjectPanel({
           ))}
         </ul>
       </CollapsibleSection>
+      )}
 
+      {activeSection === "items" && (
       <CollapsibleSection
         storageKey="project-items"
         title="Objets histoire"
@@ -358,7 +366,9 @@ export function AuthorStudioProjectPanel({
           })}
         </ul>
       </CollapsibleSection>
+      )}
 
+      {activeSection === "logs" && (
       <CollapsibleSection
         storageKey="project-logs"
         title="Journal"
@@ -385,6 +395,7 @@ export function AuthorStudioProjectPanel({
           })}
         </ul>
       </CollapsibleSection>
+      )}
     </aside>
   );
 }
