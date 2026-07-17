@@ -82,6 +82,10 @@ les policies RLS et les triggers. Un backend maison DOIT les reimplementer.
    defaut: metadata `display_name`, sinon partie locale de l'email, sinon "Auteur".
 3. **Self-signup**: role initial `reader`, jamais plus (policy RLS force
    `platform_role = 'reader'` a l'insertion par l'utilisateur).
+   Attention: `NEXT_PUBLIC_ENABLE_SELF_SIGNUP` ne bloque que l'interface.
+   Le blocage reel se fait cote fournisseur d'auth (dashboard Supabase:
+   Authentication > Providers > Email > Enable sign ups). Le backend maison
+   devra appliquer ce flag cote serveur.
 4. **Email**: l'email du profil est un miroir de `auth.users`; il ne peut pas
    etre modifie par l'utilisateur (trigger `guard_author_profiles_sensitive_fields`).
 5. **Changement de role**: reserve aux admins (trigger + RPC). Retrograder le
@@ -112,7 +116,12 @@ Enveloppe JSON: `{ "error": string }` avec code HTTP.
 | 401  | token manquant ou session invalide      | header absent, JWT expire |
 | 403  | droits insuffisants                     | demandeur non admin |
 | 409  | conflit avec une regle metier           | email deja pris, dernier admin, auto-suppression |
+| 429  | trop de requetes (rate limit)           | rafale depuis une meme IP sur les routes BFF |
 | 500  | erreur serveur / configuration          | env manquante, erreur DB |
+
+Note 429: l'implementation actuelle est un compteur en memoire par instance
+serverless (best-effort, 30 req/min/IP). Le backend maison devra fournir un
+rate limiting partage (store commun ou middleware d'infra).
 
 Les RPC `platform_*` ne levent pas d'erreur HTTP: elles retournent `false` en
 cas de refus (droits, dernier admin, cible inexistante, role invalide).

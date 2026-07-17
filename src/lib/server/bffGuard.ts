@@ -13,6 +13,38 @@ export function jsonError(message: string, status = 400) {
   return NextResponse.json({ error: message }, { status });
 }
 
+/**
+ * Rate limiting best-effort par IP (fenetre glissante en memoire).
+ *
+ * Limite: la memoire est locale a chaque instance serverless — c'est une
+ * protection contre les rafales, pas une garantie globale. Le backend maison
+ * devra fournir un vrai rate limiting partage (contrat, section erreurs: 429).
+ */
+const RATE_LIMIT_MAX_REQUESTS = 30;
+const RATE_LIMIT_WINDOW_MS = 60_000;
+const RATE_LIMIT_MAX_TRACKED_IPS = 5_000;
+const requestTimestampsByIp = new Map<string, number[]>();
+
+function isRateLimited(request: NextRequest): boolean {
+  const ip =
+    request.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ||
+    request.headers.get("x-real-ip")?.trim() ||
+    "unknown";
+
+  const now = Date.now();
+  const recent = (requestTimestampsByIp.get(ip) ?? []).filter(
+    (timestamp) => now - timestamp < RATE_LIMIT_WINDOW_MS,
+  );
+  recent.push(now);
+
+  if (requestTimestampsByIp.size > RATE_LIMIT_MAX_TRACKED_IPS) {
+    requestTimestampsByIp.clear();
+  }
+  requestTimestampsByIp.set(ip, recent);
+
+  return recent.length > RATE_LIMIT_MAX_REQUESTS;
+}
+
 export interface BffUserContext {
   serviceClient: SupabaseClient;
   requesterId: string;
@@ -25,6 +57,10 @@ export interface BffUserContext {
 export async function requireUser(
   request: NextRequest,
 ): Promise<BffUserContext | NextResponse> {
+  if (isRateLimited(request)) {
+    return jsonError("Trop de requetes. Reessaie dans une minute.", 429);
+  }
+
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
   const anonKey =
     process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY ??
