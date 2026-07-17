@@ -93,12 +93,20 @@ import {
   validateStoryBlocks,
 } from "@/lib/story";
 import {
+  StudioSnapshot,
+  loadLatestSnapshot,
+  promoteToSessionBackup,
+  saveLatestSnapshot,
+} from "@/lib/studioAutosave";
+import {
   allocateUniqueId,
   mergeChaptersForZipImport,
   mergeHeroForZipImport,
   mergeItemsForZipImport,
   mergeVariablesForZipImport,
   normalizeProjectChapters,
+  normalizeProjectHero,
+  normalizeProjectItems,
   placeImportedNodes,
   remapBlockForZipImport,
   withCollapsedChapterFolders,
@@ -209,6 +217,8 @@ export function AuthorStudioApp() {
   const [accountBusy, setAccountBusy] = useState(false);
   const actionBusy = authBusy || adminBusy || accountBusy;
   const [newProjectWarningOpen, setNewProjectWarningOpen] = useState(false);
+  const [restoreCandidate, setRestoreCandidate] = useState<StudioSnapshot | null>(null);
+  const lastAutosavedFingerprintRef = useRef<string | null>(null);
   const [lastSavedFingerprint, setLastSavedFingerprint] = useState(() =>
     buildStudioChangeFingerprint(initialProject, seed.nodes, seed.edges, {}),
   );
@@ -1107,6 +1117,66 @@ export function AuthorStudioApp() {
       markStudioClean();
     }
   }, [exportZip, markStudioClean]);
+
+  // ── Autosave locale ─────────────────────────────────────────────
+  // Au demarrage: recupere l'eventuel travail non exporte, le met a l'abri
+  // dans le secours de session, puis propose la restauration.
+  useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      const snapshot = await loadLatestSnapshot();
+      if (cancelled || !snapshot) return;
+      await promoteToSessionBackup(snapshot);
+      if (cancelled) return;
+      setRestoreCandidate(snapshot);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  // Ecrit le travail en continu (debounce) des la premiere modification.
+  // Un "Nouveau projet" volontaire remet hasUnsavedChanges a false et ne
+  // reecrit donc pas le snapshot avec un projet vierge.
+  useEffect(() => {
+    if (restoreCandidate) return;
+    if (!authUser) return;
+    if (!hasUnsavedChanges) return;
+    if (currentFingerprint === lastAutosavedFingerprintRef.current) return;
+
+    const timer = window.setTimeout(() => {
+      lastAutosavedFingerprintRef.current = currentFingerprint;
+      void saveLatestSnapshot({
+        savedAt: new Date().toISOString(),
+        fingerprint: currentFingerprint,
+        project,
+        blocks,
+        assetRefs,
+        openedValidatedChapterIds,
+      });
+    }, 2500);
+    return () => window.clearTimeout(timer);
+  }, [
+    assetRefs,
+    authUser,
+    blocks,
+    currentFingerprint,
+    hasUnsavedChanges,
+    openedValidatedChapterIds,
+    project,
+    restoreCandidate,
+  ]);
+
+  // Garde de fermeture: previent la perte de travail non exporte.
+  useEffect(() => {
+    if (!hasUnsavedChanges) return;
+    const handleBeforeUnload = (event: BeforeUnloadEvent) => {
+      event.preventDefault();
+      event.returnValue = "";
+    };
+    window.addEventListener("beforeunload", handleBeforeUnload);
+    return () => window.removeEventListener("beforeunload", handleBeforeUnload);
+  }, [hasUnsavedChanges]);
 
   useEffect(() => {
     const timer = window.setTimeout(() => {
@@ -2565,6 +2635,68 @@ export function AuthorStudioApp() {
     }
   };
 
+  const applyRestoreCandidate = () => {
+    if (!restoreCandidate) return;
+
+    // Meme chemin que l'import ZIP: on repart des blocs (qui portent leur
+    // position) et on reconstruit nodes, dossiers de chapitres et edges.
+    const restoredNodes = restoreCandidate.blocks.map((block) => blockToNode(block));
+    const rawProject = restoreCandidate.project as ProjectMeta & {
+      items?: unknown;
+      chapters?: unknown;
+      hero?: unknown;
+    };
+    const normalizedProject: ProjectMeta = {
+      ...restoreCandidate.project,
+      items: normalizeProjectItems(rawProject.items),
+      chapters: normalizeProjectChapters(rawProject.chapters),
+    };
+    normalizedProject.hero = normalizeProjectHero(
+      rawProject.hero,
+      normalizedProject.variables,
+      normalizedProject.items,
+    );
+
+    const hydratedNodes = withCollapsedChapterFolders(restoredNodes, normalizedProject.chapters);
+    const hydratedEdges = rebuildEdgesFromNodes(restoredNodes).filter(
+      (edge) => !isDialogueAutoNextHandle(edge.sourceHandle) && !isCinematicAutoNextHandle(edge.sourceHandle),
+    );
+
+    setProject(normalizedProject);
+    setNodes(hydratedNodes);
+    setEdges(hydratedEdges);
+    setAssetRefs(restoreCandidate.assetRefs ?? {});
+    resetGameplayState();
+    const validatedChapterIds = new Set(
+      normalizedProject.chapters.filter((chapter) => chapter.validated).map((chapter) => chapter.id),
+    );
+    setOpenedValidatedChapterIds(
+      (restoreCandidate.openedValidatedChapterIds ?? []).filter((chapterId) =>
+        validatedChapterIds.has(chapterId),
+      ),
+    );
+    clipboardRef.current = null;
+    clipboardPasteCountRef.current = 0;
+    replaceSelectedBlocks(
+      normalizedProject.info.startBlockId ? [normalizedProject.info.startBlockId] : [],
+      normalizedProject.info.startBlockId ?? null,
+    );
+    setLastValidation([]);
+    resetPreview();
+    // Volontairement PAS de markStudioClean: le travail restaure n'est pas
+    // exporte en ZIP, l'indicateur doit rester "Non sauvegarde".
+    lastAutosavedFingerprintRef.current = null;
+    setRestoreCandidate(null);
+    setStatusMessage("Travail restaure depuis la sauvegarde automatique locale.");
+  };
+
+  const declineRestoreCandidate = () => {
+    setRestoreCandidate(null);
+    setStatusMessage(
+      "Sauvegarde automatique ignoree. Elle sera remplacee a ta prochaine modification.",
+    );
+  };
+
   const openAccountModal = () => {
     setAdminModalOpen(false);
     setAccountModalMessage("");
@@ -3380,6 +3512,32 @@ export function AuthorStudioApp() {
           Mentions legales
         </a>
       </footer>
+
+      {authUser && restoreCandidate && (
+        <div className="confirm-overlay">
+          <div className="confirm-modal">
+            <h2>Travail non exporte detecte</h2>
+            <p>
+              Une sauvegarde automatique locale du{" "}
+              <strong>{new Date(restoreCandidate.savedAt).toLocaleString("fr-FR")}</strong> existe
+              {" "}({restoreCandidate.blocks.length} bloc(s), projet{" "}
+              <strong>{restoreCandidate.project.info.title || "sans titre"}</strong>).
+            </p>
+            <p className="confirm-warning">
+              Restaurer remplace le contenu actuel de l&apos;editeur. Ignorer conserve la
+              sauvegarde jusqu&apos;a ta prochaine modification.
+            </p>
+            <div className="confirm-actions">
+              <button className="button-secondary" onClick={declineRestoreCandidate}>
+                Repartir a neuf
+              </button>
+              <button className="button-primary" onClick={applyRestoreCandidate}>
+                Restaurer
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {newProjectWarningOpen && (
         <div className="confirm-overlay">
