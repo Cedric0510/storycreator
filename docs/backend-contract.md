@@ -71,6 +71,17 @@ Cible pour le backend maison: `Authorization: Bearer <token>`.
 | --------------- | --------------------------------- | ------- | ------ |
 | deleteMyAccount | BFF `POST /api/account/delete`    | -       | { ok } |
 
+### Journalisation client (observabilite)
+
+| Operation      | Implementation actuelle        | Entrees                                        | Sortie |
+| -------------- | ------------------------------ | ---------------------------------------------- | ------ |
+| reportError    | BFF `POST /api/client-log`     | { kind, message, stack?, url?, userAgent?, digest? } | { ok } |
+
+Route anonyme (une erreur peut survenir avant connexion), protegee par le
+rate limit et un payload borne. Aujourd'hui l'entree est reecrite dans stdout
+(logs Vercel, retention courte selon le plan). Le backend maison devra offrir
+un stockage durable et consultable de ces rapports.
+
 ## Regles metier (source: routes BFF + SQL Supabase)
 
 Ces regles vivent aujourd'hui dans les API routes, les RPC `security definer`,
