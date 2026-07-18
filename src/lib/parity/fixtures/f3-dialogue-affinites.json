@@ -1,0 +1,134 @@
+{
+  "name": "f3-dialogue-affinites",
+  "description": "Dialogue avec effets d'affinite, conditions min_affinity, chaine de fallback, puis switch sur affinite (gte) avec route par defaut.",
+  "story": {
+    "schemaVersion": "1.10.0",
+    "project": { "id": "parity-f3", "title": "F3", "slug": "f3", "startBlockId": "t1" },
+    "variables": [{ "id": "var_energie", "name": "energie", "initialValue": 3 }],
+    "itemsCatalog": [],
+    "hero": { "name": "Hero", "lore": "", "startingInventory": [] },
+    "blocks": [
+      { "id": "t1", "type": "title", "name": "Titre", "storyTitle": "F3", "subtitle": "", "nextBlockId": "dlg1" },
+      {
+        "id": "npc1",
+        "type": "npc_profile",
+        "name": "Mira",
+        "npcName": "Mira",
+        "npcLore": "",
+        "initialAffinity": 50,
+        "nextBlockId": null
+      },
+      {
+        "id": "dlg1",
+        "type": "dialogue",
+        "name": "Rencontre",
+        "npcProfileBlockId": "npc1",
+        "startLineId": "L1",
+        "lines": [
+          {
+            "id": "L1",
+            "speaker": "Mira",
+            "text": "Alors ?",
+            "conditions": [],
+            "fallbackLineId": null,
+            "continueTargetBlockId": null,
+            "responses": [
+              {
+                "id": "rA",
+                "label": "A",
+                "text": "Compliment",
+                "targetLineId": "L2",
+                "targetBlockId": null,
+                "effects": [],
+                "affinityEffects": [{ "npcProfileBlockId": "npc1", "delta": 30 }]
+              },
+              {
+                "id": "rB",
+                "label": "B",
+                "text": "Sarcasme",
+                "targetLineId": "L2",
+                "targetBlockId": null,
+                "effects": [{ "variableId": "var_energie", "delta": -1 }],
+                "affinityEffects": [{ "npcProfileBlockId": "npc1", "delta": -20 }]
+              }
+            ]
+          },
+          {
+            "id": "L2",
+            "speaker": "Mira",
+            "text": "Confidence reservee aux amis proches.",
+            "conditions": [{ "type": "min_affinity", "npcProfileBlockId": "npc1", "value": 70 }],
+            "fallbackLineId": "L3",
+            "continueTargetBlockId": "sw1",
+            "responses": []
+          },
+          {
+            "id": "L3",
+            "speaker": "Mira",
+            "text": "Reponse froide.",
+            "conditions": [],
+            "fallbackLineId": null,
+            "continueTargetBlockId": "sw1",
+            "responses": []
+          }
+        ]
+      },
+      {
+        "id": "sw1",
+        "type": "switch",
+        "name": "Routage affinite",
+        "variableId": null,
+        "nextBlockId": "cinLow",
+        "cases": [
+          {
+            "id": "caseHigh",
+            "logic": "and",
+            "conditionType": "mixed",
+            "expectedValue": 0,
+            "choiceConditions": [],
+            "choiceBlockId": null,
+            "choiceOptionId": null,
+            "targetBlockId": "cinHigh",
+            "conditions": [
+              {
+                "id": "condH1",
+                "type": "affinity",
+                "variableId": null,
+                "npcProfileBlockId": "npc1",
+                "choiceBlockId": null,
+                "choiceOptionId": null,
+                "operator": "gte",
+                "expectedValue": 70
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "id": "cinHigh",
+        "type": "cinematic",
+        "name": "Route amicale",
+        "startNarrationId": "nH",
+        "narrations": [{ "id": "nH", "heading": "Amis", "body": "", "continueTargetBlockId": null, "continueTargetNarrationId": null }],
+        "nextBlockId": null
+      },
+      {
+        "id": "cinLow",
+        "type": "cinematic",
+        "name": "Route froide",
+        "startNarrationId": "nL",
+        "narrations": [{ "id": "nL", "heading": "Froid", "body": "", "continueTargetBlockId": null, "continueTargetNarrationId": null }],
+        "nextBlockId": null
+      }
+    ]
+  },
+  "script": [
+    { "type": "continue" },
+    { "type": "pick_response", "responseId": "rA" },
+    { "type": "continue" },
+    { "type": "restart" },
+    { "type": "continue" },
+    { "type": "pick_response", "responseId": "rB" },
+    { "type": "continue" }
+  ]
+}

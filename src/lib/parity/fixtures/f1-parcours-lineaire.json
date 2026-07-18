@@ -1,0 +1,41 @@
+{
+  "name": "f1-parcours-lineaire",
+  "description": "Titre -> fiche hero -> chapitre (effets d'entree) -> cinematique multi-narrations -> fin de chapitre -> fin.",
+  "story": {
+    "schemaVersion": "1.10.0",
+    "project": { "id": "parity-f1", "title": "F1", "slug": "f1", "startBlockId": "t1" },
+    "variables": [{ "id": "var_energie", "name": "energie", "initialValue": 1 }],
+    "itemsCatalog": [],
+    "hero": { "name": "Hero", "lore": "", "startingInventory": [] },
+    "blocks": [
+      { "id": "t1", "type": "title", "name": "Titre", "storyTitle": "F1", "subtitle": "", "nextBlockId": "hp1" },
+      { "id": "hp1", "type": "hero_profile", "name": "Fiche hero", "nextBlockId": "ch1s" },
+      {
+        "id": "ch1s",
+        "type": "chapter_start",
+        "name": "Debut chapitre 1",
+        "chapterTitle": "Chapitre 1",
+        "entryEffects": [{ "variableId": "var_energie", "delta": 2 }],
+        "nextBlockId": "cin1"
+      },
+      {
+        "id": "cin1",
+        "type": "cinematic",
+        "name": "Scene 1",
+        "startNarrationId": "n1",
+        "narrations": [
+          { "id": "n1", "heading": "Un", "body": "", "continueTargetBlockId": null, "continueTargetNarrationId": null },
+          { "id": "n2", "heading": "Deux", "body": "", "continueTargetBlockId": "ch1e", "continueTargetNarrationId": null }
+        ],
+        "nextBlockId": null
+      },
+      { "id": "ch1e", "type": "chapter_end", "name": "Fin chapitre 1", "nextBlockId": null }
+    ]
+  },
+  "script": [
+    { "type": "continue" },
+    { "type": "continue" },
+    { "type": "continue" },
+    { "type": "continue" }
+  ]
+}

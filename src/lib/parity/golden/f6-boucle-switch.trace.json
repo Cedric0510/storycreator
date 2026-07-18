@@ -1,0 +1,43 @@
+{
+  "initial": {
+    "blockId": "t1",
+    "blockType": "title",
+    "dialogueLineId": null,
+    "cinematicNarrationId": null,
+    "ended": false,
+    "variables": {
+      "var_tours": 0
+    },
+    "choiceHistory": {},
+    "inventory": {},
+    "npcAffinity": {},
+    "equippedInventoryItemId": null,
+    "interactedObjectIds": [],
+    "objectVisibility": {},
+    "buttonSequenceInput": []
+  },
+  "steps": [
+    {
+      "action": {
+        "type": "continue"
+      },
+      "state": {
+        "blockId": null,
+        "blockType": null,
+        "dialogueLineId": null,
+        "cinematicNarrationId": null,
+        "ended": true,
+        "variables": {
+          "var_tours": 2
+        },
+        "choiceHistory": {},
+        "inventory": {},
+        "npcAffinity": {},
+        "equippedInventoryItemId": null,
+        "interactedObjectIds": [],
+        "objectVisibility": {},
+        "buttonSequenceInput": []
+      }
+    }
+  ]
+}

@@ -1,0 +1,196 @@
+{
+  "name": "f5-gameplay-complet",
+  "description": "Gameplay complet: inventaire de depart du hero, collectible, cle de scene sur serrure, item d'inventaire consomme sur serrure go_to_next, puis sequence de boutons (echec et succes).",
+  "story": {
+    "schemaVersion": "1.10.0",
+    "project": { "id": "parity-f5", "title": "F5", "slug": "f5", "startBlockId": "t1" },
+    "variables": [{ "id": "var_energie", "name": "energie", "initialValue": 0 }],
+    "itemsCatalog": [
+      { "id": "item_cle", "name": "Cle doree", "description": "", "iconPath": null }
+    ],
+    "hero": {
+      "name": "Hero",
+      "lore": "",
+      "startingInventory": [{ "id": "si1", "itemId": "item_cle", "itemName": "Cle doree", "quantity": 1 }]
+    },
+    "blocks": [
+      { "id": "t1", "type": "title", "name": "Titre", "storyTitle": "F5", "subtitle": "", "nextBlockId": "gp1" },
+      {
+        "id": "gp1",
+        "type": "gameplay",
+        "name": "Salle aux serrures",
+        "mode": "point_and_click",
+        "objective": "Sortir",
+        "buttonSequence": [],
+        "buttonSequenceSuccessBlockId": null,
+        "buttonSequenceFailureBlockId": null,
+        "completionEffects": [{ "variableId": "var_energie", "delta": 10 }],
+        "nextBlockId": null,
+        "objects": [
+          {
+            "id": "colG",
+            "name": "Gemme",
+            "objectType": "collectible",
+            "visibleByDefault": true,
+            "grantItemId": "item_gemme",
+            "linkedKeyId": null,
+            "lockInputMode": "scene_key",
+            "requiredItemId": null,
+            "consumeRequiredItem": false,
+            "targetBlockId": null,
+            "unlockEffect": "disappear",
+            "lockedMessage": "",
+            "successMessage": "",
+            "effects": [{ "variableId": "var_energie", "delta": 1 }]
+          },
+          {
+            "id": "keyK",
+            "name": "Cle rouillee",
+            "objectType": "key",
+            "visibleByDefault": true,
+            "grantItemId": null,
+            "linkedKeyId": null,
+            "lockInputMode": "scene_key",
+            "requiredItemId": null,
+            "consumeRequiredItem": false,
+            "targetBlockId": null,
+            "unlockEffect": "disappear",
+            "lockedMessage": "",
+            "successMessage": "",
+            "effects": []
+          },
+          {
+            "id": "lockL1",
+            "name": "Coffre",
+            "objectType": "lock",
+            "visibleByDefault": true,
+            "grantItemId": null,
+            "linkedKeyId": "keyK",
+            "lockInputMode": "scene_key",
+            "requiredItemId": null,
+            "consumeRequiredItem": false,
+            "targetBlockId": null,
+            "unlockEffect": "disappear",
+            "lockedMessage": "Il faut une cle.",
+            "successMessage": "Le coffre s'ouvre.",
+            "effects": [{ "variableId": "var_energie", "delta": 2 }]
+          },
+          {
+            "id": "lockL2",
+            "name": "Porte doree",
+            "objectType": "lock",
+            "visibleByDefault": true,
+            "grantItemId": null,
+            "linkedKeyId": null,
+            "lockInputMode": "inventory_item",
+            "requiredItemId": "item_cle",
+            "consumeRequiredItem": true,
+            "targetBlockId": "gp2",
+            "unlockEffect": "go_to_next",
+            "lockedMessage": "La porte reste fermee.",
+            "successMessage": "La porte s'ouvre.",
+            "effects": []
+          }
+        ]
+      },
+      {
+        "id": "gp2",
+        "type": "gameplay",
+        "name": "Salle du code",
+        "mode": "point_and_click",
+        "objective": "Entrer le code",
+        "buttonSequence": ["b1", "b2"],
+        "buttonSequenceSuccessBlockId": "cinOK",
+        "buttonSequenceFailureBlockId": "cinKO",
+        "completionEffects": [{ "variableId": "var_energie", "delta": 100 }],
+        "nextBlockId": null,
+        "objects": [
+          {
+            "id": "b1",
+            "name": "Bouton 1",
+            "objectType": "button",
+            "visibleByDefault": true,
+            "grantItemId": null,
+            "linkedKeyId": null,
+            "lockInputMode": "scene_key",
+            "requiredItemId": null,
+            "consumeRequiredItem": false,
+            "targetBlockId": null,
+            "unlockEffect": "disappear",
+            "lockedMessage": "",
+            "successMessage": "",
+            "effects": []
+          },
+          {
+            "id": "b2",
+            "name": "Bouton 2",
+            "objectType": "button",
+            "visibleByDefault": true,
+            "grantItemId": null,
+            "linkedKeyId": null,
+            "lockInputMode": "scene_key",
+            "requiredItemId": null,
+            "consumeRequiredItem": false,
+            "targetBlockId": null,
+            "unlockEffect": "disappear",
+            "lockedMessage": "",
+            "successMessage": "",
+            "effects": []
+          },
+          {
+            "id": "b3",
+            "name": "Bouton 3",
+            "objectType": "button",
+            "visibleByDefault": true,
+            "grantItemId": null,
+            "linkedKeyId": null,
+            "lockInputMode": "scene_key",
+            "requiredItemId": null,
+            "consumeRequiredItem": false,
+            "targetBlockId": null,
+            "unlockEffect": "disappear",
+            "lockedMessage": "",
+            "successMessage": "",
+            "effects": [{ "variableId": "var_energie", "delta": 1 }]
+          }
+        ]
+      },
+      {
+        "id": "cinOK",
+        "type": "cinematic",
+        "name": "Succes",
+        "startNarrationId": "nOK",
+        "narrations": [{ "id": "nOK", "heading": "Ouvert", "body": "", "continueTargetBlockId": null, "continueTargetNarrationId": null }],
+        "nextBlockId": null
+      },
+      {
+        "id": "cinKO",
+        "type": "cinematic",
+        "name": "Echec",
+        "startNarrationId": "nKO",
+        "narrations": [{ "id": "nKO", "heading": "Alarme", "body": "", "continueTargetBlockId": null, "continueTargetNarrationId": null }],
+        "nextBlockId": null
+      }
+    ]
+  },
+  "script": [
+    { "type": "continue" },
+    { "type": "continue" },
+    { "type": "pick_object", "objectId": "lockL1" },
+    { "type": "pick_object", "objectId": "colG" },
+    { "type": "drop_key_on_lock", "keyId": "keyK", "lockId": "lockL1" },
+    { "type": "drop_inventory_item_on_lock", "itemId": "item_gemme", "lockId": "lockL2" },
+    { "type": "equip_inventory_item", "itemId": "item_cle" },
+    { "type": "drop_inventory_item_on_lock", "itemId": "item_cle", "lockId": "lockL2" },
+    { "type": "pick_object", "objectId": "b1" },
+    { "type": "pick_object", "objectId": "b3" },
+    { "type": "restart" },
+    { "type": "continue" },
+    { "type": "pick_object", "objectId": "colG" },
+    { "type": "drop_key_on_lock", "keyId": "keyK", "lockId": "lockL1" },
+    { "type": "equip_inventory_item", "itemId": "item_cle" },
+    { "type": "drop_inventory_item_on_lock", "itemId": "item_cle", "lockId": "lockL2" },
+    { "type": "pick_object", "objectId": "b1" },
+    { "type": "pick_object", "objectId": "b2" }
+  ]
+}

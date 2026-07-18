@@ -1,0 +1,103 @@
+{
+  "name": "f4-switch-legacy",
+  "description": "Switch au format legacy: cas 'value' sur le variableId du bloc et cas 'choiceConditions', sans tableau conditions moderne.",
+  "story": {
+    "schemaVersion": "1.10.0",
+    "project": { "id": "parity-f4", "title": "F4", "slug": "f4", "startBlockId": "t1" },
+    "variables": [{ "id": "var_courage", "name": "courage", "initialValue": 0 }],
+    "itemsCatalog": [],
+    "hero": { "name": "Hero", "lore": "", "startingInventory": [] },
+    "blocks": [
+      { "id": "t1", "type": "title", "name": "Titre", "storyTitle": "F4", "subtitle": "", "nextBlockId": "c1" },
+      {
+        "id": "c1",
+        "type": "choice",
+        "name": "Decision",
+        "displayMode": "text",
+        "prompt": "Choisis.",
+        "choices": [
+          {
+            "id": "optA",
+            "label": "A",
+            "text": "Courage",
+            "targetBlockId": "sw1",
+            "effects": [{ "variableId": "var_courage", "delta": 2 }],
+            "heroMemoryVariableId": null,
+            "heroMemoryValue": 0
+          },
+          {
+            "id": "optB",
+            "label": "B",
+            "text": "Prudence",
+            "targetBlockId": "sw1",
+            "effects": [],
+            "heroMemoryVariableId": null,
+            "heroMemoryValue": 0
+          }
+        ]
+      },
+      {
+        "id": "sw1",
+        "type": "switch",
+        "name": "Routage legacy",
+        "variableId": "var_courage",
+        "nextBlockId": "cinDEF",
+        "cases": [
+          {
+            "id": "caseVal",
+            "logic": "and",
+            "conditionType": "value",
+            "expectedValue": 2,
+            "conditions": [],
+            "choiceConditions": [],
+            "choiceBlockId": null,
+            "choiceOptionId": null,
+            "targetBlockId": "cinVAL"
+          },
+          {
+            "id": "caseChoice",
+            "logic": "and",
+            "conditionType": "choice",
+            "expectedValue": 0,
+            "conditions": [],
+            "choiceConditions": [{ "id": "cc1", "choiceBlockId": "c1", "choiceOptionId": "optB" }],
+            "choiceBlockId": null,
+            "choiceOptionId": null,
+            "targetBlockId": "cinCHOICE"
+          }
+        ]
+      },
+      {
+        "id": "cinVAL",
+        "type": "cinematic",
+        "name": "Route valeur",
+        "startNarrationId": "nV",
+        "narrations": [{ "id": "nV", "heading": "Valeur", "body": "", "continueTargetBlockId": null, "continueTargetNarrationId": null }],
+        "nextBlockId": null
+      },
+      {
+        "id": "cinCHOICE",
+        "type": "cinematic",
+        "name": "Route choix",
+        "startNarrationId": "nC",
+        "narrations": [{ "id": "nC", "heading": "Choix", "body": "", "continueTargetBlockId": null, "continueTargetNarrationId": null }],
+        "nextBlockId": null
+      },
+      {
+        "id": "cinDEF",
+        "type": "cinematic",
+        "name": "Route defaut",
+        "startNarrationId": "nD",
+        "narrations": [{ "id": "nD", "heading": "Defaut", "body": "", "continueTargetBlockId": null, "continueTargetNarrationId": null }],
+        "nextBlockId": null
+      }
+    ]
+  },
+  "script": [
+    { "type": "continue" },
+    { "type": "pick_choice", "choiceId": "optA" },
+    { "type": "restart" },
+    { "type": "continue" },
+    { "type": "pick_choice", "choiceId": "optB" }
+  ]
+}

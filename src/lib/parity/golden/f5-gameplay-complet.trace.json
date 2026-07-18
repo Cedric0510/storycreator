@@ -1,0 +1,580 @@
+{
+  "initial": {
+    "blockId": "t1",
+    "blockType": "title",
+    "dialogueLineId": null,
+    "cinematicNarrationId": null,
+    "ended": false,
+    "variables": {
+      "var_energie": 0
+    },
+    "choiceHistory": {},
+    "inventory": {
+      "item_cle": 1
+    },
+    "npcAffinity": {},
+    "equippedInventoryItemId": null,
+    "interactedObjectIds": [],
+    "objectVisibility": {},
+    "buttonSequenceInput": []
+  },
+  "steps": [
+    {
+      "action": {
+        "type": "continue"
+      },
+      "state": {
+        "blockId": "gp1",
+        "blockType": "gameplay",
+        "dialogueLineId": null,
+        "cinematicNarrationId": null,
+        "ended": false,
+        "variables": {
+          "var_energie": 0
+        },
+        "choiceHistory": {},
+        "inventory": {
+          "item_cle": 1
+        },
+        "npcAffinity": {},
+        "equippedInventoryItemId": null,
+        "interactedObjectIds": [],
+        "objectVisibility": {
+          "colG": true,
+          "keyK": true,
+          "lockL1": true,
+          "lockL2": true
+        },
+        "buttonSequenceInput": []
+      }
+    },
+    {
+      "action": {
+        "type": "continue"
+      },
+      "state": {
+        "blockId": "gp1",
+        "blockType": "gameplay",
+        "dialogueLineId": null,
+        "cinematicNarrationId": null,
+        "ended": false,
+        "variables": {
+          "var_energie": 0
+        },
+        "choiceHistory": {},
+        "inventory": {
+          "item_cle": 1
+        },
+        "npcAffinity": {},
+        "equippedInventoryItemId": null,
+        "interactedObjectIds": [],
+        "objectVisibility": {
+          "colG": true,
+          "keyK": true,
+          "lockL1": true,
+          "lockL2": true
+        },
+        "buttonSequenceInput": []
+      }
+    },
+    {
+      "action": {
+        "type": "pick_object",
+        "objectId": "lockL1"
+      },
+      "state": {
+        "blockId": "gp1",
+        "blockType": "gameplay",
+        "dialogueLineId": null,
+        "cinematicNarrationId": null,
+        "ended": false,
+        "variables": {
+          "var_energie": 0
+        },
+        "choiceHistory": {},
+        "inventory": {
+          "item_cle": 1
+        },
+        "npcAffinity": {},
+        "equippedInventoryItemId": null,
+        "interactedObjectIds": [],
+        "objectVisibility": {
+          "colG": true,
+          "keyK": true,
+          "lockL1": true,
+          "lockL2": true
+        },
+        "buttonSequenceInput": []
+      }
+    },
+    {
+      "action": {
+        "type": "pick_object",
+        "objectId": "colG"
+      },
+      "state": {
+        "blockId": "gp1",
+        "blockType": "gameplay",
+        "dialogueLineId": null,
+        "cinematicNarrationId": null,
+        "ended": false,
+        "variables": {
+          "var_energie": 1
+        },
+        "choiceHistory": {},
+        "inventory": {
+          "item_cle": 1,
+          "item_gemme": 1
+        },
+        "npcAffinity": {},
+        "equippedInventoryItemId": null,
+        "interactedObjectIds": [
+          "colG"
+        ],
+        "objectVisibility": {
+          "colG": false,
+          "keyK": true,
+          "lockL1": true,
+          "lockL2": true
+        },
+        "buttonSequenceInput": []
+      }
+    },
+    {
+      "action": {
+        "type": "drop_key_on_lock",
+        "keyId": "keyK",
+        "lockId": "lockL1"
+      },
+      "state": {
+        "blockId": "gp1",
+        "blockType": "gameplay",
+        "dialogueLineId": null,
+        "cinematicNarrationId": null,
+        "ended": false,
+        "variables": {
+          "var_energie": 3
+        },
+        "choiceHistory": {},
+        "inventory": {
+          "item_cle": 1,
+          "item_gemme": 1
+        },
+        "npcAffinity": {},
+        "equippedInventoryItemId": null,
+        "interactedObjectIds": [
+          "colG",
+          "keyK",
+          "lockL1"
+        ],
+        "objectVisibility": {
+          "colG": false,
+          "keyK": false,
+          "lockL1": false,
+          "lockL2": true
+        },
+        "buttonSequenceInput": []
+      }
+    },
+    {
+      "action": {
+        "type": "drop_inventory_item_on_lock",
+        "itemId": "item_gemme",
+        "lockId": "lockL2"
+      },
+      "state": {
+        "blockId": "gp1",
+        "blockType": "gameplay",
+        "dialogueLineId": null,
+        "cinematicNarrationId": null,
+        "ended": false,
+        "variables": {
+          "var_energie": 3
+        },
+        "choiceHistory": {},
+        "inventory": {
+          "item_cle": 1,
+          "item_gemme": 1
+        },
+        "npcAffinity": {},
+        "equippedInventoryItemId": null,
+        "interactedObjectIds": [
+          "colG",
+          "keyK",
+          "lockL1"
+        ],
+        "objectVisibility": {
+          "colG": false,
+          "keyK": false,
+          "lockL1": false,
+          "lockL2": true
+        },
+        "buttonSequenceInput": []
+      }
+    },
+    {
+      "action": {
+        "type": "equip_inventory_item",
+        "itemId": "item_cle"
+      },
+      "state": {
+        "blockId": "gp1",
+        "blockType": "gameplay",
+        "dialogueLineId": null,
+        "cinematicNarrationId": null,
+        "ended": false,
+        "variables": {
+          "var_energie": 3
+        },
+        "choiceHistory": {},
+        "inventory": {
+          "item_cle": 1,
+          "item_gemme": 1
+        },
+        "npcAffinity": {},
+        "equippedInventoryItemId": "item_cle",
+        "interactedObjectIds": [
+          "colG",
+          "keyK",
+          "lockL1"
+        ],
+        "objectVisibility": {
+          "colG": false,
+          "keyK": false,
+          "lockL1": false,
+          "lockL2": true
+        },
+        "buttonSequenceInput": []
+      }
+    },
+    {
+      "action": {
+        "type": "drop_inventory_item_on_lock",
+        "itemId": "item_cle",
+        "lockId": "lockL2"
+      },
+      "state": {
+        "blockId": "gp2",
+        "blockType": "gameplay",
+        "dialogueLineId": null,
+        "cinematicNarrationId": null,
+        "ended": false,
+        "variables": {
+          "var_energie": 13
+        },
+        "choiceHistory": {},
+        "inventory": {
+          "item_gemme": 1
+        },
+        "npcAffinity": {},
+        "equippedInventoryItemId": null,
+        "interactedObjectIds": [],
+        "objectVisibility": {
+          "b1": true,
+          "b2": true,
+          "b3": true
+        },
+        "buttonSequenceInput": []
+      }
+    },
+    {
+      "action": {
+        "type": "pick_object",
+        "objectId": "b1"
+      },
+      "state": {
+        "blockId": "gp2",
+        "blockType": "gameplay",
+        "dialogueLineId": null,
+        "cinematicNarrationId": null,
+        "ended": false,
+        "variables": {
+          "var_energie": 13
+        },
+        "choiceHistory": {},
+        "inventory": {
+          "item_gemme": 1
+        },
+        "npcAffinity": {},
+        "equippedInventoryItemId": null,
+        "interactedObjectIds": [],
+        "objectVisibility": {
+          "b1": true,
+          "b2": true,
+          "b3": true
+        },
+        "buttonSequenceInput": [
+          "b1"
+        ]
+      }
+    },
+    {
+      "action": {
+        "type": "pick_object",
+        "objectId": "b3"
+      },
+      "state": {
+        "blockId": "cinKO",
+        "blockType": "cinematic",
+        "dialogueLineId": null,
+        "cinematicNarrationId": "nKO",
+        "ended": false,
+        "variables": {
+          "var_energie": 14
+        },
+        "choiceHistory": {},
+        "inventory": {
+          "item_gemme": 1
+        },
+        "npcAffinity": {},
+        "equippedInventoryItemId": null,
+        "interactedObjectIds": [],
+        "objectVisibility": {},
+        "buttonSequenceInput": []
+      }
+    },
+    {
+      "action": {
+        "type": "restart"
+      },
+      "state": {
+        "blockId": "t1",
+        "blockType": "title",
+        "dialogueLineId": null,
+        "cinematicNarrationId": null,
+        "ended": false,
+        "variables": {
+          "var_energie": 0
+        },
+        "choiceHistory": {},
+        "inventory": {
+          "item_cle": 1
+        },
+        "npcAffinity": {},
+        "equippedInventoryItemId": null,
+        "interactedObjectIds": [],
+        "objectVisibility": {},
+        "buttonSequenceInput": []
+      }
+    },
+    {
+      "action": {
+        "type": "continue"
+      },
+      "state": {
+        "blockId": "gp1",
+        "blockType": "gameplay",
+        "dialogueLineId": null,
+        "cinematicNarrationId": null,
+        "ended": false,
+        "variables": {
+          "var_energie": 0
+        },
+        "choiceHistory": {},
+        "inventory": {
+          "item_cle": 1
+        },
+        "npcAffinity": {},
+        "equippedInventoryItemId": null,
+        "interactedObjectIds": [],
+        "objectVisibility": {
+          "colG": true,
+          "keyK": true,
+          "lockL1": true,
+          "lockL2": true
+        },
+        "buttonSequenceInput": []
+      }
+    },
+    {
+      "action": {
+        "type": "pick_object",
+        "objectId": "colG"
+      },
+      "state": {
+        "blockId": "gp1",
+        "blockType": "gameplay",
+        "dialogueLineId": null,
+        "cinematicNarrationId": null,
+        "ended": false,
+        "variables": {
+          "var_energie": 1
+        },
+        "choiceHistory": {},
+        "inventory": {
+          "item_cle": 1,
+          "item_gemme": 1
+        },
+        "npcAffinity": {},
+        "equippedInventoryItemId": null,
+        "interactedObjectIds": [
+          "colG"
+        ],
+        "objectVisibility": {
+          "colG": false,
+          "keyK": true,
+          "lockL1": true,
+          "lockL2": true
+        },
+        "buttonSequenceInput": []
+      }
+    },
+    {
+      "action": {
+        "type": "drop_key_on_lock",
+        "keyId": "keyK",
+        "lockId": "lockL1"
+      },
+      "state": {
+        "blockId": "gp1",
+        "blockType": "gameplay",
+        "dialogueLineId": null,
+        "cinematicNarrationId": null,
+        "ended": false,
+        "variables": {
+          "var_energie": 3
+        },
+        "choiceHistory": {},
+        "inventory": {
+          "item_cle": 1,
+          "item_gemme": 1
+        },
+        "npcAffinity": {},
+        "equippedInventoryItemId": null,
+        "interactedObjectIds": [
+          "colG",
+          "keyK",
+          "lockL1"
+        ],
+        "objectVisibility": {
+          "colG": false,
+          "keyK": false,
+          "lockL1": false,
+          "lockL2": true
+        },
+        "buttonSequenceInput": []
+      }
+    },
+    {
+      "action": {
+        "type": "equip_inventory_item",
+        "itemId": "item_cle"
+      },
+      "state": {
+        "blockId": "gp1",
+        "blockType": "gameplay",
+        "dialogueLineId": null,
+        "cinematicNarrationId": null,
+        "ended": false,
+        "variables": {
+          "var_energie": 3
+        },
+        "choiceHistory": {},
+        "inventory": {
+          "item_cle": 1,
+          "item_gemme": 1
+        },
+        "npcAffinity": {},
+        "equippedInventoryItemId": "item_cle",
+        "interactedObjectIds": [
+          "colG",
+          "keyK",
+          "lockL1"
+        ],
+        "objectVisibility": {
+          "colG": false,
+          "keyK": false,
+          "lockL1": false,
+          "lockL2": true
+        },
+        "buttonSequenceInput": []
+      }
+    },
+    {
+      "action": {
+        "type": "drop_inventory_item_on_lock",
+        "itemId": "item_cle",
+        "lockId": "lockL2"
+      },
+      "state": {
+        "blockId": "gp2",
+        "blockType": "gameplay",
+        "dialogueLineId": null,
+        "cinematicNarrationId": null,
+        "ended": false,
+        "variables": {
+          "var_energie": 13
+        },
+        "choiceHistory": {},
+        "inventory": {
+          "item_gemme": 1
+        },
+        "npcAffinity": {},
+        "equippedInventoryItemId": null,
+        "interactedObjectIds": [],
+        "objectVisibility": {
+          "b1": true,
+          "b2": true,
+          "b3": true
+        },
+        "buttonSequenceInput": []
+      }
+    },
+    {
+      "action": {
+        "type": "pick_object",
+        "objectId": "b1"
+      },
+      "state": {
+        "blockId": "gp2",
+        "blockType": "gameplay",
+        "dialogueLineId": null,
+        "cinematicNarrationId": null,
+        "ended": false,
+        "variables": {
+          "var_energie": 13
+        },
+        "choiceHistory": {},
+        "inventory": {
+          "item_gemme": 1
+        },
+        "npcAffinity": {},
+        "equippedInventoryItemId": null,
+        "interactedObjectIds": [],
+        "objectVisibility": {
+          "b1": true,
+          "b2": true,
+          "b3": true
+        },
+        "buttonSequenceInput": [
+          "b1"
+        ]
+      }
+    },
+    {
+      "action": {
+        "type": "pick_object",
+        "objectId": "b2"
+      },
+      "state": {
+        "blockId": "cinOK",
+        "blockType": "cinematic",
+        "dialogueLineId": null,
+        "cinematicNarrationId": "nOK",
+        "ended": false,
+        "variables": {
+          "var_energie": 113
+        },
+        "choiceHistory": {},
+        "inventory": {
+          "item_gemme": 1
+        },
+        "npcAffinity": {},
+        "equippedInventoryItemId": null,
+        "interactedObjectIds": [],
+        "objectVisibility": {},
+        "buttonSequenceInput": []
+      }
+    }
+  ]
+}

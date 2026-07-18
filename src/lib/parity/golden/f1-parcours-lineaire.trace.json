@@ -1,0 +1,109 @@
+{
+  "initial": {
+    "blockId": "t1",
+    "blockType": "title",
+    "dialogueLineId": null,
+    "cinematicNarrationId": null,
+    "ended": false,
+    "variables": {
+      "var_energie": 1
+    },
+    "choiceHistory": {},
+    "inventory": {},
+    "npcAffinity": {},
+    "equippedInventoryItemId": null,
+    "interactedObjectIds": [],
+    "objectVisibility": {},
+    "buttonSequenceInput": []
+  },
+  "steps": [
+    {
+      "action": {
+        "type": "continue"
+      },
+      "state": {
+        "blockId": "hp1",
+        "blockType": "hero_profile",
+        "dialogueLineId": null,
+        "cinematicNarrationId": null,
+        "ended": false,
+        "variables": {
+          "var_energie": 1
+        },
+        "choiceHistory": {},
+        "inventory": {},
+        "npcAffinity": {},
+        "equippedInventoryItemId": null,
+        "interactedObjectIds": [],
+        "objectVisibility": {},
+        "buttonSequenceInput": []
+      }
+    },
+    {
+      "action": {
+        "type": "continue"
+      },
+      "state": {
+        "blockId": "cin1",
+        "blockType": "cinematic",
+        "dialogueLineId": null,
+        "cinematicNarrationId": "n1",
+        "ended": false,
+        "variables": {
+          "var_energie": 3
+        },
+        "choiceHistory": {},
+        "inventory": {},
+        "npcAffinity": {},
+        "equippedInventoryItemId": null,
+        "interactedObjectIds": [],
+        "objectVisibility": {},
+        "buttonSequenceInput": []
+      }
+    },
+    {
+      "action": {
+        "type": "continue"
+      },
+      "state": {
+        "blockId": "cin1",
+        "blockType": "cinematic",
+        "dialogueLineId": null,
+        "cinematicNarrationId": "n2",
+        "ended": false,
+        "variables": {
+          "var_energie": 3
+        },
+        "choiceHistory": {},
+        "inventory": {},
+        "npcAffinity": {},
+        "equippedInventoryItemId": null,
+        "interactedObjectIds": [],
+        "objectVisibility": {},
+        "buttonSequenceInput": []
+      }
+    },
+    {
+      "action": {
+        "type": "continue"
+      },
+      "state": {
+        "blockId": null,
+        "blockType": null,
+        "dialogueLineId": null,
+        "cinematicNarrationId": null,
+        "ended": true,
+        "variables": {
+          "var_energie": 3
+        },
+        "choiceHistory": {},
+        "inventory": {},
+        "npcAffinity": {},
+        "equippedInventoryItemId": null,
+        "interactedObjectIds": [],
+        "objectVisibility": {},
+        "buttonSequenceInput": []
+      }
+    }
+  ]
+}

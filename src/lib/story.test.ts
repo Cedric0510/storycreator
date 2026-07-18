@@ -40,7 +40,7 @@ describe("story gameplay schema", () => {
     expect(normalized.completionEffects).toEqual([]);
   });
 
-  it("auto-completes button sequence with missing button ids", () => {
+  it("preserves the exported button sequence (buttons hors sequence = leurres)", () => {
     const gameplay = createBlock("gameplay", { x: 0, y: 0 }) as GameplayBlock;
     gameplay.objects = [
       {
@@ -113,11 +113,13 @@ describe("story gameplay schema", () => {
         effects: [],
       },
     ];
-    gameplay.buttonSequence = ["btn-2"];
+    // btn-2 dedouble, id inconnu filtre; btn-1 et btn-3 restent des leurres
+    // (le lecteur applique la sequence telle quelle: leurre presse = echec).
+    gameplay.buttonSequence = ["btn-2", "btn-2", "btn-fantome"];
 
     const normalized = normalizeGameplayBlock(gameplay);
 
-    expect(normalized.buttonSequence).toEqual(["btn-2", "btn-1", "btn-3"]);
+    expect(normalized.buttonSequence).toEqual(["btn-2"]);
   });
 
   it("reports gameplay validation issues for empty objects", () => {

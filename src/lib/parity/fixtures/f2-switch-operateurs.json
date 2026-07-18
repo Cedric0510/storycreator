@@ -1,0 +1,178 @@
+{
+  "name": "f2-switch-operateurs",
+  "description": "Choix (effets + memoire hero) puis switch a operateurs (gt, gte, ne, lt, lte) et logiques and/or.",
+  "story": {
+    "schemaVersion": "1.10.0",
+    "project": { "id": "parity-f2", "title": "F2", "slug": "f2", "startBlockId": "t1" },
+    "variables": [
+      { "id": "var_courage", "name": "courage", "initialValue": 0 },
+      { "id": "var_mem", "name": "memoire", "initialValue": 0 }
+    ],
+    "itemsCatalog": [],
+    "hero": { "name": "Hero", "lore": "", "startingInventory": [] },
+    "blocks": [
+      { "id": "t1", "type": "title", "name": "Titre", "storyTitle": "F2", "subtitle": "", "nextBlockId": "c1" },
+      {
+        "id": "c1",
+        "type": "choice",
+        "name": "Decision",
+        "displayMode": "text",
+        "prompt": "Que faire ?",
+        "choices": [
+          {
+            "id": "optA",
+            "label": "A",
+            "text": "Foncer",
+            "targetBlockId": "sw1",
+            "effects": [{ "variableId": "var_courage", "delta": 2 }],
+            "heroMemoryVariableId": null,
+            "heroMemoryValue": 0
+          },
+          {
+            "id": "optB",
+            "label": "B",
+            "text": "Reflechir",
+            "targetBlockId": "sw1",
+            "effects": [],
+            "heroMemoryVariableId": "var_mem",
+            "heroMemoryValue": 5
+          }
+        ]
+      },
+      {
+        "id": "sw1",
+        "type": "switch",
+        "name": "Routage",
+        "variableId": null,
+        "nextBlockId": "cinDEF",
+        "cases": [
+          {
+            "id": "caseA",
+            "logic": "and",
+            "conditionType": "mixed",
+            "expectedValue": 0,
+            "choiceConditions": [],
+            "choiceBlockId": null,
+            "choiceOptionId": null,
+            "targetBlockId": "cinA",
+            "conditions": [
+              {
+                "id": "condA1",
+                "type": "variable",
+                "variableId": "var_courage",
+                "npcProfileBlockId": null,
+                "choiceBlockId": null,
+                "choiceOptionId": null,
+                "operator": "gt",
+                "expectedValue": 1
+              }
+            ]
+          },
+          {
+            "id": "caseB",
+            "logic": "and",
+            "conditionType": "mixed",
+            "expectedValue": 0,
+            "choiceConditions": [],
+            "choiceBlockId": null,
+            "choiceOptionId": null,
+            "targetBlockId": "cinB",
+            "conditions": [
+              {
+                "id": "condB1",
+                "type": "variable",
+                "variableId": "var_mem",
+                "npcProfileBlockId": null,
+                "choiceBlockId": null,
+                "choiceOptionId": null,
+                "operator": "gte",
+                "expectedValue": 5
+              },
+              {
+                "id": "condB2",
+                "type": "choice",
+                "variableId": null,
+                "npcProfileBlockId": null,
+                "choiceBlockId": "c1",
+                "choiceOptionId": "optA",
+                "operator": "ne",
+                "expectedValue": 0
+              }
+            ]
+          },
+          {
+            "id": "caseC",
+            "logic": "or",
+            "conditionType": "mixed",
+            "expectedValue": 0,
+            "choiceConditions": [],
+            "choiceBlockId": null,
+            "choiceOptionId": null,
+            "targetBlockId": "cinC",
+            "conditions": [
+              {
+                "id": "condC1",
+                "type": "variable",
+                "variableId": "var_courage",
+                "npcProfileBlockId": null,
+                "choiceBlockId": null,
+                "choiceOptionId": null,
+                "operator": "lt",
+                "expectedValue": 0
+              },
+              {
+                "id": "condC2",
+                "type": "variable",
+                "variableId": "var_mem",
+                "npcProfileBlockId": null,
+                "choiceBlockId": null,
+                "choiceOptionId": null,
+                "operator": "lte",
+                "expectedValue": -1
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "id": "cinA",
+        "type": "cinematic",
+        "name": "Route A",
+        "startNarrationId": "nA",
+        "narrations": [{ "id": "nA", "heading": "A", "body": "", "continueTargetBlockId": null, "continueTargetNarrationId": null }],
+        "nextBlockId": null
+      },
+      {
+        "id": "cinB",
+        "type": "cinematic",
+        "name": "Route B",
+        "startNarrationId": "nB",
+        "narrations": [{ "id": "nB", "heading": "B", "body": "", "continueTargetBlockId": null, "continueTargetNarrationId": null }],
+        "nextBlockId": null
+      },
+      {
+        "id": "cinC",
+        "type": "cinematic",
+        "name": "Route C",
+        "startNarrationId": "nC",
+        "narrations": [{ "id": "nC", "heading": "C", "body": "", "continueTargetBlockId": null, "continueTargetNarrationId": null }],
+        "nextBlockId": null
+      },
+      {
+        "id": "cinDEF",
+        "type": "cinematic",
+        "name": "Route defaut",
+        "startNarrationId": "nD",
+        "narrations": [{ "id": "nD", "heading": "D", "body": "", "continueTargetBlockId": null, "continueTargetNarrationId": null }],
+        "nextBlockId": null
+      }
+    ]
+  },
+  "script": [
+    { "type": "continue" },
+    { "type": "pick_choice", "choiceId": "optA" },
+    { "type": "restart" },
+    { "type": "continue" },
+    { "type": "pick_choice", "choiceId": "optB" }
+  ]
+}

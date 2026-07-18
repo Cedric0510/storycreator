@@ -1,0 +1,137 @@
+{
+  "initial": {
+    "blockId": "t1",
+    "blockType": "title",
+    "dialogueLineId": null,
+    "cinematicNarrationId": null,
+    "ended": false,
+    "variables": {
+      "var_courage": 0
+    },
+    "choiceHistory": {},
+    "inventory": {},
+    "npcAffinity": {},
+    "equippedInventoryItemId": null,
+    "interactedObjectIds": [],
+    "objectVisibility": {},
+    "buttonSequenceInput": []
+  },
+  "steps": [
+    {
+      "action": {
+        "type": "continue"
+      },
+      "state": {
+        "blockId": "c1",
+        "blockType": "choice",
+        "dialogueLineId": null,
+        "cinematicNarrationId": null,
+        "ended": false,
+        "variables": {
+          "var_courage": 0
+        },
+        "choiceHistory": {},
+        "inventory": {},
+        "npcAffinity": {},
+        "equippedInventoryItemId": null,
+        "interactedObjectIds": [],
+        "objectVisibility": {},
+        "buttonSequenceInput": []
+      }
+    },
+    {
+      "action": {
+        "type": "pick_choice",
+        "choiceId": "optA"
+      },
+      "state": {
+        "blockId": "cinVAL",
+        "blockType": "cinematic",
+        "dialogueLineId": null,
+        "cinematicNarrationId": "nV",
+        "ended": false,
+        "variables": {
+          "var_courage": 2
+        },
+        "choiceHistory": {
+          "c1": "optA"
+        },
+        "inventory": {},
+        "npcAffinity": {},
+        "equippedInventoryItemId": null,
+        "interactedObjectIds": [],
+        "objectVisibility": {},
+        "buttonSequenceInput": []
+      }
+    },
+    {
+      "action": {
+        "type": "restart"
+      },
+      "state": {
+        "blockId": "t1",
+        "blockType": "title",
+        "dialogueLineId": null,
+        "cinematicNarrationId": null,
+        "ended": false,
+        "variables": {
+          "var_courage": 0
+        },
+        "choiceHistory": {},
+        "inventory": {},
+        "npcAffinity": {},
+        "equippedInventoryItemId": null,
+        "interactedObjectIds": [],
+        "objectVisibility": {},
+        "buttonSequenceInput": []
+      }
+    },
+    {
+      "action": {
+        "type": "continue"
+      },
+      "state": {
+        "blockId": "c1",
+        "blockType": "choice",
+        "dialogueLineId": null,
+        "cinematicNarrationId": null,
+        "ended": false,
+        "variables": {
+          "var_courage": 0
+        },
+        "choiceHistory": {},
+        "inventory": {},
+        "npcAffinity": {},
+        "equippedInventoryItemId": null,
+        "interactedObjectIds": [],
+        "objectVisibility": {},
+        "buttonSequenceInput": []
+      }
+    },
+    {
+      "action": {
+        "type": "pick_choice",
+        "choiceId": "optB"
+      },
+      "state": {
+        "blockId": "cinCHOICE",
+        "blockType": "cinematic",
+        "dialogueLineId": null,
+        "cinematicNarrationId": "nC",
+        "ended": false,
+        "variables": {
+          "var_courage": 0
+        },
+        "choiceHistory": {
+          "c1": "optB"
+        },
+        "inventory": {},
+        "npcAffinity": {},
+        "equippedInventoryItemId": null,
+        "interactedObjectIds": [],
+        "objectVisibility": {},
+        "buttonSequenceInput": []
+      }
+    }
+  ]
+}

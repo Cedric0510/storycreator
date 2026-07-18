@@ -1,0 +1,33 @@
+{
+  "name": "f6-boucle-switch",
+  "description": "Deux switchs qui se renvoient l'un vers l'autre: le moteur doit appliquer les effets d'entree une fois chacun puis terminer proprement (detection de cycle).",
+  "story": {
+    "schemaVersion": "1.10.0",
+    "project": { "id": "parity-f6", "title": "F6", "slug": "f6", "startBlockId": "t1" },
+    "variables": [{ "id": "var_tours", "name": "tours", "initialValue": 0 }],
+    "itemsCatalog": [],
+    "hero": { "name": "Hero", "lore": "", "startingInventory": [] },
+    "blocks": [
+      { "id": "t1", "type": "title", "name": "Titre", "storyTitle": "F6", "subtitle": "", "nextBlockId": "sw1" },
+      {
+        "id": "sw1",
+        "type": "switch",
+        "name": "Aiguillage 1",
+        "variableId": null,
+        "nextBlockId": "sw2",
+        "entryEffects": [{ "variableId": "var_tours", "delta": 1 }],
+        "cases": []
+      },
+      {
+        "id": "sw2",
+        "type": "switch",
+        "name": "Aiguillage 2",
+        "variableId": null,
+        "nextBlockId": "sw1",
+        "entryEffects": [{ "variableId": "var_tours", "delta": 1 }],
+        "cases": []
+      }
+    ]
+  },
+  "script": [{ "type": "continue" }]
+}

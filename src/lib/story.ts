@@ -718,6 +718,24 @@ function normalizeSwitchConditionType(raw: unknown): SwitchConditionType {
   }
 }
 
+function normalizeSwitchOperator(
+  raw: unknown,
+  type: SwitchConditionType,
+): SwitchComparisonOperator {
+  switch (raw) {
+    case "eq":
+    case "ne":
+    case "gt":
+    case "gte":
+    case "lt":
+    case "lte":
+      return raw;
+    default:
+      // Valeurs historiques du studio: eq pour choice, gte pour le reste.
+      return type === "choice" ? "eq" : "gte";
+  }
+}
+
 export function normalizeSwitchCondition(condition: unknown): SwitchCondition {
   const candidate = (condition && typeof condition === "object"
     ? condition
@@ -742,7 +760,9 @@ export function normalizeSwitchCondition(condition: unknown): SwitchCondition {
       typeof candidate.choiceOptionId === "string" && candidate.choiceOptionId
         ? candidate.choiceOptionId
         : null,
-    operator: type === "choice" ? "eq" : "gte",
+    // Preserve l'operateur exporte: le lecteur applique eq/ne/gt/gte/lt/lte
+    // (l'ecraser corromprait les histoires importees qui les utilisent).
+    operator: normalizeSwitchOperator(candidate.operator, type),
     expectedValue:
       typeof candidate.expectedValue === "number" && Number.isFinite(candidate.expectedValue)
         ? candidate.expectedValue
@@ -1285,13 +1305,15 @@ export function normalizeGameplayBlock(block: GameplayBlock): GameplayBlock {
     }
   }
 
-  const orderedButtonIds = objects
-    .filter((obj) => obj.objectType === "button")
-    .map((obj) => obj.id);
-  const buttonIds = new Set(orderedButtonIds);
+  const buttonIds = new Set(
+    objects.filter((obj) => obj.objectType === "button").map((obj) => obj.id),
+  );
   const rawButtonSequence = Array.isArray(raw.buttonSequence) ? raw.buttonSequence : [];
   const seenButtonIds = new Set<string>();
-  const explicitButtonSequence = rawButtonSequence
+  // Respecte la sequence telle qu'exportee (le lecteur fait de meme): un
+  // bouton hors sequence est un leurre volontaire, le presser = echec.
+  // Les operations d'edition, elles, completent la sequence explicitement.
+  const buttonSequence = rawButtonSequence
     .filter((value): value is string => typeof value === "string" && buttonIds.has(value))
     .filter((buttonId) => {
       if (seenButtonIds.has(buttonId)) return false;
@@ -1299,8 +1321,6 @@ export function normalizeGameplayBlock(block: GameplayBlock): GameplayBlock {
       return true;
     })
     .slice(0, MAX_GAMEPLAY_BUTTONS);
-  const missingButtonIds = orderedButtonIds.filter((buttonId) => !seenButtonIds.has(buttonId));
-  const buttonSequence = [...explicitButtonSequence, ...missingButtonIds].slice(0, MAX_GAMEPLAY_BUTTONS);
   const buttonSequenceSuccessBlockId =
     typeof raw.buttonSequenceSuccessBlockId === "string" && raw.buttonSequenceSuccessBlockId
       ? raw.buttonSequenceSuccessBlockId

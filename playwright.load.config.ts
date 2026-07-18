@@ -3,7 +3,9 @@ import { defineConfig } from "@playwright/test";
 const port = Number(process.env.LOAD_TEST_PORT ?? 3101);
 const baseURL = process.env.LOAD_TEST_BASE_URL ?? `http://127.0.0.1:${port}`;
 const useExternalServer = Boolean(process.env.LOAD_TEST_BASE_URL);
-const loadTestTimeoutMs = Number(process.env.LOAD_TEST_TIMEOUT_MS ?? 15 * 60 * 1000);
+// 30 min: chaque cycle repart d'un projet vierge et reimporte tous les assets
+// (l'import est une fusion depuis la refonte), ce qui rallonge le run complet.
+const loadTestTimeoutMs = Number(process.env.LOAD_TEST_TIMEOUT_MS ?? 30 * 60 * 1000);
 
 export default defineConfig({
   testDir: "./tests/load",
@@ -11,7 +13,7 @@ export default defineConfig({
   outputDir: "test-results/load/artifacts",
   fullyParallel: false,
   workers: 1,
-  timeout: Number.isFinite(loadTestTimeoutMs) ? loadTestTimeoutMs : 15 * 60 * 1000,
+  timeout: Number.isFinite(loadTestTimeoutMs) ? loadTestTimeoutMs : 30 * 60 * 1000,
   expect: {
     timeout: 20_000,
   },
