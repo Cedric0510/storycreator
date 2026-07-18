@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { Backend, SignUpOutcome } from "@/lib/backend/ports";
-import { getBrowserBackend } from "@/lib/backend/supabaseBackend";
+import { getBrowserBackend } from "@/lib/backend/browserBackend";
 import { AuthorUser, BackendResult, PlatformRole, fail } from "@/lib/backend/types";
 
 interface UseAuthOptions {

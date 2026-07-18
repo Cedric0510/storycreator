@@ -9,6 +9,8 @@
     "lint": "eslint",
     "test": "vitest run",
     "test:watch": "vitest",
+    "test:e2e": "playwright test -c playwright.e2e.config.ts",
+    "test:e2e:install": "playwright install chromium",
     "test:load": "playwright test -c playwright.load.config.ts",
     "test:load:headed": "playwright test -c playwright.load.config.ts --headed",
     "test:load:install": "playwright install chromium"

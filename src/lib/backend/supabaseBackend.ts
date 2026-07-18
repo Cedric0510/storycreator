@@ -8,8 +8,6 @@
 
 import { SupabaseClient, User } from "@supabase/supabase-js";
 
-import { getSupabaseBrowserClient } from "@/lib/supabaseClient";
-
 import {
   AccountPort,
   AdminPort,
@@ -283,19 +281,6 @@ export function createSupabaseBackend(client: SupabaseClient): Backend {
     admin: createAdminPort(auth),
     account: createAccountPort(auth),
   };
-}
-
-let cachedBackend: Backend | null | undefined;
-
-/**
- * Backend unique cote navigateur. Retourne null quand Supabase n'est pas
- * configure (l'app doit rester utilisable en mode degrade).
- */
-export function getBrowserBackend(): Backend | null {
-  if (cachedBackend !== undefined) return cachedBackend;
-  const client = getSupabaseBrowserClient();
-  cachedBackend = client ? createSupabaseBackend(client) : null;
-  return cachedBackend;
 }
 
 export type { PlatformRole };

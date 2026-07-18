@@ -10,6 +10,11 @@ import { NextRequest, NextResponse } from "next/server";
 import { SupabaseClient, createClient } from "@supabase/supabase-js";
 
 export function jsonError(message: string, status = 400) {
+  // Les erreurs serveur sont loggees (visibles dans les logs Vercel);
+  // les 4xx sont des refus attendus, pas du bruit de log.
+  if (status >= 500) {
+    console.error(`[bff] ${status}: ${message}`);
+  }
   return NextResponse.json({ error: message }, { status });
 }
 
