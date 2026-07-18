@@ -845,7 +845,7 @@ label {
 .account-modal-overlay {
   position: fixed;
   inset: 0;
-  z-index: 130;
+  z-index: 620;
   background: rgba(9, 26, 28, 0.3);
   backdrop-filter: blur(8px);
   display: flex;
@@ -2309,7 +2309,7 @@ label {
 .confirm-overlay {
   position: fixed;
   inset: 0;
-  z-index: 110;
+  z-index: 610;
   background: rgba(5, 21, 34, 0.42);
   backdrop-filter: blur(4px);
   display: flex;
@@ -2358,10 +2358,12 @@ label {
    PREVIEW — Smartphone Simulator
    ═══════════════════════════════════════════════ */
 
+/* Overlays plein ecran: toujours au-dessus du header (z-index 500),
+   sous les toasts (9999). Ordre relatif: preview < confirm < modales. */
 .preview-overlay {
   position: fixed;
   inset: 0;
-  z-index: 100;
+  z-index: 600;
   background: rgba(2, 6, 14, 0.82);
   backdrop-filter: blur(10px);
   display: flex;
