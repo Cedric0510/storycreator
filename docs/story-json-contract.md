@@ -233,6 +233,9 @@ verrouillee dessus par les tests de parite.
 - Les chemins (`backgroundPath`, `imagePath`, `soundPath`, `voicePath`,
   `videoPath`, `iconPath`...) pointent dans le zip exporte.
 - Convention: `assets/{asset_id}-{nom_fichier_sanitize}`.
+- Deduplication par contenu: PLUSIEURS references (assetIds) peuvent pointer
+  vers le MEME fichier du zip quand leur contenu est identique. Un lecteur ne
+  doit jamais supposer une bijection chemin <-> reference.
 - Les champs `*AssetId` exportes servent au reimport dans l'outil auteur;
   le lecteur ne lit que les `*Path`.
 

@@ -17,6 +17,7 @@ import {
 import {
   putAssetBlob,
   getAssetBlob,
+  getAssetContentHash,
   getAssetObjectURL,
   isCachedAssetObjectURL,
   clearAllAssetBlobs,
@@ -224,6 +225,38 @@ export function useStudioAssets({
       }
     }
 
+    // Deduplication par contenu: la meme image attachee N fois (fonds de
+    // scene reutilises...) ne doit produire qu'UN fichier dans le ZIP.
+    // Tous les assetIds partageant un contenu pointent vers le packagePath
+    // du representant; sans ca, une histoire peut peser 30x sa taille reelle.
+    setStatusMessage("Export: preparation des assets...");
+    const exportAssetRefs: Record<string, AssetRef> = { ...assetRefs };
+    const blobByRepresentativeId = new Map<string, Blob>();
+    const representativeIdByHash = new Map<string, string>();
+
+    for (const assetId of referencedAssetIds) {
+      const blob = await getAssetBlob(assetId);
+      if (!blob) {
+        setStatusMessage(
+          `Asset manquant en local (${assetRefs[assetId]?.fileName ?? assetId}). Reimporte-le depuis un ZIP complet avant d'exporter.`,
+        );
+        return false;
+      }
+
+      // Hash inconnu (donnees historiques): contenu traite comme unique.
+      const contentHash = (await getAssetContentHash(assetId)) ?? `unique:${assetId}`;
+      const representativeId = representativeIdByHash.get(contentHash);
+      if (!representativeId) {
+        representativeIdByHash.set(contentHash, assetId);
+        blobByRepresentativeId.set(assetId, blob);
+      } else {
+        exportAssetRefs[assetId] = {
+          ...exportAssetRefs[assetId],
+          packagePath: exportAssetRefs[representativeId].packagePath,
+        };
+      }
+    }
+
     const openedValidatedChapterIdSet = new Set(
       project.chapters
         .filter((chapter) => chapter.validated)
@@ -254,7 +287,7 @@ export function useStudioAssets({
         name: item.name,
         description: item.description,
         iconAssetId: item.iconAssetId,
-        iconPath: assetPath(item.iconAssetId, assetRefs),
+        iconPath: assetPath(item.iconAssetId, exportAssetRefs),
       })),
       hero: {
         name: project.hero.name,
@@ -279,11 +312,11 @@ export function useStudioAssets({
             itemName: item?.name ?? "unknown",
             quantity: entry.quantity,
             iconAssetId: item?.iconAssetId ?? null,
-            iconPath: assetPath(item?.iconAssetId ?? null, assetRefs),
+            iconPath: assetPath(item?.iconAssetId ?? null, exportAssetRefs),
           };
         }),
       },
-      blocks: blocks.map((block) => serializeBlock(block, variableNameById, assetRefs)),
+      blocks: blocks.map((block) => serializeBlock(block, variableNameById, exportAssetRefs)),
       graph: {
         edges: edges.map((edge) => ({
           source: edge.source,
@@ -296,18 +329,10 @@ export function useStudioAssets({
     const zip = new JSZip();
     zip.file("story.json", JSON.stringify(payload, null, 2));
 
-    for (const assetId of referencedAssetIds) {
-      const ref = assetRefs[assetId];
+    for (const [representativeId, assetBlob] of blobByRepresentativeId) {
+      const ref = exportAssetRefs[representativeId];
       if (!ref) continue;
-      const blob = await getAssetBlob(assetId);
-      if (blob) {
-        zip.file(ref.packagePath, blob);
-      } else {
-        setStatusMessage(
-          `Asset manquant en local (${ref.fileName}). Reimporte-le depuis un ZIP complet avant d'exporter.`,
-        );
-        return false;
-      }
+      zip.file(ref.packagePath, assetBlob);
     }
 
     setStatusMessage("Export: generation du ZIP...");
@@ -318,8 +343,13 @@ export function useStudioAssets({
     });
 
     downloadBlob(blob, `${project.info.slug || "story"}-bundle.zip`);
-    setStatusMessage(`Export reussi: ${referencedAssetIds.size} asset(s) dans le ZIP.`);
-    logAction("export_zip", `${referencedAssetIds.size} assets`);
+    setStatusMessage(
+      `Export reussi: ${blobByRepresentativeId.size} fichier(s) asset pour ${referencedAssetIds.size} reference(s).`,
+    );
+    logAction(
+      "export_zip",
+      `${blobByRepresentativeId.size} fichier(s) / ${referencedAssetIds.size} reference(s)`,
+    );
     return true;
    } catch (err: unknown) {
     const msg = err instanceof Error ? err.message : String(err);

@@ -384,6 +384,22 @@ export async function getAssetBlob(assetId: string): Promise<Blob | null> {
   return withReadyDb((db) => getBlobByAssetIdWithDb(db, assetId));
 }
 
+/**
+ * Content hash of a stored asset (or null if unknown).
+ * Same asset attached several times => same hash: used by the ZIP export to
+ * write a single file per unique content.
+ */
+export async function getAssetContentHash(assetId: string): Promise<string | null> {
+  await waitForPendingAssetWrites([assetId]);
+  return withReadyDb(async (db) => {
+    const transaction = db.transaction(ASSET_REFS_STORE, "readonly");
+    const ref = (await requestToPromise(
+      transaction.objectStore(ASSET_REFS_STORE).get(assetId),
+    )) as AssetRefRecord | undefined;
+    return ref?.hash ?? null;
+  });
+}
+
 /** Delete many assets at once. */
 export async function deleteAssetBlobs(assetIds: string[]): Promise<void> {
   const uniqueAssetIds = Array.from(new Set(assetIds.filter(Boolean)));
