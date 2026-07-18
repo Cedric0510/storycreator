@@ -42,6 +42,12 @@ export default defineConfig({
         url: baseURL,
         timeout: 180_000,
         reuseExistingServer: !process.env.CI,
+        env: {
+          // Backend fake en memoire: pas de Supabase ni de credentials requis.
+          NEXT_PUBLIC_BACKEND_MODE: "fake",
+          // Build isole pour cohabiter avec un `next dev` local.
+          NEXT_DIST_DIR: ".next-load",
+        },
       },
   projects: [
     {

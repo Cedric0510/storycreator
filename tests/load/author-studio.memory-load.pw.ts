@@ -80,10 +80,6 @@ function fixedId(prefix: string, index: number): string {
   return `${prefix}_${index.toString(16).padStart(8, "0")}`;
 }
 
-function escapeRegExp(value: string): string {
-  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-}
-
 function readEnvConfig(): EnvConfig {
   return {
     importCycles: readIntEnv("LOAD_IMPORT_CYCLES", 6),
@@ -277,30 +273,63 @@ async function buildLoadBundle({
 }
 
 async function requireSignIn(page: Page): Promise<void> {
-  if (await page.getByRole("button", { name: "Se deconnecter" }).isVisible().catch(() => false)) {
+  if (page.url().includes("/studio")) {
     return;
   }
 
-  const email = process.env.LOAD_TEST_EMAIL;
-  const password = process.env.LOAD_TEST_PASSWORD;
-  if (!email || !password) {
-    throw new Error(
-      "Missing auth for load battery. Set LOAD_TEST_EMAIL and LOAD_TEST_PASSWORD to an author/admin account.",
-    );
-  }
+  // Par defaut: compte admin seede par le backend fake
+  // (NEXT_PUBLIC_BACKEND_MODE=fake, voir playwright.load.config.ts).
+  // LOAD_TEST_EMAIL / LOAD_TEST_PASSWORD permettent de viser une vraie instance.
+  const email = process.env.LOAD_TEST_EMAIL ?? "e2e-admin@studio.local";
+  const password = process.env.LOAD_TEST_PASSWORD ?? "motdepasse-e2e";
 
   const emailInput = page.getByLabel("Email");
   const passwordInput = page.getByLabel("Mot de passe");
-  if ((await emailInput.count()) === 0 || (await passwordInput.count()) === 0) {
-    throw new Error("Cannot find auth form inputs (Email / Mot de passe).");
-  }
+  // La carte affiche "Chargement session..." tant que l'etat auth n'est pas resolu.
+  await emailInput.waitFor({ state: "visible", timeout: 30_000 });
 
   await emailInput.fill(email);
   await passwordInput.fill(password);
   await page.getByRole("button", { name: "Se connecter" }).click();
-  await expect(page.getByRole("button", { name: "Se deconnecter" })).toBeVisible({
-    timeout: 60_000,
-  });
+  await page.waitForURL("**/studio", { timeout: 60_000 });
+}
+
+async function openMainMenu(page: Page): Promise<ReturnType<Page["locator"]>> {
+  const panel = page.locator("#studio-main-menu-panel");
+  if (!(await panel.isVisible().catch(() => false))) {
+    await page.locator(".studio-menu-trigger").click();
+  }
+  await expect(panel).toBeVisible();
+  return panel;
+}
+
+/**
+ * Repart d'un projet vierge. L'import est une fusion depuis la refonte:
+ * sans reset, les fixtures s'accumuleraient et le bloc de depart resterait
+ * celui du projet initial.
+ */
+async function resetToBlankProject(page: Page): Promise<void> {
+  const menuPanel = await openMainMenu(page);
+  await menuPanel.getByRole("button", { name: "Nouveau projet" }).click();
+  await page
+    .locator(".confirm-modal")
+    .getByRole("button", { name: "Quitter sans sauvegarder" })
+    .click();
+  await expect(page.locator(".react-flow__node")).toHaveCount(1);
+}
+
+/** Definit le bloc titre importe (LOAD_TITLE) comme bloc de depart. */
+async function setImportedTitleAsStart(page: Page): Promise<void> {
+  await page.locator(".react-flow__controls-fitview").click();
+  // dispatchEvent: les noeuds de la fixture se chevauchent au zoom arriere,
+  // un clic physique serait intercepte par le noeud du dessus.
+  await page
+    .locator(".react-flow__node")
+    .filter({ hasText: "LOAD_TITLE" })
+    .first()
+    .dispatchEvent("click");
+  await page.getByRole("button", { name: "Definir comme START" }).click();
+  await expect(page.locator(".chip-start").filter({ hasText: "Bloc de depart" })).toBeVisible();
 }
 
 async function importBundle(page: Page, bundle: LoadBundle): Promise<void> {
@@ -312,8 +341,10 @@ async function importBundle(page: Page, bundle: LoadBundle): Promise<void> {
     buffer: bundle.buffer,
   });
 
+  // Deux statuts s'enchainent dans le meme batch React ("Import reussi" puis
+  // "Import fusionne"): seul le dernier devient un toast.
   const successPattern = new RegExp(
-    `Import reussi: .*depuis ${escapeRegExp(bundle.fileName)}\\.`,
+    `Import fusionne: ${bundle.expectedNodeCount} bloc\\(s\\)`,
   );
   await expect(
     page.locator(".toast-message").filter({ hasText: successPattern }).first(),
@@ -325,8 +356,6 @@ async function importBundle(page: Page, bundle: LoadBundle): Promise<void> {
       message: `Expected imported graph node count near ${bundle.expectedNodeCount}`,
     })
     .toBeGreaterThanOrEqual(bundle.expectedNodeCount - 1);
-
-  await expect(page.locator(".nav-action-preview")).toBeEnabled({ timeout: 15_000 });
 }
 
 async function clickIfVisible(locator: ReturnType<Page["locator"]>): Promise<boolean> {
@@ -392,8 +421,8 @@ async function collectMemorySnapshot(
 }
 
 async function startPreview(page: Page): Promise<void> {
-  await expect(page.locator(".nav-action-preview")).toBeEnabled();
-  await page.locator(".nav-action-preview").click();
+  const menuPanel = await openMainMenu(page);
+  await menuPanel.getByRole("button", { name: "Preview" }).click();
   await expect(page.locator(".preview-overlay")).toBeVisible({ timeout: 15_000 });
 }
 
@@ -505,12 +534,11 @@ test("targeted load battery: preview + long navigation + successive imports", as
     title: "Load battery secondary",
   });
 
+  // La video d'intro retarde le formulaire de connexion: on la court-circuite.
+  await page.route("**/*.mp4", (route) => route.abort());
   await page.goto("/");
-  await page.waitForSelector(".nav-action-preview", { timeout: 90_000 });
   await requireSignIn(page);
-  await expect(page.locator(".nav-action-import")).toBeEnabled();
-  await expect(page.locator(".nav-action-preview")).toBeEnabled();
-  await expect(page.locator(".react-flow")).toBeVisible();
+  await expect(page.locator(".react-flow")).toBeVisible({ timeout: 90_000 });
 
   let cdp: CDPSession | null = null;
   try {
@@ -533,7 +561,9 @@ test("targeted load battery: preview + long navigation + successive imports", as
   for (let cycle = 1; cycle <= config.importCycles; cycle += 1) {
     const bundle = cycle % 2 === 0 ? secondaryBundle : primaryBundle;
 
+    await resetToBlankProject(page);
     await importBundle(page, bundle);
+    await setImportedTitleAsStart(page);
     allSnapshots.push(await collectMemorySnapshot(page, cdp, `cycle-${cycle}-after-import`));
 
     await startPreview(page);
