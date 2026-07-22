@@ -27,7 +27,8 @@ export class CadariumApiClient {
     if (options.body !== undefined) headers.set("content-type", "application/json");
     if (options.token) headers.set("authorization", `Bearer ${options.token}`);
     try {
-      const response = await this.fetcher(`${this.baseUrl}${path}`, {
+      const fetcher = this.fetcher;
+      const response = await fetcher(`${this.baseUrl}${path}`, {
         method: options.method ?? "GET",
         headers,
         body: options.body === undefined ? undefined : JSON.stringify(options.body),

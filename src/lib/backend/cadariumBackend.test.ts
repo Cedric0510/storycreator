@@ -24,6 +24,22 @@ function jsonResponse(body: unknown, status = 200) {
 }
 
 describe("Cadarium backend adapter", () => {
+  it("calls the browser fetch function without binding it to the API client", async () => {
+    const storage = memoryStorage();
+    const fetcher = function (this: unknown, input: RequestInfo | URL) {
+      if (this !== undefined) throw new TypeError("Illegal invocation");
+      const url = String(input);
+      if (url.endsWith("/v1/auth/sign-up")) return Promise.resolve(jsonResponse(author, 201));
+      return Promise.resolve(jsonResponse({ status: "authenticated", token: "token-1", expiresAt: "2026-08-22T00:00:00.000Z", author }));
+    } as typeof fetch;
+    const backend = createCadariumBackend({ baseUrl: "http://localhost:3001", storage, fetcher });
+
+    const result = await backend.auth.signUp(author.email, "safe-password");
+
+    expect(result.ok).toBe(true);
+    expect(await backend.auth.getAccessToken()).toBe("token-1");
+  });
+
   it("opens, restores and closes an author session", async () => {
     const storage = memoryStorage();
     const fetcher = vi.fn<typeof fetch>(async (_input, init) => {
