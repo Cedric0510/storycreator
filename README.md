@@ -45,7 +45,7 @@ NEXT_PUBLIC_BACKEND_MODE=cadarium
 NEXT_PUBLIC_CADARIUM_API_URL=http://localhost:3001
 ```
 
-Sans `NEXT_PUBLIC_BACKEND_MODE=cadarium`, le Studio conserve l'adaptateur Supabase. Le mode Cadarium couvre actuellement la connexion, l'inscription locale, la restauration de session, le rôle et la déconnexion. Les opérations d'administration, de mot de passe et de projets seront activées au fur et à mesure que leurs routes seront disponibles.
+Sans `NEXT_PUBLIC_BACKEND_MODE=cadarium`, le Studio conserve l'adaptateur Supabase. Le mode Cadarium couvre la connexion, l'inscription locale, la restauration de session, les rôles, l'administration des comptes, le changement de mot de passe et les opérations de projets. La réinitialisation par email reste désactivée tant qu'un service d'envoi n'est pas configuré.
 
 ## Setup Supabase
 

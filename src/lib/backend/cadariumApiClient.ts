@@ -58,5 +58,9 @@ function messageForCode(code: string | undefined): string {
   if (code === "email_taken") return "Un compte existe déjà pour cet email.";
   if (code === "invalid_email") return "Email invalide.";
   if (code === "invalid_password") return "Le mot de passe doit contenir au moins 8 caractères.";
+  if (code === "last_admin") return "Impossible de modifier ou supprimer le dernier administrateur.";
+  if (code === "admin_self_delete_forbidden") return "Utilise la page Compte pour supprimer ton propre compte.";
+  if (code === "admin_role_required") return "Accès réservé aux administrateurs.";
+  if (code === "not_found") return "Utilisateur introuvable.";
   return "La requête Cadarium a échoué.";
 }

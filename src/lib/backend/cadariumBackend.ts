@@ -1,5 +1,5 @@
 import { AccountPort, AdminPort, AuthEvent, AuthPort, Backend, ProjectPort } from "./ports";
-import { AuthorUser, BackendResult, CloudProject, CloudProjectSummary, PlatformRole, fail, ok } from "./types";
+import { AuthorUser, BackendResult, CloudProject, CloudProjectSummary, PlatformProfile, PlatformRole, fail, ok } from "./types";
 import { CadariumApiClient, CadariumApiError } from "./cadariumApiClient";
 
 interface TokenStorage {
@@ -105,7 +105,16 @@ export function createCadariumBackend(options: CadariumBackendOptions): Backend 
 
     async changePassword(newPassword) {
       if (newPassword.length < 8) return fail("invalid_request", "Le mot de passe doit contenir au moins 8 caractères.");
-      return unavailable("Le changement de mot de passe Cadarium n'est pas encore disponible.");
+      const result = await authenticatedRequest((token) => api.request<void>("/v1/auth/password", {
+        method: "PUT",
+        token,
+        body: { password: newPassword },
+      }));
+      if (result.ok && currentAuthor) {
+        currentAuthor = { ...currentAuthor, mustChangePassword: false };
+        emit("other");
+      }
+      return result;
     },
 
     async requestPasswordReset() {
@@ -126,26 +135,52 @@ export function createCadariumBackend(options: CadariumBackendOptions): Backend 
   };
 
   const admin: AdminPort = {
-    async listProfiles() { return unavailable("L'administration Cadarium n'est pas encore disponible."); },
-    async setProfileRole() { return unavailable("L'administration Cadarium n'est pas encore disponible."); },
-    async createUser() { return unavailable("L'administration Cadarium n'est pas encore disponible."); },
-    async deleteUser() { return unavailable("L'administration Cadarium n'est pas encore disponible."); },
+    async listProfiles() {
+      return mapResult(
+        await authenticatedRequest((token) => api.request<{ authors: CadariumAuthor[] }>("/v1/admin/authors", { token })),
+        (response) => response.authors.map(toPlatformProfile),
+      );
+    },
+    async setProfileRole(targetUserId, nextRole) {
+      return authenticatedRequest((token) => api.request<void>(`/v1/admin/authors/${encodeURIComponent(targetUserId)}/role`, {
+        method: "PUT",
+        token,
+        body: { role: nextRole },
+      }));
+    },
+    async createUser(input) {
+      return mapResult(
+        await authenticatedRequest((token) => api.request<CadariumAuthor>("/v1/admin/authors", { method: "POST", token, body: input })),
+        (author) => ({ userId: author.id }),
+      );
+    },
+    async deleteUser(targetUserId) {
+      return authenticatedRequest((token) => api.request<void>(`/v1/admin/authors/${encodeURIComponent(targetUserId)}`, { method: "DELETE", token }));
+    },
   };
 
   const account: AccountPort = {
-    async deleteMyAccount() { return unavailable("La suppression de compte Cadarium n'est pas encore disponible."); },
+    async deleteMyAccount() {
+      const result = await authenticatedRequest((token) => api.request<void>("/v1/account", { method: "DELETE", token }));
+      if (result.ok) {
+        options.storage.removeItem(tokenKey);
+        currentAuthor = null;
+        emit("signed_out");
+      }
+      return result;
+    },
   };
 
   const projects: ProjectPort = {
     async list() {
-      return projectRequest(async (token) => {
+      return authenticatedRequest(async (token) => {
         const response = await api.request<{ projects: CloudProjectSummary[] }>("/v1/author/projects", { token });
         return response.projects;
       });
     },
 
     async create<T>(title: string, document: T) {
-      return projectRequest((token) => api.request<CloudProject<T>>("/v1/author/projects", {
+      return authenticatedRequest((token) => api.request<CloudProject<T>>("/v1/author/projects", {
         method: "POST",
         token,
         body: { title, document },
@@ -153,11 +188,11 @@ export function createCadariumBackend(options: CadariumBackendOptions): Backend 
     },
 
     async load<T>(projectId: string) {
-      return projectRequest((token) => api.request<CloudProject<T>>(`/v1/author/projects/${encodeURIComponent(projectId)}`, { token }));
+      return authenticatedRequest((token) => api.request<CloudProject<T>>(`/v1/author/projects/${encodeURIComponent(projectId)}`, { token }));
     },
 
     async save<T>(projectId: string, expectedRevision: number, title: string, document: T) {
-      return projectRequest((token) => api.request<CloudProject<T>>(`/v1/author/projects/${encodeURIComponent(projectId)}`, {
+      return authenticatedRequest((token) => api.request<CloudProject<T>>(`/v1/author/projects/${encodeURIComponent(projectId)}`, {
         method: "PUT",
         token,
         body: { expectedRevision, title, document },
@@ -165,13 +200,13 @@ export function createCadariumBackend(options: CadariumBackendOptions): Backend 
     },
 
     async archive(projectId: string) {
-      return projectRequest((token) => api.request<void>(`/v1/author/projects/${encodeURIComponent(projectId)}`, { method: "DELETE", token }));
+      return authenticatedRequest((token) => api.request<void>(`/v1/author/projects/${encodeURIComponent(projectId)}`, { method: "DELETE", token }));
     },
   };
 
-  async function projectRequest<T>(operation: (token: string) => Promise<T>): Promise<BackendResult<T>> {
+  async function authenticatedRequest<T>(operation: (token: string) => Promise<T>): Promise<BackendResult<T>> {
     const token = options.storage.getItem(tokenKey);
-    if (!token) return fail("unauthorized", "Connecte-toi pour accéder aux projets cloud.");
+    if (!token) return fail("unauthorized", "Connecte-toi pour effectuer cette action.");
     try {
       return ok(await operation(token));
     } catch (error) {
@@ -184,6 +219,20 @@ export function createCadariumBackend(options: CadariumBackendOptions): Backend 
 
 function toAuthorUser(author: CadariumAuthor | null): AuthorUser | null {
   return author ? { id: author.id, email: author.email, mustChangePassword: author.mustChangePassword } : null;
+}
+
+function toPlatformProfile(author: CadariumAuthor): PlatformProfile {
+  return {
+    userId: author.id,
+    email: author.email,
+    displayName: author.displayName,
+    platformRole: author.platformRole,
+    createdAt: author.createdAt,
+  };
+}
+
+function mapResult<T, U>(result: BackendResult<T>, mapper: (value: T) => U): BackendResult<U> {
+  return result.ok ? ok(mapper(result.value)) : result;
 }
 
 function fromApiError(error: unknown): { ok: false; error: { kind: "invalid_request" | "unauthorized" | "forbidden" | "not_found" | "conflict" | "network" | "server"; message: string } } {

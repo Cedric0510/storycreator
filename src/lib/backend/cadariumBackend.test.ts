@@ -111,4 +111,32 @@ describe("Cadarium backend adapter", () => {
     expect(saved.ok && saved.value.revision).toBe(2);
     expect((await backend.projects!.archive(project.id)).ok).toBe(true);
   });
+
+  it("manages accounts and passwords through Cadarium", async () => {
+    const storage = memoryStorage();
+    storage.setItem("cadarium-author-session", "token-1");
+    const createdAuthor = { ...author, id: "author-2", email: "writer@cadarium.test", platformRole: "author" as const, mustChangePassword: true };
+    const fetcher = vi.fn<typeof fetch>(async (input, init) => {
+      expect(new Headers(init?.headers).get("authorization")).toBe("Bearer token-1");
+      const url = String(input);
+      if (url.endsWith("/v1/auth/password")) return new Response(null, { status: 204 });
+      if (url.endsWith("/v1/admin/authors") && init?.method === "POST") return jsonResponse(createdAuthor, 201);
+      if (url.endsWith("/v1/admin/authors")) return jsonResponse({ authors: [author, createdAuthor] });
+      if (url.endsWith("/role")) return new Response(null, { status: 204 });
+      if (url.includes("/v1/admin/authors/") && init?.method === "DELETE") return new Response(null, { status: 204 });
+      if (url.endsWith("/v1/account")) return new Response(null, { status: 204 });
+      return jsonResponse({ code: "not_found" }, 404);
+    });
+    const backend = createCadariumBackend({ baseUrl: "http://localhost:3001", storage, fetcher });
+
+    expect((await backend.auth.changePassword("new-safe-password")).ok).toBe(true);
+    const profiles = await backend.admin.listProfiles();
+    expect(profiles.ok && profiles.value[1]).toMatchObject({ userId: "author-2", platformRole: "author" });
+    const created = await backend.admin.createUser({ email: createdAuthor.email, password: "temporary-password", role: "author" });
+    expect(created).toEqual({ ok: true, value: { userId: "author-2" } });
+    expect((await backend.admin.setProfileRole("author-2", "admin")).ok).toBe(true);
+    expect((await backend.admin.deleteUser("author-2")).ok).toBe(true);
+    expect((await backend.account.deleteMyAccount()).ok).toBe(true);
+    expect(await backend.auth.getAccessToken()).toBeNull();
+  });
 });
