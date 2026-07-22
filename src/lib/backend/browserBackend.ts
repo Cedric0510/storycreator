@@ -24,6 +24,7 @@ export const E2E_FAKE_ADMIN = {
 let cachedBackend: Backend | null | undefined;
 
 export function getBrowserBackend(): Backend | null {
+  if (typeof window === "undefined") return null;
   if (cachedBackend !== undefined) return cachedBackend;
 
   if (process.env.NEXT_PUBLIC_BACKEND_MODE === "fake") {
