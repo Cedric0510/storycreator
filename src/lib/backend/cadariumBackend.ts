@@ -1,5 +1,5 @@
-import { AccountPort, AdminPort, AuthEvent, AuthPort, Backend } from "./ports";
-import { AuthorUser, BackendResult, PlatformRole, fail, ok } from "./types";
+import { AccountPort, AdminPort, AuthEvent, AuthPort, Backend, ProjectPort } from "./ports";
+import { AuthorUser, BackendResult, CloudProject, CloudProjectSummary, PlatformRole, fail, ok } from "./types";
 import { CadariumApiClient, CadariumApiError } from "./cadariumApiClient";
 
 interface TokenStorage {
@@ -136,7 +136,50 @@ export function createCadariumBackend(options: CadariumBackendOptions): Backend 
     async deleteMyAccount() { return unavailable("La suppression de compte Cadarium n'est pas encore disponible."); },
   };
 
-  return { auth, admin, account };
+  const projects: ProjectPort = {
+    async list() {
+      return projectRequest(async (token) => {
+        const response = await api.request<{ projects: CloudProjectSummary[] }>("/v1/author/projects", { token });
+        return response.projects;
+      });
+    },
+
+    async create<T>(title: string, document: T) {
+      return projectRequest((token) => api.request<CloudProject<T>>("/v1/author/projects", {
+        method: "POST",
+        token,
+        body: { title, document },
+      }));
+    },
+
+    async load<T>(projectId: string) {
+      return projectRequest((token) => api.request<CloudProject<T>>(`/v1/author/projects/${encodeURIComponent(projectId)}`, { token }));
+    },
+
+    async save<T>(projectId: string, expectedRevision: number, title: string, document: T) {
+      return projectRequest((token) => api.request<CloudProject<T>>(`/v1/author/projects/${encodeURIComponent(projectId)}`, {
+        method: "PUT",
+        token,
+        body: { expectedRevision, title, document },
+      }));
+    },
+
+    async archive(projectId: string) {
+      return projectRequest((token) => api.request<void>(`/v1/author/projects/${encodeURIComponent(projectId)}`, { method: "DELETE", token }));
+    },
+  };
+
+  async function projectRequest<T>(operation: (token: string) => Promise<T>): Promise<BackendResult<T>> {
+    const token = options.storage.getItem(tokenKey);
+    if (!token) return fail("unauthorized", "Connecte-toi pour accéder aux projets cloud.");
+    try {
+      return ok(await operation(token));
+    } catch (error) {
+      return fromApiError(error);
+    }
+  }
+
+  return { auth, admin, account, projects };
 }
 
 function toAuthorUser(author: CadariumAuthor | null): AuthorUser | null {

@@ -79,4 +79,36 @@ describe("Cadarium backend adapter", () => {
     const network = await offline.auth.signIn(author.email, "safe-password");
     expect(network).toEqual({ ok: false, error: { kind: "network", message: "Backend Cadarium inaccessible." } });
   });
+
+  it("persists projects through the optional project port", async () => {
+    const storage = memoryStorage();
+    storage.setItem("cadarium-author-session", "token-1");
+    const project = {
+      id: "00000000-0000-4000-8000-000000000001",
+      title: "Asteria",
+      revision: 1,
+      createdAt: "2026-07-22T00:00:00.000Z",
+      updatedAt: "2026-07-22T00:00:00.000Z",
+      document: { blocks: [{ id: "start" }] },
+    };
+    const fetcher = vi.fn<typeof fetch>(async (input, init) => {
+      expect(new Headers(init?.headers).get("authorization")).toBe("Bearer token-1");
+      const url = String(input);
+      if (url.endsWith("/v1/author/projects") && init?.method === "POST") return jsonResponse(project, 201);
+      if (url.endsWith("/v1/author/projects")) return jsonResponse({ projects: [{ ...project, document: undefined }] });
+      if (url.endsWith(`/${project.id}`) && init?.method === "PUT") return jsonResponse({ ...project, revision: 2 });
+      if (url.endsWith(`/${project.id}`) && init?.method === "DELETE") return new Response(null, { status: 204 });
+      if (url.endsWith(`/${project.id}`)) return jsonResponse(project);
+      return jsonResponse({}, 404);
+    });
+    const backend = createCadariumBackend({ baseUrl: "http://localhost:3001", storage, fetcher });
+
+    expect((await backend.projects!.create(project.title, project.document)).ok).toBe(true);
+    expect((await backend.projects!.list()).ok).toBe(true);
+    const loaded = await backend.projects!.load<typeof project.document>(project.id);
+    expect(loaded.ok && loaded.value.document).toEqual(project.document);
+    const saved = await backend.projects!.save(project.id, 1, project.title, project.document);
+    expect(saved.ok && saved.value.revision).toBe(2);
+    expect((await backend.projects!.archive(project.id)).ok).toBe(true);
+  });
 });

@@ -11,6 +11,8 @@ import {
   BackendResult,
   PlatformProfile,
   PlatformRole,
+  CloudProject,
+  CloudProjectSummary,
 } from "./types";
 
 export type AuthEvent =
@@ -71,8 +73,17 @@ export interface AccountPort {
   deleteMyAccount(): Promise<BackendResult>;
 }
 
+export interface ProjectPort {
+  list(): Promise<BackendResult<CloudProjectSummary[]>>;
+  create<T>(title: string, document: T): Promise<BackendResult<CloudProject<T>>>;
+  load<T>(projectId: string): Promise<BackendResult<CloudProject<T>>>;
+  save<T>(projectId: string, expectedRevision: number, title: string, document: T): Promise<BackendResult<CloudProject<T>>>;
+  archive(projectId: string): Promise<BackendResult>;
+}
+
 export interface Backend {
   auth: AuthPort;
   admin: AdminPort;
   account: AccountPort;
+  projects?: ProjectPort;
 }

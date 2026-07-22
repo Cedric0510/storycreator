@@ -25,6 +25,18 @@ export interface PlatformProfile {
   createdAt: string;
 }
 
+export interface CloudProjectSummary {
+  id: string;
+  title: string;
+  revision: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface CloudProject<T = unknown> extends CloudProjectSummary {
+  document: T;
+}
+
 export type BackendErrorKind =
   | "invalid_request"
   | "unauthorized"
