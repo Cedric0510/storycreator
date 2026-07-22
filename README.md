@@ -36,6 +36,17 @@ SUPABASE_SERVICE_ROLE_KEY=...
 # SUPABASE_SECRET_KEY=...
 ```
 
+## Backend Cadarium local
+
+Pour utiliser le backend Cadarium local sans modifier le déploiement Vercel:
+
+```bash
+NEXT_PUBLIC_BACKEND_MODE=cadarium
+NEXT_PUBLIC_CADARIUM_API_URL=http://localhost:3001
+```
+
+Sans `NEXT_PUBLIC_BACKEND_MODE=cadarium`, le Studio conserve l'adaptateur Supabase. Le mode Cadarium couvre actuellement la connexion, l'inscription locale, la restauration de session, le rôle et la déconnexion. Les opérations d'administration, de mot de passe et de projets seront activées au fur et à mesure que leurs routes seront disponibles.
+
 ## Setup Supabase
 
 Mode actuel recommande pour MVP sans sauvegarde cloud:
