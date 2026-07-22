@@ -44,6 +44,7 @@ import { useDialogueOperations } from "@/components/useDialogueOperations";
 import { useGameplayOperations } from "@/components/useGameplayOperations";
 import { usePreviewRuntime } from "@/components/usePreviewRuntime";
 import { useStudioAssets } from "@/components/useStudioAssets";
+import { LoadedCloudProject, useCloudProjects } from "@/components/useCloudProjects";
 import {
   EditorEdge,
   EditorNode,
@@ -218,6 +219,8 @@ export function AuthorStudioApp() {
   const actionBusy = authBusy || adminBusy || accountBusy;
   const [newProjectWarningOpen, setNewProjectWarningOpen] = useState(false);
   const [restoreCandidate, setRestoreCandidate] = useState<StudioSnapshot | null>(null);
+  const [restoreCandidateSource, setRestoreCandidateSource] = useState<"local" | "cloud">("local");
+  const [pendingCloudProject, setPendingCloudProject] = useState<LoadedCloudProject | null>(null);
   const lastAutosavedFingerprintRef = useRef<string | null>(null);
   const [lastSavedFingerprint, setLastSavedFingerprint] = useState(() =>
     buildStudioChangeFingerprint(initialProject, seed.nodes, seed.edges, {}),
@@ -1026,6 +1029,20 @@ export function AuthorStudioApp() {
     [assetRefs, edges, nodes, project],
   );
   const hasUnsavedChanges = currentFingerprint !== lastSavedFingerprint;
+  const cloudProjects = useCloudProjects(
+    backend,
+    Boolean(authUser && canUseAuthorTools && backend?.projects && backend.assets),
+    authUser?.id ?? null,
+  );
+
+  const createCurrentSnapshot = useCallback((): StudioSnapshot => ({
+    savedAt: new Date().toISOString(),
+    fingerprint: currentFingerprint,
+    project,
+    blocks,
+    assetRefs,
+    openedValidatedChapterIds,
+  }), [assetRefs, blocks, currentFingerprint, openedValidatedChapterIds, project]);
 
   useEffect(() => {
     toastsRef.current = toasts;
@@ -1111,6 +1128,38 @@ export function AuthorStudioApp() {
     [currentFingerprint],
   );
 
+  const saveProjectToCloud = useCallback(async () => {
+    const result = await cloudProjects.save(createCurrentSnapshot());
+    if (!result.ok) {
+      setStatusMessage(`Échec sauvegarde cloud: ${result.error.message}`);
+      return;
+    }
+    markStudioClean(currentFingerprint);
+    setStatusMessage("Projet et médias sauvegardés sur Cadarium.");
+  }, [cloudProjects, createCurrentSnapshot, currentFingerprint, markStudioClean]);
+
+  const loadProjectFromCloud = useCallback(async (projectId: string) => {
+    const result = await cloudProjects.load(projectId);
+    if (!result.ok) {
+      setStatusMessage(`Échec chargement cloud: ${result.error.message}`);
+      return;
+    }
+    setPendingCloudProject(result.value);
+    setRestoreCandidateSource("cloud");
+    setRestoreCandidate(result.value.snapshot);
+  }, [cloudProjects]);
+
+  const archiveCloudProject = useCallback(async (projectId: string) => {
+    if (!window.confirm("Archiver cette sauvegarde cloud ?")) return;
+    const result = await cloudProjects.archive(projectId);
+    setStatusMessage(result.ok ? "Projet cloud archivé." : `Échec archivage cloud: ${result.error.message}`);
+  }, [cloudProjects]);
+
+  const refreshCloudProjects = useCallback(async () => {
+    const result = await cloudProjects.refresh();
+    if (!result.ok) setStatusMessage(`Échec actualisation cloud: ${result.error.message}`);
+  }, [cloudProjects]);
+
   const exportProjectZip = useCallback(async () => {
     const exported = await exportZip();
     if (exported) {
@@ -1128,6 +1177,7 @@ export function AuthorStudioApp() {
       if (cancelled || !snapshot) return;
       await promoteToSessionBackup(snapshot);
       if (cancelled) return;
+      setRestoreCandidateSource("local");
       setRestoreCandidate(snapshot);
     })();
     return () => {
@@ -2629,6 +2679,7 @@ export function AuthorStudioApp() {
     );
     setLastValidation([]);
     resetPreview();
+    cloudProjects.detach();
     markStudioClean(buildStudioChangeFingerprint(normalizedFreshProject, fresh.nodes, freshEdges, {}));
     if (!options?.preserveStatusMessage) {
       setStatusMessage("Nouveau projet initialise.");
@@ -2683,18 +2734,26 @@ export function AuthorStudioApp() {
     );
     setLastValidation([]);
     resetPreview();
-    // Volontairement PAS de markStudioClean: le travail restaure n'est pas
-    // exporte en ZIP, l'indicateur doit rester "Non sauvegarde".
+    if (restoreCandidateSource === "cloud" && pendingCloudProject) {
+      cloudProjects.activate(pendingCloudProject.id, pendingCloudProject.revision);
+      markStudioClean(restoreCandidate.fingerprint);
+    }
     lastAutosavedFingerprintRef.current = null;
     setRestoreCandidate(null);
-    setStatusMessage("Travail restaure depuis la sauvegarde automatique locale.");
+    setPendingCloudProject(null);
+    setStatusMessage(
+      restoreCandidateSource === "cloud"
+        ? "Projet restauré depuis Cadarium."
+        : "Travail restaure depuis la sauvegarde automatique locale.",
+    );
   };
 
   const declineRestoreCandidate = () => {
     setRestoreCandidate(null);
-    setStatusMessage(
-      "Sauvegarde automatique ignoree. Elle sera remplacee a ta prochaine modification.",
-    );
+    setPendingCloudProject(null);
+    setStatusMessage(restoreCandidateSource === "cloud"
+      ? "Chargement cloud annulé. Le projet courant est conservé."
+      : "Sauvegarde automatique ignoree. Elle sera remplacee a ta prochaine modification.");
   };
 
   const openAccountModal = () => {
@@ -3083,6 +3142,14 @@ export function AuthorStudioApp() {
             isAuthenticated={Boolean(authUser)}
             authEmail={authUser?.email ?? null}
             platformRole={platformRole}
+            cloudEnabled={Boolean(authUser && canUseAuthorTools && backend?.projects && backend.assets)}
+            cloudBusy={cloudProjects.busy}
+            cloudProjects={cloudProjects.projects}
+            activeCloudProjectId={cloudProjects.activeProject?.id ?? null}
+            onSaveCloud={() => { void saveProjectToCloud(); }}
+            onRefreshCloud={() => { void refreshCloudProjects(); }}
+            onLoadCloud={(projectId) => { void loadProjectFromCloud(projectId); }}
+            onArchiveCloud={(projectId) => { void archiveCloudProject(projectId); }}
           />
           )}
 
@@ -3516,20 +3583,21 @@ export function AuthorStudioApp() {
       {authUser && restoreCandidate && (
         <div className="confirm-overlay">
           <div className="confirm-modal">
-            <h2>Travail non exporte detecte</h2>
+            <h2>{restoreCandidateSource === "cloud" ? "Ouvrir le projet cloud" : "Travail non exporte detecte"}</h2>
             <p>
-              Une sauvegarde automatique locale du{" "}
+              {restoreCandidateSource === "cloud" ? "La sauvegarde Cadarium du " : "Une sauvegarde automatique locale du "}
               <strong>{new Date(restoreCandidate.savedAt).toLocaleString("fr-FR")}</strong> existe
               {" "}({restoreCandidate.blocks.length} bloc(s), projet{" "}
               <strong>{restoreCandidate.project.info.title || "sans titre"}</strong>).
             </p>
             <p className="confirm-warning">
-              Restaurer remplace le contenu actuel de l&apos;editeur. Ignorer conserve la
-              sauvegarde jusqu&apos;a ta prochaine modification.
+              Restaurer remplace le contenu actuel de l&apos;editeur. {restoreCandidateSource === "cloud"
+                ? "Annuler conserve le projet actuellement ouvert."
+                : "Ignorer conserve la sauvegarde jusqu'a ta prochaine modification."}
             </p>
             <div className="confirm-actions">
               <button className="button-secondary" onClick={declineRestoreCandidate}>
-                Repartir a neuf
+                {restoreCandidateSource === "cloud" ? "Annuler" : "Repartir a neuf"}
               </button>
               <button className="button-primary" onClick={applyRestoreCandidate}>
                 Restaurer

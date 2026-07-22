@@ -1,5 +1,5 @@
-import { AccountPort, AdminPort, AuthEvent, AuthPort, Backend, ProjectPort } from "./ports";
-import { AuthorUser, BackendResult, CloudProject, CloudProjectSummary, PlatformProfile, PlatformRole, fail, ok } from "./types";
+import { AccountPort, AdminPort, AssetPort, AuthEvent, AuthPort, Backend, ProjectPort } from "./ports";
+import { AuthorUser, BackendResult, CloudAsset, CloudProject, CloudProjectSummary, PlatformProfile, PlatformRole, fail, ok } from "./types";
 import { CadariumApiClient, CadariumApiError } from "./cadariumApiClient";
 
 interface TokenStorage {
@@ -33,7 +33,8 @@ export interface CadariumBackendOptions {
 const tokenKey = "cadarium-author-session";
 
 export function createCadariumBackend(options: CadariumBackendOptions): Backend {
-  const api = new CadariumApiClient(options.baseUrl.replace(/\/$/, ""), options.fetcher);
+  const fetcher = options.fetcher ?? fetch;
+  const api = new CadariumApiClient(options.baseUrl.replace(/\/$/, ""), fetcher);
   const listeners = new Set<(user: AuthorUser | null, event: AuthEvent) => void>();
   let currentAuthor: CadariumAuthor | null = null;
 
@@ -204,6 +205,61 @@ export function createCadariumBackend(options: CadariumBackendOptions): Backend 
     },
   };
 
+  const assets: AssetPort = {
+    async list(projectId) {
+      return mapResult(
+        await authenticatedRequest((token) => api.request<{ assets: CloudAsset[] }>(`/v1/author/projects/${encodeURIComponent(projectId)}/assets`, { token })),
+        (response) => response.assets,
+      );
+    },
+
+    async upload(projectId, assetId, fileName, blob) {
+      const sha256 = await hashBlob(blob);
+      const prepared = await authenticatedRequest((token) => api.request<{
+        status: "prepared" | "already_ready";
+        uploadUrl?: string;
+        uploadHeaders?: Record<string, string>;
+      }>(`/v1/author/projects/${encodeURIComponent(projectId)}/assets/uploads`, {
+        method: "POST",
+        token,
+        body: { assetId, fileName, contentType: blob.type, sizeBytes: blob.size, sha256 },
+      }));
+      if (!prepared.ok) return prepared;
+      if (prepared.value.status === "prepared") {
+        if (!prepared.value.uploadUrl) return fail("server", "URL d'envoi du média absente.");
+        try {
+          const response = await fetcher(prepared.value.uploadUrl, {
+            method: "PUT",
+            headers: prepared.value.uploadHeaders,
+            body: blob,
+          });
+          if (!response.ok) return fail("network", "L'envoi du média vers le stockage a échoué.");
+        } catch {
+          return fail("network", "Le stockage des médias est inaccessible.");
+        }
+      }
+      const completed = await authenticatedRequest((token) => api.request<{ asset: CloudAsset }>(
+        `/v1/author/projects/${encodeURIComponent(projectId)}/assets/${encodeURIComponent(assetId)}/complete`,
+        { method: "POST", token },
+      ));
+      return mapResult(completed, (response) => response.asset);
+    },
+
+    async download(projectId, assetId) {
+      const signed = await authenticatedRequest((token) => api.request<{ url: string }>(
+        `/v1/author/projects/${encodeURIComponent(projectId)}/assets/${encodeURIComponent(assetId)}/download`,
+        { token },
+      ));
+      if (!signed.ok) return signed;
+      try {
+        const response = await fetcher(signed.value.url);
+        return response.ok ? ok(await response.blob()) : fail("network", "Téléchargement du média impossible.");
+      } catch {
+        return fail("network", "Le stockage des médias est inaccessible.");
+      }
+    },
+  };
+
   async function authenticatedRequest<T>(operation: (token: string) => Promise<T>): Promise<BackendResult<T>> {
     const token = options.storage.getItem(tokenKey);
     if (!token) return fail("unauthorized", "Connecte-toi pour effectuer cette action.");
@@ -214,7 +270,7 @@ export function createCadariumBackend(options: CadariumBackendOptions): Backend 
     }
   }
 
-  return { auth, admin, account, projects };
+  return { auth, admin, account, projects, assets };
 }
 
 function toAuthorUser(author: CadariumAuthor | null): AuthorUser | null {
@@ -243,4 +299,9 @@ function fromApiError(error: unknown): { ok: false; error: { kind: "invalid_requ
 
 function unavailable<T = void>(message: string): BackendResult<T> {
   return fail("server", message);
+}
+
+async function hashBlob(blob: Blob): Promise<string> {
+  const digest = await crypto.subtle.digest("SHA-256", await blob.arrayBuffer());
+  return Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, "0")).join("");
 }

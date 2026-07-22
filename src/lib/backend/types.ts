@@ -37,6 +37,19 @@ export interface CloudProject<T = unknown> extends CloudProjectSummary {
   document: T;
 }
 
+export interface CloudAsset {
+  id: string;
+  projectId: string;
+  assetId: string;
+  fileName: string;
+  contentType: string;
+  sizeBytes: number;
+  sha256: string;
+  status: "pending" | "ready";
+  createdAt: string;
+  updatedAt: string;
+}
+
 export type BackendErrorKind =
   | "invalid_request"
   | "unauthorized"

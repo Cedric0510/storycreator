@@ -13,6 +13,7 @@ import {
   PlatformRole,
   CloudProject,
   CloudProjectSummary,
+  CloudAsset,
 } from "./types";
 
 export type AuthEvent =
@@ -81,9 +82,16 @@ export interface ProjectPort {
   archive(projectId: string): Promise<BackendResult>;
 }
 
+export interface AssetPort {
+  list(projectId: string): Promise<BackendResult<CloudAsset[]>>;
+  upload(projectId: string, assetId: string, fileName: string, blob: Blob): Promise<BackendResult<CloudAsset>>;
+  download(projectId: string, assetId: string): Promise<BackendResult<Blob>>;
+}
+
 export interface Backend {
   auth: AuthPort;
   admin: AdminPort;
   account: AccountPort;
   projects?: ProjectPort;
+  assets?: AssetPort;
 }
