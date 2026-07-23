@@ -44,6 +44,7 @@ import { useDialogueOperations } from "@/components/useDialogueOperations";
 import { useGameplayOperations } from "@/components/useGameplayOperations";
 import { usePreviewRuntime } from "@/components/usePreviewRuntime";
 import { useStudioAssets } from "@/components/useStudioAssets";
+import { useStudioParts } from "@/components/useStudioParts";
 import { LoadedCloudProject, useCloudProjects } from "@/components/useCloudProjects";
 import {
   EditorEdge,
@@ -52,7 +53,6 @@ import {
   blockFromNode,
   blockToNode,
   computeChapterBlockSets,
-  computePartBlockSets,
   buildStudioChangeFingerprint,
   buildEdge,
   buildInitialStudio,
@@ -179,7 +179,6 @@ export function AuthorStudioApp() {
     project.info.startBlockId,
   );
   const [openedValidatedChapterIds, setOpenedValidatedChapterIds] = useState<string[]>([]);
-  const [openedValidatedPartIds, setOpenedValidatedPartIds] = useState<string[]>([]);
   const [lastValidation, setLastValidation] = useState<ValidationIssue[]>([]);
   const [statusMessage, setStatusMessage] = useState<string>("");
   const [toasts, setToasts] = useState<Array<{ id: number; text: string; level: "info" | "warn" | "error"; exiting: boolean }>>([]);
@@ -565,6 +564,25 @@ export function AuthorStudioApp() {
     return [...manualEdges, ...autoEdges];
   }, [edges, nodes]);
 
+  const {
+    hiddenValidatedPartIds,
+    openedValidatedPartIds,
+    partBlockSets,
+    setOpenedValidatedPartIds,
+    setPartValidationFromEnd,
+    toggleValidatedPartVisibility,
+  } = useStudioParts({
+    nodes,
+    edges: edgesWithAutoDialogueLinks,
+    project,
+    setProject,
+    blockById,
+    canEdit,
+    removeSelectedBlocks,
+    replaceSelectedBlocks,
+    setStatusMessage,
+  });
+
   /** Map chapterId → chapter_start node (used to position folder nodes) */
   const chapterStartNodeMap = useMemo(() => {
     const map = new Map<string, EditorNode>();
@@ -587,25 +605,6 @@ export function AuthorStudioApp() {
     [edgesWithAutoDialogueLinks, nodes, project.chapters],
   );
 
-  const partBlockSets = useMemo(
-    () => computePartBlockSets(nodes, edgesWithAutoDialogueLinks, project.parts),
-    [edgesWithAutoDialogueLinks, nodes, project.parts],
-  );
-
-  const openedValidatedPartIdSet = useMemo(
-    () => new Set(openedValidatedPartIds),
-    [openedValidatedPartIds],
-  );
-
-  const hiddenValidatedPartIds = useMemo(
-    () =>
-      new Set(
-        project.parts
-          .filter((part) => part.validated && !openedValidatedPartIdSet.has(part.id))
-          .map((part) => part.id),
-      ),
-    [openedValidatedPartIdSet, project.parts],
-  );
 
   /** Compute BFS-based block→chapter and build hidden set — both used below */
   const computeChapterContext = useCallback((chapId: string) => {
@@ -887,71 +886,6 @@ export function AuthorStudioApp() {
     computeChapterContext,
     openedValidatedChapterIdSet,
     project.chapters,
-    removeSelectedBlocks,
-    replaceSelectedBlocks,
-    setStatusMessage,
-  ]);
-
-  const setPartValidationFromEnd = useCallback((partEndBlockId: string, validated: boolean) => {
-    if (!canEdit) return;
-    const endBlock = blockById.get(partEndBlockId);
-    if (!endBlock || endBlock.type !== "part_end" || !endBlock.partId) return;
-    const part = project.parts.find((candidate) => candidate.id === endBlock.partId);
-    if (!part) {
-      setStatusMessage("Partie introuvable pour cette fin de partie.");
-      return;
-    }
-    if (validated && !part.chapterId) {
-      setStatusMessage("Selectionne le chapitre parent avant de valider cette partie.");
-      return;
-    }
-    const memberIds = partBlockSets.get(part.id);
-    const hasStart = nodes.some(
-      (node) => node.data.block.type === "part_start" && node.data.block.partId === part.id,
-    );
-    if (validated && (!hasStart || !memberIds?.has(partEndBlockId))) {
-      setStatusMessage("Relie le debut de partie a cette fin de partie avant de la valider.");
-      return;
-    }
-
-    setProject((current) => ({
-      ...current,
-      parts: current.parts.map((candidate) =>
-        candidate.id === part.id ? { ...candidate, validated } : candidate,
-      ),
-      info: { ...current.info, updatedAt: new Date().toISOString() },
-    }));
-
-    if (validated) {
-      setOpenedValidatedPartIds((current) => current.filter((id) => id !== part.id));
-      removeSelectedBlocks(memberIds ?? new Set<string>());
-      setStatusMessage(`Partie "${part.name}" validee et archivee.`);
-      return;
-    }
-
-    setStatusMessage(`Partie "${part.name}" remise en edition.`);
-  }, [blockById, canEdit, nodes, partBlockSets, project.parts, removeSelectedBlocks, setStatusMessage]);
-
-  const toggleValidatedPartVisibility = useCallback((partId: string) => {
-    const part = project.parts.find((candidate) => candidate.id === partId);
-    if (!part?.validated) return;
-    if (openedValidatedPartIdSet.has(partId)) {
-      setOpenedValidatedPartIds((current) => current.filter((id) => id !== partId));
-      removeSelectedBlocks(partBlockSets.get(partId) ?? new Set<string>());
-      setStatusMessage(`Partie "${part.name}" masquee du whiteboard.`);
-      return;
-    }
-    setOpenedValidatedPartIds((current) => [...current, partId]);
-    const start = nodes.find(
-      (node) => node.data.block.type === "part_start" && node.data.block.partId === partId,
-    );
-    if (start) replaceSelectedBlocks([start.id], start.id);
-    setStatusMessage(`Partie "${part.name}" reouverte sur le whiteboard.`);
-  }, [
-    nodes,
-    openedValidatedPartIdSet,
-    partBlockSets,
-    project.parts,
     removeSelectedBlocks,
     replaceSelectedBlocks,
     setStatusMessage,
