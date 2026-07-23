@@ -370,6 +370,13 @@ export const DEFAULT_SCENE_LAYOUT: SceneLayout = {
 };
 
 const DEFAULT_CHOICE_OPTION_LAYOUTS: Record<ChoiceLabel, SceneLayerLayout> = {
+  A: { x: 8, y: 18, width: 38, height: 34 },
+  B: { x: 54, y: 18, width: 38, height: 34 },
+  C: { x: 8, y: 58, width: 38, height: 34 },
+  D: { x: 54, y: 58, width: 38, height: 34 },
+};
+
+const LEGACY_CHOICE_OPTION_LAYOUTS: Record<ChoiceLabel, SceneLayerLayout> = {
   A: { x: 8, y: 22, width: 38, height: 68 },
   B: { x: 54, y: 22, width: 38, height: 68 },
   C: { x: 8, y: 56, width: 38, height: 36 },
@@ -379,6 +386,24 @@ const DEFAULT_CHOICE_OPTION_LAYOUTS: Record<ChoiceLabel, SceneLayerLayout> = {
 export function defaultChoiceOptionLayout(label: ChoiceLabel): SceneLayerLayout {
   const layout = DEFAULT_CHOICE_OPTION_LAYOUTS[label] ?? DEFAULT_CHOICE_OPTION_LAYOUTS.A;
   return { ...layout };
+}
+
+function migrateLegacyChoiceOptionLayout(
+  layout: SceneLayerLayout,
+  label: ChoiceLabel,
+  choiceCount: number,
+): SceneLayerLayout {
+  const legacy = LEGACY_CHOICE_OPTION_LAYOUTS[label];
+  if (
+    choiceCount > 2 &&
+    layout.x === legacy.x &&
+    layout.y === legacy.y &&
+    layout.width === legacy.width &&
+    layout.height === legacy.height
+  ) {
+    return defaultChoiceOptionLayout(label);
+  }
+  return layout;
 }
 
 export interface DialogueBlock extends BaseBlock {
@@ -1663,9 +1688,13 @@ export function normalizeStoryBlock(block: StoryBlock): StoryBlock {
       ...option,
       description: option.description ?? "",
       imageAssetId: option.imageAssetId ?? null,
-      layout: normalizeLayerLayout(
-        (option as unknown as Record<string, unknown>).layout,
-        defaultChoiceOptionLayout(option.label),
+      layout: migrateLegacyChoiceOptionLayout(
+        normalizeLayerLayout(
+          (option as unknown as Record<string, unknown>).layout,
+          defaultChoiceOptionLayout(option.label),
+        ),
+        option.label,
+        rawChoices.length,
       ),
       zIndex:
         typeof (option as unknown as Record<string, unknown>).zIndex === "number" &&

@@ -15,6 +15,20 @@ import {
 } from "./story";
 
 describe("story gameplay schema", () => {
+  it("migrates overlapping legacy choice layouts without changing custom layouts", () => {
+    const block = createBlock("choice", { x: 0, y: 0 }) as ChoiceBlock;
+    block.choices = [
+      { ...block.choices[0], id: "a", label: "A", layout: { x: 8, y: 22, width: 38, height: 68 } },
+      { ...block.choices[1], id: "b", label: "B", layout: { x: 54, y: 22, width: 38, height: 68 } },
+      { ...block.choices[0], id: "c", label: "C", layout: { x: 12, y: 61, width: 30, height: 25 } },
+    ];
+
+    const normalized = normalizeStoryBlock(block) as ChoiceBlock;
+    expect(normalized.choices[0].layout).toEqual({ x: 8, y: 18, width: 38, height: 34 });
+    expect(normalized.choices[1].layout).toEqual({ x: 54, y: 18, width: 38, height: 34 });
+    expect(normalized.choices[2].layout).toEqual({ x: 12, y: 61, width: 30, height: 25 });
+  });
+
   it("creates gameplay block with V3 defaults", () => {
     const block = createBlock("gameplay", { x: 100, y: 120 }) as GameplayBlock;
 
@@ -587,7 +601,7 @@ describe("story choice block", () => {
     expect(block.choices[1].label).toBe("B");
     expect(block.choices[0].description).toBe("");
     expect(block.choices[0].imageAssetId).toBeNull();
-    expect(block.choices[0].layout).toEqual({ x: 8, y: 22, width: 38, height: 68 });
+    expect(block.choices[0].layout).toEqual({ x: 8, y: 18, width: 38, height: 34 });
     expect(block.choices[0].zIndex).toBe(2);
     expect(block.choices[0].effects).toEqual([]);
     expect(block.choices[0].heroMemoryVariableId).toBeNull();
@@ -676,7 +690,7 @@ describe("story choice block", () => {
       background: { x: 0, y: 0, width: 100, height: 100 },
       character: { x: 25, y: 10, width: 50, height: 80 },
     });
-    expect(normalized.choices[0].layout).toEqual({ x: 8, y: 22, width: 38, height: 68 });
+    expect(normalized.choices[0].layout).toEqual({ x: 8, y: 18, width: 38, height: 34 });
     expect(normalized.choices[0].zIndex).toBe(2);
   });
 

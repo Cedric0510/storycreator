@@ -568,10 +568,19 @@ export function PreviewOverlay({
                         text={currentLine.text || "…"}
                       />
                     </div>
+                    {currentLine.responses.length === 0 && (
+                      <button
+                        className="preview-vn-next-btn"
+                        onClick={onContinue}
+                        aria-label="Continuer"
+                      >
+                        <span aria-hidden>{"\u25B6"}</span>
+                      </button>
+                    )}
                   </div>
-                  <div className="preview-vn-responses">
-                    {currentLine.responses.length > 0 ? (
-                      currentLine.responses.map((resp) => (
+                  {currentLine.responses.length > 0 && (
+                    <div className="preview-vn-responses">
+                      {currentLine.responses.map((resp) => (
                       <button
                         key={resp.id}
                         className="preview-vn-response-btn"
@@ -580,13 +589,9 @@ export function PreviewOverlay({
                         <strong>{resp.label}</strong>
                         <FormattedPlayerText text={resp.text || "…"} />
                       </button>
-                      ))
-                    ) : (
-                      <button className="preview-vn-response-btn" onClick={onContinue}>
-                        <strong>Continuer</strong>
-                      </button>
-                    )}
-                  </div>
+                      ))}
+                    </div>
+                  )}
                 </div>
               </div>
             );
@@ -606,7 +611,8 @@ export function PreviewOverlay({
             const hasChoiceImages = positionedChoices.some((option) => Boolean(option.imageSrc));
             const isTextChoiceMode = previewBlock.displayMode === "text";
             const showVisualChoiceScene = !isTextChoiceMode && hasChoiceImages;
-            const textModeCharacterLayers = isTextChoiceMode
+            const usesTextChoiceCards = isTextChoiceMode || !hasChoiceImages;
+            const textModeCharacterLayers = usesTextChoiceCards
               ? (previewBlock.characterLayers ?? [])
                   .map((layer, index) => ({
                     id: layer.id,
@@ -652,12 +658,27 @@ export function PreviewOverlay({
                   />
                 ))}
 
-                <div className="preview-vn-choice-scene-area">
-                  <FormattedPlayerText
-                    as="h3"
-                    className="preview-vn-choice-prompt"
-                    text={previewBlock.prompt || "Choisissez..."}
-                  />
+                <div
+                  className={`preview-vn-choice-scene-area${
+                    usesTextChoiceCards ? " preview-vn-choice-scene-area-text" : ""
+                  }`}
+                >
+                  {usesTextChoiceCards ? (
+                    <div className="preview-vn-choice-text-panel">
+                      <FormattedPlayerText
+                        as="h3"
+                        className="preview-vn-choice-prompt"
+                        text={previewBlock.prompt || "Choisissez..."}
+                      />
+                      <small>Touchez une réponse pour continuer.</small>
+                    </div>
+                  ) : (
+                    <FormattedPlayerText
+                      as="h3"
+                      className="preview-vn-choice-prompt"
+                      text={previewBlock.prompt || "Choisissez..."}
+                    />
+                  )}
 
                   {showVisualChoiceScene ? (
                     <div className="preview-vn-choice-scene">
@@ -694,7 +715,11 @@ export function PreviewOverlay({
                       ))}
                     </div>
                   ) : (
-                    <div className="preview-vn-choice-grid">
+                    <div
+                      className={`preview-vn-choice-grid${
+                        previewBlock.choices.length > 2 ? " preview-vn-choice-grid-many" : ""
+                      }${previewBlock.choices.length > 4 ? " preview-vn-choice-grid-dense" : ""} preview-vn-choice-grid-count-${Math.min(previewBlock.choices.length, 5)}`}
+                    >
                       {previewBlock.choices.map((option) => (
                         <button
                           key={option.id}

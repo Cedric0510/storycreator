@@ -2852,6 +2852,73 @@ label {
 }
 
 .preview-vn-choice-btn {
+  border-left: 3px solid rgba(251, 191, 36, 0.78);
+}
+
+.preview-vn-choice-grid-many {
+  gap: 6px;
+}
+
+.preview-vn-choice-scene-area-text {
+  position: absolute;
+  inset: 0;
+  padding: 0;
+  background: none;
+}
+
+.preview-vn-choice-scene-area-text .preview-vn-choice-grid {
+  position: absolute;
+  top: 52px;
+  right: 12px;
+  bottom: 104px;
+  left: 12px;
+  align-content: end;
+  overflow-y: auto;
+}
+
+.preview-vn-choice-grid-count-3 {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.preview-vn-choice-grid-count-4 {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.preview-vn-choice-grid-count-5 {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.preview-vn-choice-text-panel {
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  left: 0;
+  z-index: 30;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 10px 14px 12px;
+  border-top: 1px solid rgba(251, 191, 36, 0.34);
+  background: rgba(8, 15, 28, 0.84);
+}
+
+.preview-vn-choice-text-panel small {
+  color: #d6e6f4;
+  font-size: 12px;
+}
+
+.preview-vn-choice-grid-many .preview-vn-choice-btn {
+  gap: 3px;
+  padding: 7px;
+  font-size: 12px;
+}
+
+.preview-vn-choice-grid-dense .preview-vn-choice-btn {
+  padding: 5px;
+  font-size: 11px;
+}
+
+.preview-vn-choice-btn {
   display: flex;
   flex-direction: column;
   align-items: center;
