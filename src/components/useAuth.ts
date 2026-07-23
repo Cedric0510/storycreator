@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 import { Backend, SignUpOutcome } from "@/lib/backend/ports";
 import { getBrowserBackend } from "@/lib/backend/browserBackend";
@@ -36,8 +36,9 @@ export interface UseAuthResult {
  * l'utilisateur en `reader` (ce qui desactiverait ses outils).
  */
 export function useAuth(options: UseAuthOptions = {}): UseAuthResult {
-  const backend = useMemo(() => getBrowserBackend(), []);
-  const [authLoading, setAuthLoading] = useState(Boolean(backend));
+  const [backend, setBackend] = useState<Backend | null>(null);
+  const [backendResolved, setBackendResolved] = useState(false);
+  const [authLoading, setAuthLoading] = useState(true);
   const [user, setUser] = useState<AuthorUser | null>(null);
   const [role, setRole] = useState<PlatformRole>("reader");
   const [busy, setBusy] = useState(false);
@@ -49,6 +50,12 @@ export function useAuth(options: UseAuthOptions = {}): UseAuthResult {
   }, [options.onNotice]);
 
   useEffect(() => {
+    setBackend(getBrowserBackend());
+    setBackendResolved(true);
+  }, []);
+
+  useEffect(() => {
+    if (!backendResolved) return;
     if (!backend) {
       setAuthLoading(false);
       return;
@@ -137,7 +144,7 @@ export function useAuth(options: UseAuthOptions = {}): UseAuthResult {
       window.clearTimeout(loadingSafety);
       unsubscribe();
     };
-  }, [backend]);
+  }, [backend, backendResolved]);
 
   const signIn = useCallback(
     async (email: string, password: string): Promise<BackendResult> => {
