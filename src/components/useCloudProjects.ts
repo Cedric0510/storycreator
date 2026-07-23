@@ -31,7 +31,7 @@ export function useCloudProjects(backend: Backend | null, enabled: boolean, owne
   const refresh = useCallback(async () => {
     if (!enabled || !backend?.projects) {
       setProjects([]);
-      return fail("server", "Sauvegarde cloud Cadarium indisponible.");
+      return fail("server", "Cadarium Cloud est indisponible.");
     }
     const result = await backend.projects.list();
     if (result.ok) setProjects(result.value);
@@ -64,7 +64,7 @@ export function useCloudProjects(backend: Backend | null, enabled: boolean, owne
   }, [activeStorageKey, enabled]);
 
   const save = useCallback(async (snapshot: StudioSnapshot): Promise<BackendResult> => {
-    if (!backend?.projects) return fail("server", "Sauvegarde cloud Cadarium indisponible.");
+    if (!backend?.projects) return fail("server", "Cadarium Cloud est indisponible.");
     setBusy(true);
     try {
       const title = snapshot.project.info.title.trim() || "Projet sans titre";
@@ -91,7 +91,7 @@ export function useCloudProjects(backend: Backend | null, enabled: boolean, owne
   }, [activeProject, backend, refresh, storeActiveProject]);
 
   const load = useCallback(async (projectId: string): Promise<BackendResult<LoadedCloudProject>> => {
-    if (!backend?.projects) return fail("server", "Sauvegarde cloud Cadarium indisponible.");
+    if (!backend?.projects) return fail("server", "Cadarium Cloud est indisponible.");
     setBusy(true);
     try {
       const result = await backend.projects.load<unknown>(projectId);
@@ -112,7 +112,7 @@ export function useCloudProjects(backend: Backend | null, enabled: boolean, owne
   }, [backend]);
 
   const archive = useCallback(async (projectId: string): Promise<BackendResult> => {
-    if (!backend?.projects) return fail("server", "Sauvegarde cloud Cadarium indisponible.");
+    if (!backend?.projects) return fail("server", "Cadarium Cloud est indisponible.");
     setBusy(true);
     try {
       const result = await backend.projects.archive(projectId);

@@ -1135,7 +1135,7 @@ export function AuthorStudioApp() {
       return;
     }
     markStudioClean(currentFingerprint);
-    setStatusMessage("Projet et médias sauvegardés sur Cadarium.");
+    setStatusMessage("Projet et médias sauvegardés dans Cadarium Cloud.");
   }, [cloudProjects, createCurrentSnapshot, currentFingerprint, markStudioClean]);
 
   const loadProjectFromCloud = useCallback(async (projectId: string) => {
@@ -3137,7 +3137,7 @@ export function AuthorStudioApp() {
           <div className="panel-left-stack">
           {activeLeftSection === "cloud" && (
           <AuthorStudioAccountPanel
-            supabaseEnabled={backendReady}
+            backendEnabled={backendReady}
             authLoading={authLoading}
             isAuthenticated={Boolean(authUser)}
             authEmail={authUser?.email ?? null}
@@ -3583,9 +3583,9 @@ export function AuthorStudioApp() {
       {authUser && restoreCandidate && (
         <div className="confirm-overlay">
           <div className="confirm-modal">
-            <h2>{restoreCandidateSource === "cloud" ? "Ouvrir le projet cloud" : "Travail non exporte detecte"}</h2>
+            <h2>{restoreCandidateSource === "cloud" ? "Ouvrir la sauvegarde Cadarium Cloud" : "Travail non exporte detecte"}</h2>
             <p>
-              {restoreCandidateSource === "cloud" ? "La sauvegarde Cadarium du " : "Une sauvegarde automatique locale du "}
+              {restoreCandidateSource === "cloud" ? "La sauvegarde Cadarium Cloud du " : "Une sauvegarde automatique locale du "}
               <strong>{new Date(restoreCandidate.savedAt).toLocaleString("fr-FR")}</strong> existe
               {" "}({restoreCandidate.blocks.length} bloc(s), projet{" "}
               <strong>{restoreCandidate.project.info.title || "sans titre"}</strong>).

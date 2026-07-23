@@ -5,7 +5,7 @@ import { CollapsibleSection } from "@/components/CollapsibleSection";
 import { HelpHint } from "@/components/HelpHint";
 
 interface AuthorStudioAccountPanelProps {
-  supabaseEnabled: boolean;
+  backendEnabled: boolean;
   authLoading: boolean;
   isAuthenticated: boolean;
   authEmail: string | null;
@@ -21,7 +21,7 @@ interface AuthorStudioAccountPanelProps {
 }
 
 export function AuthorStudioAccountPanel({
-  supabaseEnabled,
+  backendEnabled,
   authLoading,
   isAuthenticated,
   authEmail,
@@ -47,16 +47,15 @@ export function AuthorStudioAccountPanel({
           </HelpHint>
         }
       >
-        {!supabaseEnabled && (
+        {!backendEnabled && (
           <p className="empty-placeholder">
-            Configure `NEXT_PUBLIC_SUPABASE_URL` et `NEXT_PUBLIC_SUPABASE_ANON_KEY` (ou
-            `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY`).
+            Le backend Cadarium n&apos;est pas configuré.
           </p>
         )}
 
-        {supabaseEnabled && authLoading && <p>Chargement session...</p>}
+        {backendEnabled && authLoading && <p>Chargement session...</p>}
 
-        {supabaseEnabled && !authLoading && !isAuthenticated && (
+        {backendEnabled && !authLoading && !isAuthenticated && (
           <div className="subsection">
             <p className="empty-placeholder">
               Connecte-toi depuis la page d&apos;accueil pour acceder au studio.
@@ -67,22 +66,23 @@ export function AuthorStudioAccountPanel({
           </div>
         )}
 
-        {supabaseEnabled && !authLoading && isAuthenticated && (
+        {backendEnabled && !authLoading && isAuthenticated && (
           <div className="subsection">
             <p>
               Connecte: <strong>{authEmail ?? "compte sans email"}</strong>{" "}
               <span className="chip chip-start">{platformRole}</span>
             </p>
             <p className="empty-placeholder">
-              Sauvegarde en ligne desactivee. Les projets se sauvegardent avec
-              Export ZIP et se reprennent avec Import ZIP.
+              {cloudEnabled
+                ? "Cadarium Cloud est disponible pour sauvegarder et restaurer tes projets."
+                : "Cadarium Cloud est indisponible. Utilise Export ZIP pour conserver une copie locale."}
             </p>
           </div>
         )}
       </CollapsibleSection>
 
       {cloudEnabled && isAuthenticated && (
-        <CollapsibleSection storageKey="cloud-projects" title="Projets cloud">
+        <CollapsibleSection storageKey="cloud-projects" title="Cadarium Cloud">
           <div className="row-inline">
             <button className="button-primary" onClick={onSaveCloud} disabled={cloudBusy}>
               {activeCloudProjectId ? "Sauvegarder" : "Créer la sauvegarde"}
@@ -92,7 +92,7 @@ export function AuthorStudioAccountPanel({
             </button>
           </div>
           {cloudProjects.length === 0 ? (
-            <p className="empty-placeholder">Aucun projet sauvegardé sur Cadarium.</p>
+            <p className="empty-placeholder">Aucune sauvegarde dans Cadarium Cloud.</p>
           ) : (
             <ul className="cloud-project-list">
               {cloudProjects.map((project) => (

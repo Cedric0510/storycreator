@@ -11,7 +11,7 @@ export default function GuidePremierProjetPage() {
           Un admin t&apos;a passe au role <code>author</code> ou <code>admin</code> pour editer.
         </li>
         <li>
-          Tu es connecte dans le bloc <code>Supabase Cloud</code>.
+          Tu es connecté dans le bloc <code>Cadarium Cloud</code>.
         </li>
       </ul>
 
@@ -105,7 +105,7 @@ export default function GuidePremierProjetPage() {
       <h2>9. Sauvegarder et partager</h2>
       <ol>
         <li>
-          Dans <code>Supabase Cloud</code>, clique <code>Creer + sauvegarder</code> (premiere
+          Dans <code>Cadarium Cloud</code>, clique <code>Créer la sauvegarde</code> (première
           fois).
         </li>
         <li>
