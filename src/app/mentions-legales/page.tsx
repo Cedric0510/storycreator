@@ -33,12 +33,7 @@ export default function MentionsLegalesPage() {
 
       <h2>Fournisseurs techniques</h2>
       <p>
-        Backend/base de donnees/stockage: Supabase
-        <br />
-        Site:{" "}
-        <a href="https://supabase.com" target="_blank" rel="noreferrer">
-          https://supabase.com
-        </a>
+        Backend, base de données et stockage: infrastructure Cadarium auto-hébergée.
       </p>
 
       <h2>Propriete intellectuelle</h2>

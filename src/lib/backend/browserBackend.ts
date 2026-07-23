@@ -5,15 +5,12 @@
  * - `NEXT_PUBLIC_BACKEND_MODE=fake`: backend en memoire (tests e2e uniquement,
  *   ne jamais definir cette variable en production). Compte seede:
  *   e2e-admin@studio.local / motdepasse-e2e (admin).
- * - sinon: adaptateur Supabase, ou null si Supabase n'est pas configure
- *   (l'app doit rester utilisable en mode degrade).
+ * - `NEXT_PUBLIC_BACKEND_MODE=cadarium`: backend Cadarium
+ * - sinon: aucun backend distant
  */
-
-import { getSupabaseBrowserClient } from "@/lib/supabaseClient";
 
 import { createFakeBackend } from "./fakeBackend";
 import { Backend } from "./ports";
-import { createSupabaseBackend } from "./supabaseBackend";
 import { createCadariumBackend } from "./cadariumBackend";
 
 export const E2E_FAKE_ADMIN = {
@@ -43,7 +40,6 @@ export function getBrowserBackend(): Backend | null {
     return cachedBackend;
   }
 
-  const client = getSupabaseBrowserClient();
-  cachedBackend = client ? createSupabaseBackend(client) : null;
+  cachedBackend = null;
   return cachedBackend;
 }

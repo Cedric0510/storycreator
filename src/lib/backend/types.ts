@@ -2,8 +2,7 @@
  * Types domaine du backend Author Studio.
  *
  * Ces types sont la seule representation du backend qui circule dans les
- * composants React. Les types des SDK (Supabase `User`, rows snake_case...)
- * ne doivent jamais sortir des adaptateurs (`supabaseBackend.ts`).
+ * composants React. Les formats techniques ne sortent jamais des adaptateurs.
  *
  * Contrat complet: docs/backend-contract.md
  */

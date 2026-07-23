@@ -1,7 +1,6 @@
 /**
  * Ports du backend: les interfaces que le front consomme, exprimees en
- * vocabulaire domaine. Chaque backend (Supabase aujourd'hui, backend maison
- * demain, fake en test) fournit un adaptateur qui les implemente.
+ * vocabulaire domaine. Cadarium et le fake de test fournissent les adaptateurs.
  *
  * Contrat complet (operations, regles metier, erreurs): docs/backend-contract.md
  */

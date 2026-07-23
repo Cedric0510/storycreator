@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 
-import { isRateLimited, jsonError } from "@/lib/server/bffGuard";
+import { isRateLimited, jsonError } from "@/lib/server/httpGuards";
 
 /**
  * Reception des erreurs survenues dans le navigateur des utilisateurs.

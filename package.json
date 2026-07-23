@@ -16,7 +16,6 @@
     "test:load:install": "playwright install chromium"
   },
   "dependencies": {
-    "@supabase/supabase-js": "^2.97.0",
     "@xyflow/react": "^12.10.1",
     "jszip": "^3.10.1",
     "next": "16.1.6",
