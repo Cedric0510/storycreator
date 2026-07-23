@@ -3,6 +3,7 @@ import { ChangeEvent, ReactNode } from "react";
 import { HelpHint } from "@/components/HelpHint";
 import { EditorGroup } from "@/components/EditorGroup";
 import { PlayerTextInput } from "@/components/PlayerTextFormatting";
+import { AuthorStudioBustEditor } from "@/components/AuthorStudioBustEditor";
 import {
   SceneComposer,
   SceneCopyPaste,
@@ -148,6 +149,18 @@ export function DialogueEditorSection({
         />
       </label>
       {renderAssetAttachment("backgroundAssetId", block.backgroundAssetId)}
+      <AuthorStudioBustEditor
+        bust={block.bust}
+        canEdit={canEdit}
+        assetPreviewSrcById={assetPreviewSrcById}
+        onRegisterAsset={onRegisterAsset}
+        onEnsureAssetPreviewSrc={onEnsureAssetPreviewSrc}
+        onChange={(bust) =>
+          onUpdateSelectedBlock((candidate) =>
+            candidate.type === "dialogue" ? { ...candidate, bust } : candidate,
+          )
+        }
+      />
 
       {/* --- Character layers (multi-character with z-index) --- */}
       <div className="section-title-row">
@@ -304,6 +317,11 @@ export function DialogueEditorSection({
             layout={block.sceneLayout}
             bgSrc={bgSrc}
             characterLayers={layerSrcs}
+            bust={{
+              src: assetPreviewSrcById[block.bust?.assetId ?? ""],
+              side: block.bust?.side ?? "left",
+              width: block.bust?.width ?? 38,
+            }}
             canEdit={canEdit}
             onChange={(newLayout) => {
               onUpdateSelectedBlock((b) =>
@@ -590,6 +608,29 @@ export function DialogueEditorSection({
             />
           </label>
           {renderLineVoiceAttachment(line.id, line.voiceAssetId)}
+          <label>
+            Buste pour cette replique
+            <input
+              type="file"
+              accept="image/*"
+              disabled={!canEdit}
+              onChange={(event) => {
+                const file = event.target.files?.[0];
+                event.currentTarget.value = "";
+                if (!file) return;
+                const assetId = onRegisterAsset(file);
+                onUpdateDialogueLineField(line.id, "bustAssetId", assetId);
+                void onEnsureAssetPreviewSrc(assetId);
+              }}
+            />
+          </label>
+          <button
+            className="button-secondary"
+            disabled={!canEdit || !line.bustAssetId}
+            onClick={() => onUpdateDialogueLineField(line.id, "bustAssetId", null)}
+          >
+            Utiliser le buste par defaut
+          </button>
 
           {/* --- Responses for this line --- */}
           <div className="section-title-row">

@@ -860,7 +860,7 @@ export function AuthorStudioApp() {
     }
 
     setStatusMessage(`Chapitre "${chapter.name}" remis en edition sur le whiteboard.`);
-  }, [blockById, canEdit, computeChapterContext, project.chapters, project.parts, removeSelectedBlocks, resolveChapterIdForBlock, setStatusMessage]);
+  }, [blockById, canEdit, computeChapterContext, project.chapters, project.parts, removeSelectedBlocks, resolveChapterIdForBlock, setOpenedValidatedPartIds, setStatusMessage]);
 
   const toggleValidatedChapterVisibility = useCallback((chapterId: string) => {
     const chapter = project.chapters.find((candidate) => candidate.id === chapterId);
@@ -1283,6 +1283,10 @@ export function AuthorStudioApp() {
 
       if (selectedBlock.type === "dialogue") {
         if (selectedBlock.backgroundAssetId) void ensureAssetPreviewSrc(selectedBlock.backgroundAssetId);
+        if (selectedBlock.bust?.assetId) void ensureAssetPreviewSrc(selectedBlock.bust.assetId);
+        for (const line of selectedBlock.lines) {
+          if (line.bustAssetId) void ensureAssetPreviewSrc(line.bustAssetId);
+        }
         if (selectedBlock.characterAssetId) void ensureAssetPreviewSrc(selectedBlock.characterAssetId);
         if (selectedBlock.npcImageAssetId) void ensureAssetPreviewSrc(selectedBlock.npcImageAssetId);
         for (const layer of selectedBlock.characterLayers ?? []) {
@@ -1300,6 +1304,10 @@ export function AuthorStudioApp() {
 
       if (selectedBlock.type === "cinematic") {
         if (selectedBlock.backgroundAssetId) void ensureAssetPreviewSrc(selectedBlock.backgroundAssetId);
+        if (selectedBlock.bust?.assetId) void ensureAssetPreviewSrc(selectedBlock.bust.assetId);
+        for (const narration of selectedBlock.narrations) {
+          if (narration.bustAssetId) void ensureAssetPreviewSrc(narration.bustAssetId);
+        }
         if (selectedBlock.characterAssetId) void ensureAssetPreviewSrc(selectedBlock.characterAssetId);
         for (const layer of selectedBlock.characterLayers ?? []) {
           if (layer.assetId) void ensureAssetPreviewSrc(layer.assetId);
@@ -1308,6 +1316,7 @@ export function AuthorStudioApp() {
 
       if (selectedBlock.type === "choice") {
         if (selectedBlock.backgroundAssetId) void ensureAssetPreviewSrc(selectedBlock.backgroundAssetId);
+        if (selectedBlock.bust?.assetId) void ensureAssetPreviewSrc(selectedBlock.bust.assetId);
         if (selectedBlock.voiceAssetId) void ensureAssetPreviewSrc(selectedBlock.voiceAssetId);
         for (const layer of selectedBlock.characterLayers ?? []) {
           if (layer.assetId) void ensureAssetPreviewSrc(layer.assetId);
@@ -1320,6 +1329,7 @@ export function AuthorStudioApp() {
       if (selectedBlock.type === "gameplay") {
         const wantedAssetIds = new Set<string>();
         if (selectedBlock.backgroundAssetId) wantedAssetIds.add(selectedBlock.backgroundAssetId);
+        if (selectedBlock.bust?.assetId) wantedAssetIds.add(selectedBlock.bust.assetId);
         for (const obj of selectedBlock.objects) {
           if (obj.assetId) wantedAssetIds.add(obj.assetId);
         }
@@ -1346,6 +1356,10 @@ export function AuthorStudioApp() {
         if (block.backgroundAssetId) wantedAssetIds.add(block.backgroundAssetId);
       } else if (block.type === "cinematic") {
         if (block.backgroundAssetId) wantedAssetIds.add(block.backgroundAssetId);
+        if (block.bust?.assetId) wantedAssetIds.add(block.bust.assetId);
+        for (const narration of block.narrations) {
+          if (narration.bustAssetId) wantedAssetIds.add(narration.bustAssetId);
+        }
         if (block.characterAssetId) wantedAssetIds.add(block.characterAssetId);
         for (const layer of block.characterLayers ?? []) {
           if (layer.assetId) wantedAssetIds.add(layer.assetId);
@@ -1354,6 +1368,7 @@ export function AuthorStudioApp() {
         if (block.voiceAssetId) wantedAssetIds.add(block.voiceAssetId);
       } else if (block.type === "dialogue") {
         if (block.backgroundAssetId) wantedAssetIds.add(block.backgroundAssetId);
+        if (block.bust?.assetId) wantedAssetIds.add(block.bust.assetId);
         if (block.characterAssetId) wantedAssetIds.add(block.characterAssetId);
         if (block.npcImageAssetId) wantedAssetIds.add(block.npcImageAssetId);
         for (const layer of block.characterLayers ?? []) {
@@ -1361,6 +1376,7 @@ export function AuthorStudioApp() {
         }
         for (const line of block.lines) {
           if (line.voiceAssetId) wantedAssetIds.add(line.voiceAssetId);
+          if (line.bustAssetId) wantedAssetIds.add(line.bustAssetId);
         }
         if (block.npcProfileBlockId) {
           const npcBlock = blockById.get(block.npcProfileBlockId);
@@ -1372,6 +1388,7 @@ export function AuthorStudioApp() {
         }
       } else if (block.type === "choice") {
         if (block.backgroundAssetId) wantedAssetIds.add(block.backgroundAssetId);
+        if (block.bust?.assetId) wantedAssetIds.add(block.bust.assetId);
         if (block.voiceAssetId) wantedAssetIds.add(block.voiceAssetId);
         for (const layer of block.characterLayers ?? []) {
           if (layer.assetId) wantedAssetIds.add(layer.assetId);
@@ -1386,6 +1403,7 @@ export function AuthorStudioApp() {
         if (block.defaultImageAssetId) wantedAssetIds.add(block.defaultImageAssetId);
       } else if (block.type === "gameplay") {
         if (block.backgroundAssetId) wantedAssetIds.add(block.backgroundAssetId);
+        if (block.bust?.assetId) wantedAssetIds.add(block.bust.assetId);
         if (block.voiceAssetId) wantedAssetIds.add(block.voiceAssetId);
         for (const obj of block.objects) {
           if (obj.assetId) wantedAssetIds.add(obj.assetId);

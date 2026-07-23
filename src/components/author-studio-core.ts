@@ -460,12 +460,17 @@ export function collectAssetIds(block: StoryBlock) {
     const layerAssetIds = (block.characterLayers ?? [])
       .map((layer) => layer.assetId)
       .filter((value): value is string => Boolean(value));
+    const narrationBustIds = (block.narrations ?? [])
+      .map((narration) => narration.bustAssetId)
+      .filter((value): value is string => Boolean(value));
     return [
       block.backgroundAssetId,
+      block.bust?.assetId,
       block.characterAssetId,
       ...layerAssetIds,
       block.videoAssetId,
       block.voiceAssetId,
+      ...narrationBustIds,
     ].filter((value): value is string => Boolean(value));
   }
   if (block.type === "dialogue") {
@@ -475,7 +480,10 @@ export function collectAssetIds(block: StoryBlock) {
     const layerAssetIds = (block.characterLayers ?? [])
       .map((layer) => layer.assetId)
       .filter((value): value is string => Boolean(value));
-    return [block.backgroundAssetId, block.characterAssetId, block.npcImageAssetId, ...layerAssetIds, ...lineVoiceIds].filter(
+    const lineBustIds = (block.lines ?? [])
+      .map((line) => line.bustAssetId)
+      .filter((value): value is string => Boolean(value));
+    return [block.backgroundAssetId, block.bust?.assetId, block.characterAssetId, block.npcImageAssetId, ...layerAssetIds, ...lineVoiceIds, ...lineBustIds].filter(
       (value): value is string => Boolean(value),
     );
   }
@@ -486,7 +494,7 @@ export function collectAssetIds(block: StoryBlock) {
     const characterLayerAssetIds = (block.characterLayers ?? [])
       .map((layer) => layer.assetId)
       .filter((value): value is string => Boolean(value));
-    return [block.backgroundAssetId, block.voiceAssetId, ...characterLayerAssetIds, ...optionImageIds].filter(
+    return [block.backgroundAssetId, block.bust?.assetId, block.voiceAssetId, ...characterLayerAssetIds, ...optionImageIds].filter(
       (value): value is string => Boolean(value),
     );
   }
@@ -513,7 +521,7 @@ export function collectAssetIds(block: StoryBlock) {
   const objectSoundIds = block.objects
     .map((obj) => obj.soundAssetId)
     .filter((value): value is string => Boolean(value));
-  return [block.backgroundAssetId, block.voiceAssetId, ...objectAssetIds, ...objectSoundIds].filter(
+  return [block.backgroundAssetId, block.bust?.assetId, block.voiceAssetId, ...objectAssetIds, ...objectSoundIds].filter(
     (value): value is string => Boolean(value),
   );
 }
@@ -964,6 +972,7 @@ export function serializeBlock(
         body: narration.body,
         continueTargetBlockId: narration.continueTargetBlockId,
         continueTargetNarrationId: narration.continueTargetNarrationId,
+        bustPath: assetPath(narration.bustAssetId ?? null, assetRefs),
       })),
       startNarrationId: startNarration?.id ?? block.startNarrationId,
       backgroundPath: assetPath(block.backgroundAssetId, assetRefs),
@@ -976,6 +985,11 @@ export function serializeBlock(
         assetId: layer.assetId,
         imagePath: assetPath(layer.assetId, assetRefs),
       })),
+      bust: {
+        side: block.bust?.side ?? "left",
+        width: block.bust?.width ?? 38,
+        imagePath: assetPath(block.bust?.assetId ?? null, assetRefs),
+      },
       sceneLayout: block.sceneLayout,
       videoPath: assetPath(block.videoAssetId, assetRefs),
       voicePath: assetPath(block.voiceAssetId, assetRefs),
@@ -1008,12 +1022,18 @@ export function serializeBlock(
         assetId: layer.assetId,
         imagePath: assetPath(layer.assetId, assetRefs),
       })),
+      bust: {
+        side: block.bust?.side ?? "left",
+        width: block.bust?.width ?? 38,
+        imagePath: assetPath(block.bust?.assetId ?? null, assetRefs),
+      },
       startLineId: block.startLineId,
       lines: (block.lines ?? []).map((line) => ({
         id: line.id,
         speaker: line.speaker,
         text: line.text,
         voicePath: assetPath(line.voiceAssetId, assetRefs),
+        bustPath: assetPath(line.bustAssetId ?? null, assetRefs),
         conditions: line.conditions,
         fallbackLineId: line.fallbackLineId,
         continueTargetBlockId: line.continueTargetBlockId,
@@ -1052,6 +1072,11 @@ export function serializeBlock(
         assetId: layer.assetId,
         imagePath: assetPath(layer.assetId, assetRefs),
       })),
+      bust: {
+        side: block.bust?.side ?? "left",
+        width: block.bust?.width ?? 38,
+        imagePath: assetPath(block.bust?.assetId ?? null, assetRefs),
+      },
       voicePath: assetPath(block.voiceAssetId, assetRefs),
       choices: block.choices.map((option) => ({
         id: option.id,
@@ -1163,6 +1188,11 @@ export function serializeBlock(
     backgroundPath: assetPath(block.backgroundAssetId, assetRefs),
     sceneLayout: block.sceneLayout,
     voicePath: assetPath(block.voiceAssetId, assetRefs),
+    bust: {
+      side: block.bust?.side ?? "left",
+      width: block.bust?.width ?? 38,
+      imagePath: assetPath(block.bust?.assetId ?? null, assetRefs),
+    },
     objects: block.objects.map((obj) => ({
       id: obj.id,
       name: obj.name,
@@ -1201,6 +1231,18 @@ export function serializeBlock(
 function resolveAssetId(path: unknown, pathToAssetId: Map<string, string>): string | null {
   if (typeof path !== "string" || !path) return null;
   return pathToAssetId.get(path) ?? null;
+}
+
+function deserializeBust(raw: unknown, pathToAssetId: Map<string, string>) {
+  const candidate = raw && typeof raw === "object" ? raw as Record<string, unknown> : {};
+  return {
+    assetId: resolveAssetId(candidate.imagePath, pathToAssetId),
+    side: candidate.side === "right" ? "right" as const : "left" as const,
+    width:
+      typeof candidate.width === "number" && Number.isFinite(candidate.width)
+        ? candidate.width
+        : 38,
+  };
 }
 
 /**
@@ -1308,12 +1350,14 @@ export function deserializeBlockFromExport(
           typeof item.continueTargetBlockId === "string" ? item.continueTargetBlockId : null,
         continueTargetNarrationId:
           typeof item.continueTargetNarrationId === "string" ? item.continueTargetNarrationId : null,
+        bustAssetId: resolveAssetId(item.bustPath, pathToAssetId),
       })),
       startNarrationId:
         typeof raw.startNarrationId === "string" ? raw.startNarrationId : "",
       backgroundAssetId: resolveAssetId(raw.backgroundPath, pathToAssetId),
       characterAssetId: resolveAssetId(raw.characterPath, pathToAssetId),
       characterLayers,
+      bust: deserializeBust(raw.bust, pathToAssetId),
       sceneLayout: raw.sceneLayout
         ? (raw.sceneLayout as typeof DEFAULT_SCENE_LAYOUT)
         : { ...DEFAULT_SCENE_LAYOUT },
@@ -1332,6 +1376,7 @@ export function deserializeBlockFromExport(
       speaker: (line.speaker as string) ?? "Narrateur",
       text: (line.text as string) ?? "",
       voiceAssetId: resolveAssetId(line.voicePath, pathToAssetId),
+      bustAssetId: resolveAssetId(line.bustPath, pathToAssetId),
       conditions: Array.isArray(line.conditions) ? line.conditions as DialogueLine["conditions"] : [],
       fallbackLineId: typeof line.fallbackLineId === "string" ? line.fallbackLineId : null,
       continueTargetBlockId:
@@ -1373,6 +1418,7 @@ export function deserializeBlockFromExport(
         ? (raw.sceneLayout as typeof DEFAULT_SCENE_LAYOUT)
         : { ...DEFAULT_SCENE_LAYOUT },
       characterLayers,
+      bust: deserializeBust(raw.bust, pathToAssetId),
       lines,
       startLineId: (raw.startLineId as string) ?? (lines[0]?.id ?? ""),
     });
@@ -1409,6 +1455,7 @@ export function deserializeBlockFromExport(
           resolveAssetId(layer.imagePath, pathToAssetId)
           ?? (typeof layer.assetId === "string" ? layer.assetId : null),
       })),
+      bust: deserializeBust(raw.bust, pathToAssetId),
       voiceAssetId: resolveAssetId(raw.voicePath, pathToAssetId),
       choices: rawChoices.map((option: Record<string, unknown>) => {
         const label = ((option.label as string) ?? "A") as ChoiceLabel;
@@ -1643,6 +1690,7 @@ export function deserializeBlockFromExport(
       backgroundAssetId: resolveAssetId(raw.backgroundPath, pathToAssetId),
       sceneLayout: raw.sceneLayout,
       voiceAssetId: resolveAssetId(raw.voicePath, pathToAssetId),
+      bust: deserializeBust(raw.bust, pathToAssetId),
       objects,
       buttonSequence: Array.isArray(raw.buttonSequence)
         ? raw.buttonSequence.filter((value): value is string => typeof value === "string")

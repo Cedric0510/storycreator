@@ -14,6 +14,7 @@ import {
 import { GameplayPlacementTarget } from "@/components/author-studio-types";
 import { HelpHint } from "@/components/HelpHint";
 import { EditorGroup } from "@/components/EditorGroup";
+import { AuthorStudioBustEditor } from "@/components/AuthorStudioBustEditor";
 import {
   SceneComposer,
   SceneCopyPaste,
@@ -201,6 +202,18 @@ export function GameplayEditorSection({
         <input type="file" accept="image/*" onChange={onAssetInput("backgroundAssetId")} disabled={!canEdit} />
       </label>
       {renderAssetAttachment("backgroundAssetId", block.backgroundAssetId)}
+      <AuthorStudioBustEditor
+        bust={block.bust}
+        canEdit={canEdit}
+        assetPreviewSrcById={assetPreviewSrcById}
+        onRegisterAsset={onRegisterAsset}
+        onEnsureAssetPreviewSrc={onEnsureAssetPreviewSrc}
+        onChange={(bust) =>
+          onUpdateSelectedBlock((candidate) =>
+            candidate.type === "gameplay" ? { ...candidate, bust } : candidate,
+          )
+        }
+      />
 
       <div className="section-title-row">
         <small>
@@ -212,6 +225,11 @@ export function GameplayEditorSection({
       <SceneComposer
         layout={block.sceneLayout}
         bgSrc={assetPreviewSrcById[block.backgroundAssetId ?? ""]}
+        bust={{
+          src: assetPreviewSrcById[block.bust?.assetId ?? ""],
+          side: block.bust?.side ?? "left",
+          width: block.bust?.width ?? 38,
+        }}
         canEdit={canEdit}
         onChange={(newLayout) => {
           onUpdateSelectedBlock((b) =>

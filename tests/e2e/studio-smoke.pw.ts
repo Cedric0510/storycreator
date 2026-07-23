@@ -47,7 +47,7 @@ test("parcours coeur: connexion, export ZIP, reimport, preview", async ({ page }
     project: { title: string; startBlockId: string | null };
     blocks: Array<{ id: string; type: string }>;
   };
-  expect(story.schemaVersion).toBe("1.11.0");
+  expect(story.schemaVersion).toBe("1.12.0");
   expect(story.blocks).toHaveLength(1);
   expect(story.blocks[0].type).toBe("title");
   expect(story.project.startBlockId).toBe(story.blocks[0].id);
@@ -106,7 +106,8 @@ test("l'export deduplique les assets au contenu identique", async ({ page }) => 
         {
           id: "cinA", type: "cinematic", name: "A", position: { x: 100, y: 100 }, notes: "",
           heading: "A", body: "", startNarrationId: "nA",
-          narrations: [{ id: "nA", heading: "A", body: "", continueTargetBlockId: null, continueTargetNarrationId: null }],
+          narrations: [{ id: "nA", heading: "A", body: "", bustPath: "assets/asset_uniq-autre.svg", continueTargetBlockId: null, continueTargetNarrationId: null }],
+          bust: { imagePath: "assets/asset_dupa-fond.svg", side: "right", width: 46 },
           backgroundPath: "assets/asset_dupa-fond.svg", nextBlockId: "cinB",
         },
         {
@@ -156,7 +157,12 @@ test("l'export deduplique les assets au contenu identique", async ({ page }) => 
   expect(assetFiles).toHaveLength(2);
 
   const story = JSON.parse(await exported.file("story.json")!.async("string")) as {
-    blocks: Array<{ name: string; backgroundPath?: string | null }>;
+    blocks: Array<{
+      name: string;
+      backgroundPath?: string | null;
+      bust?: { imagePath: string | null; side: string; width: number };
+      narrations?: Array<{ bustPath?: string | null }>;
+    }>;
   };
   const backgroundOf = (name: string) =>
     story.blocks.find((block) => block.name === name)?.backgroundPath ?? null;
@@ -164,6 +170,13 @@ test("l'export deduplique les assets au contenu identique", async ({ page }) => 
   expect(backgroundOf("A")).toBe(backgroundOf("B"));
   expect(backgroundOf("C")).toBeTruthy();
   expect(backgroundOf("C")).not.toBe(backgroundOf("A"));
+  const cinematicA = story.blocks.find((block) => block.name === "A");
+  expect(cinematicA?.bust).toEqual({
+    imagePath: backgroundOf("A"),
+    side: "right",
+    width: 46,
+  });
+  expect(cinematicA?.narrations?.[0]?.bustPath).toBe(backgroundOf("C"));
 });
 
 test("un compte non admin ne voit pas l'entree Administration", async ({ page }) => {

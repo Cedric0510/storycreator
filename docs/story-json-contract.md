@@ -1,7 +1,7 @@
 # Contrat `story.json` (Studio Auteur)
 
 Ce document fige le format exporte par l'outil auteur pour la partie lecture.
-Version courante: `schemaVersion = "1.11.0"`.
+Version courante: `schemaVersion = "1.12.0"`.
 
 Source de verite cote code: `serializeBlock` + `exportZip`
 (author-studio) et `storyLoader.ts` (story-player-mobile). Les scenarios de
@@ -12,7 +12,7 @@ executables de ce contrat: les deux moteurs doivent produire les memes traces.
 
 ```json
 {
-  "schemaVersion": "1.11.0",
+  "schemaVersion": "1.12.0",
   "exportedAt": "2026-07-18T10:00:00.000Z",
   "project": {
     "id": "project_xxx",
@@ -83,11 +83,14 @@ hero_profile | npc_profile | chapter_start | chapter_end | part_start | part_end
 ### `cinematic`
 
 - `heading` / `body`: compat descendante, refletent la narration de depart
-- `narrations[]`: `{ id, heading, body, continueTargetBlockId, continueTargetNarrationId }`
+- `narrations[]`: `{ id, heading, body, bustPath, continueTargetBlockId, continueTargetNarrationId }`
 - `startNarrationId`
 - `backgroundPath`, `characterPath` (legacy premier calque), `videoPath`, `voicePath`
 - `characterLayers[]`: `{ id, label, zIndex, layout: {x,y,width,height}, assetId, imagePath }`
 - `sceneLayout`: `{ background?, character? }` (rectangles en `%`)
+- `bust`: `{ imagePath, side: "left" | "right", width }`; `narrations[].bustPath`
+  remplace son image pour une narration. Le lecteur ancre ce calque au-dessus
+  de la barre de texte, quelle que soit sa hauteur.
 - `autoAdvanceSeconds`: number | null (UI lecteur; sans effet moteur)
 - `nextBlockId`: string | null (suivi apres la derniere narration)
 
@@ -102,7 +105,7 @@ la sortie se fait par `continueTargetBlockId` (ligne) ou `targetBlockId`
 - `npcImageAssetId` / `npcImagePath`
 - `startLineId`
 - `lines[]`:
-  - `id`, `speaker`, `text`, `voicePath`
+  - `id`, `speaker`, `text`, `voicePath`, `bustPath`
   - `conditions[]`: `{ type: "min_affinity" | "max_affinity", npcProfileBlockId, value }`
   - `fallbackLineId`: string | null (ligne de repli si conditions non remplies)
   - `continueTargetBlockId`: string | null (sortie du bouton Continuer, si pas de reponses)
@@ -110,12 +113,15 @@ la sortie se fait par `continueTargetBlockId` (ligne) ou `targetBlockId`
     - `id`, `label: "A"|"B"|"C"|"D"`, `text`
     - `targetLineId` (navigation interne) / `targetBlockId` (sortie) — exclusifs
     - `effects[]`, `affinityEffects[]: { npcProfileBlockId, delta }`
+- `bust`: meme format que `cinematic`; `lines[].bustPath` remplace son image
+  pour permettre l'alternance des interlocuteurs.
 
 ### `choice`
 
 - `displayMode`: `"visual" | "text"`
 - `prompt`
 - `backgroundPath`, `sceneLayout`, `characterLayers[]`, `voicePath`
+- `bust`: meme format que `cinematic`
 - `choices[]` (max 4):
   - `id`, `label: "A"|"B"|"C"|"D"`, `text`, `description`
   - `imagePath`, `layout`, `zIndex` (mode visual)
@@ -155,6 +161,7 @@ sinon `nextBlockId`. Un cas sans `targetBlockId` est ignore.
 - `mode`: `"point_and_click"`
 - `objective`
 - `backgroundPath`, `sceneLayout`, `voicePath`
+- `bust`: meme format que `cinematic`
 - `objects[]`:
   - `id`, `name`, `x`, `y`, `width`, `height` (en `%`, coin haut-gauche), `zIndex`
   - `visibleByDefault`: boolean

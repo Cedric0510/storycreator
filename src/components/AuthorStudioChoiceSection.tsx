@@ -4,6 +4,7 @@ import { HelpHint } from "@/components/HelpHint";
 import { EditorGroup } from "@/components/EditorGroup";
 import { PlayerTextInput } from "@/components/PlayerTextFormatting";
 import { SceneComposer } from "@/components/AuthorStudioSceneComposer";
+import { AuthorStudioBustEditor } from "@/components/AuthorStudioBustEditor";
 import {
   BLOCK_LABELS,
   CharacterLayer,
@@ -143,6 +144,18 @@ export function ChoiceEditorSection({
         />
       </label>
       {renderAssetAttachment("backgroundAssetId", block.backgroundAssetId)}
+      <AuthorStudioBustEditor
+        bust={block.bust}
+        canEdit={canEdit}
+        assetPreviewSrcById={assetPreviewSrcById}
+        onRegisterAsset={onRegisterAsset}
+        onEnsureAssetPreviewSrc={onEnsureAssetPreviewSrc}
+        onChange={(bust) =>
+          onUpdateSelectedBlock((candidate) =>
+            candidate.type === "choice" ? { ...candidate, bust } : candidate,
+          )
+        }
+      />
       <label>
         Voix / narration audio
         <input
@@ -313,6 +326,11 @@ export function ChoiceEditorSection({
           layout={block.sceneLayout}
           bgSrc={assetPreviewSrcById[block.backgroundAssetId ?? ""]}
           characterLayers={currentSceneLayers}
+          bust={{
+            src: assetPreviewSrcById[block.bust?.assetId ?? ""],
+            side: block.bust?.side ?? "left",
+            width: block.bust?.width ?? 38,
+          }}
           canEdit={canEdit}
           onChange={(nextSceneLayout) =>
             onUpdateSelectedBlock((candidate) =>

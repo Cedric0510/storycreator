@@ -14,6 +14,27 @@ import {
   type SwitchBlock,
 } from "./story";
 
+describe("story bust schema", () => {
+  it("creates every scene block with the same bust defaults", () => {
+    for (const type of ["cinematic", "dialogue", "choice", "gameplay"] as const) {
+      const block = createBlock(type, { x: 0, y: 0 }) as
+        | CinematicBlock
+        | DialogueBlock
+        | ChoiceBlock
+        | GameplayBlock;
+      expect(block.bust).toEqual({ assetId: null, side: "left", width: 38 });
+    }
+  });
+
+  it("normalizes old scene blocks without a bust", () => {
+    const block = createBlock("dialogue", { x: 0, y: 0 }) as DialogueBlock;
+    delete block.bust;
+
+    const normalized = normalizeStoryBlock(block) as DialogueBlock;
+    expect(normalized.bust).toEqual({ assetId: null, side: "left", width: 38 });
+  });
+});
+
 describe("story gameplay schema", () => {
   it("migrates overlapping legacy choice layouts without changing custom layouts", () => {
     const block = createBlock("choice", { x: 0, y: 0 }) as ChoiceBlock;

@@ -7,6 +7,26 @@ import { FormattedPlayerText } from "@/components/PlayerTextFormatting";
 import { PreviewRuntimeState } from "@/components/usePreviewRuntime";
 import { GameplayBlock, StoryBlock } from "@/lib/story";
 
+function PreviewBust({
+  src,
+  side,
+  width,
+}: {
+  src: string | undefined;
+  side: "left" | "right";
+  width: number;
+}) {
+  if (!src) return null;
+  return (
+    <div
+      className={`preview-vn-bust preview-vn-bust-${side}`}
+      style={{ width: `${width}%`, backgroundImage: `url("${src}")` }}
+      role="img"
+      aria-label="Buste du personnage"
+    />
+  );
+}
+
 /* ------------------------------------------------------------------ */
 /*  Props                                                              */
 /* ------------------------------------------------------------------ */
@@ -380,6 +400,9 @@ export function PreviewOverlay({
             const legacyCharSrc = assetPreviewSrcById[previewBlock.characterAssetId ?? ""];
             const videoSrc = assetPreviewSrcById[previewBlock.videoAssetId ?? ""];
             const voiceSrc = assetPreviewSrcById[previewBlock.voiceAssetId ?? ""];
+            const bustSrc = assetPreviewSrcById[
+              currentNarration?.bustAssetId ?? previewBlock.bust?.assetId ?? ""
+            ];
             const sl = previewBlock.sceneLayout;
             const charLayers = (previewBlock.characterLayers ?? [])
               .map((layer) => ({
@@ -449,6 +472,11 @@ export function PreviewOverlay({
                   <audio className="preview-vn-audio" src={voiceSrc} controls autoPlay />
                 )}
                 <div className="preview-vn-textbox preview-vn-cinematic-textbox">
+                  <PreviewBust
+                    src={bustSrc}
+                    side={previewBlock.bust?.side ?? "left"}
+                    width={previewBlock.bust?.width ?? 38}
+                  />
                   <div className="preview-vn-textbox-inner">
                     {currentNarration?.heading && (
                       <FormattedPlayerText
@@ -498,6 +526,9 @@ export function PreviewOverlay({
                 : currentLine.speaker;
 
             const voiceSrc = assetPreviewSrcById[currentLine.voiceAssetId ?? ""];
+            const bustSrc = assetPreviewSrcById[
+              currentLine.bustAssetId ?? previewBlock.bust?.assetId ?? ""
+            ];
             const sl = previewBlock.sceneLayout;
 
             // Multi-character layers sorted by zIndex (higher zIndex = further back)
@@ -556,6 +587,11 @@ export function PreviewOverlay({
 
                 {/* Textbox + responses */}
                 <div className="preview-vn-dialogue-area">
+                  <PreviewBust
+                    src={bustSrc}
+                    side={previewBlock.bust?.side ?? "left"}
+                    width={previewBlock.bust?.width ?? 38}
+                  />
                   <div className="preview-vn-textbox">
                     <div className="preview-vn-textbox-inner">
                       <FormattedPlayerText
@@ -665,6 +701,11 @@ export function PreviewOverlay({
                 >
                   {usesTextChoiceCards ? (
                     <div className="preview-vn-choice-text-panel">
+                      <PreviewBust
+                        src={assetPreviewSrcById[previewBlock.bust?.assetId ?? ""]}
+                        side={previewBlock.bust?.side ?? "left"}
+                        width={previewBlock.bust?.width ?? 38}
+                      />
                       <FormattedPlayerText
                         as="h3"
                         className="preview-vn-choice-prompt"
@@ -899,6 +940,11 @@ export function PreviewOverlay({
                 )}
 
                 <div className="preview-vn-gameplay-bottom">
+                  <PreviewBust
+                    src={assetPreviewSrcById[previewBlock.bust?.assetId ?? ""]}
+                    side={previewBlock.bust?.side ?? "left"}
+                    width={previewBlock.bust?.width ?? 38}
+                  />
                   <p className="preview-vn-text" style={{ textAlign: "center" }}>
                     {previewBlock.objective || "Objectif…"}
                   </p>

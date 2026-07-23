@@ -2,6 +2,7 @@ import { ReactNode, useCallback, useRef, useState } from "react";
 
 import { HelpHint } from "@/components/HelpHint";
 import {
+  BustConfig,
   CharacterLayer,
   CinematicBlock,
   DEFAULT_SCENE_LAYOUT,
@@ -14,12 +15,12 @@ import {
 
 interface DialogueSceneClipboard {
   backgroundAssetId: string | null;
+  bust: BustConfig;
   characterAssetId: string | null;
   characterLayers: CharacterLayer[];
   sceneLayout: SceneLayout;
 }
 
-// Persists across block selections within the session.
 let dialogueSceneClipboard: DialogueSceneClipboard | null = null;
 
 interface SceneCopyPasteProps {
@@ -40,6 +41,7 @@ export function SceneCopyPaste({
   const copyScene = useCallback(() => {
     dialogueSceneClipboard = {
       backgroundAssetId: block.backgroundAssetId,
+      bust: structuredClone(block.bust ?? { assetId: null, side: "left", width: 38 }),
       characterAssetId: block.type !== "gameplay" ? block.characterAssetId : null,
       characterLayers:
         block.type === "dialogue" || block.type === "cinematic"
@@ -59,6 +61,7 @@ export function SceneCopyPaste({
         return {
           ...candidate,
           backgroundAssetId: clip.backgroundAssetId,
+          bust: structuredClone(clip.bust),
           characterLayers: structuredClone(clip.characterLayers),
           sceneLayout: structuredClone(clip.sceneLayout),
         };
@@ -69,6 +72,7 @@ export function SceneCopyPaste({
         return {
           ...candidate,
           backgroundAssetId: clip.backgroundAssetId,
+          bust: structuredClone(clip.bust),
           characterAssetId: legacyCharacterAssetId,
           characterLayers: structuredClone(clip.characterLayers),
           sceneLayout: structuredClone(clip.sceneLayout),
@@ -78,6 +82,7 @@ export function SceneCopyPaste({
         return {
           ...candidate,
           backgroundAssetId: clip.backgroundAssetId,
+          bust: structuredClone(clip.bust),
           sceneLayout: structuredClone(clip.sceneLayout),
         };
       }
@@ -119,6 +124,7 @@ interface SceneComposerProps {
   bgSrc: string | undefined;
   characterLayers?: SceneCharacterLayerInfo[];
   charSrc?: string | undefined;
+  bust?: { src: string | undefined; side: "left" | "right"; width: number };
   canEdit: boolean;
   onChange: (layout: SceneLayout) => void;
   onChangeCharacterLayout?: (layerId: string, layout: SceneLayerLayout) => void;
@@ -137,6 +143,7 @@ export function SceneComposer({
   bgSrc,
   characterLayers,
   charSrc,
+  bust,
   canEdit,
   onChange,
   onChangeCharacterLayout,
@@ -342,6 +349,13 @@ export function SceneComposer({
             ),
           )}
         {hasSingleChar && renderBox({ kind: "char" }, layout.character, charSrc, "Perso", true)}
+        {bust?.src && (
+          <div
+            className={`scene-composer-bust scene-composer-bust-${bust.side}`}
+            style={{ width: `${bust.width}%`, backgroundImage: `url("${bust.src}")` }}
+          />
+        )}
+        {bust?.src && <div className="scene-composer-dialogue-guide">Barre de texte dynamique</div>}
         {children}
       </div>
     </div>

@@ -7,6 +7,7 @@ import { InspectorSection } from "@/components/InspectorSection";
 import { EditorGroup } from "@/components/EditorGroup";
 import { NextBlockSelect } from "@/components/AuthorStudioNextBlockSelect";
 import { PlayerTextInput } from "@/components/PlayerTextFormatting";
+import { AuthorStudioBustEditor } from "@/components/AuthorStudioBustEditor";
 import {
   SwitchEditorSection,
   TitleEditorSection,
@@ -319,6 +320,47 @@ function CinematicEditorSection({
             multiline
             rows={4}
           />
+          <label>
+            Buste pour cette narration
+            <input
+              type="file"
+              accept="image/*"
+              disabled={!canEdit}
+              onChange={(event) => {
+                const file = event.target.files?.[0];
+                event.currentTarget.value = "";
+                if (!file) return;
+                const assetId = onRegisterAsset(file);
+                void onEnsureAssetPreviewSrc(assetId);
+                onUpdateSelectedBlock((candidate) => {
+                  if (candidate.type !== "cinematic") return candidate;
+                  return {
+                    ...candidate,
+                    narrations: candidate.narrations.map((item) =>
+                      item.id === narration.id ? { ...item, bustAssetId: assetId } : item,
+                    ),
+                  };
+                });
+              }}
+            />
+          </label>
+          <button
+            className="button-secondary"
+            disabled={!canEdit || !narration.bustAssetId}
+            onClick={() =>
+              onUpdateSelectedBlock((candidate) => {
+                if (candidate.type !== "cinematic") return candidate;
+                return {
+                  ...candidate,
+                  narrations: candidate.narrations.map((item) =>
+                    item.id === narration.id ? { ...item, bustAssetId: null } : item,
+                  ),
+                };
+              })
+            }
+          >
+            Utiliser le buste par defaut
+          </button>
         </div>
       ))}
       </EditorGroup>
@@ -342,6 +384,18 @@ function CinematicEditorSection({
         />
       </label>
       {renderAssetAttachment("backgroundAssetId", block.backgroundAssetId)}
+      <AuthorStudioBustEditor
+        bust={block.bust}
+        canEdit={canEdit}
+        assetPreviewSrcById={assetPreviewSrcById}
+        onRegisterAsset={onRegisterAsset}
+        onEnsureAssetPreviewSrc={onEnsureAssetPreviewSrc}
+        onChange={(bust) =>
+          onUpdateSelectedBlock((candidate) =>
+            candidate.type === "cinematic" ? { ...candidate, bust } : candidate,
+          )
+        }
+      />
 
       <div className="section-title-row">
         <div className="title-with-help">
@@ -489,6 +543,11 @@ function CinematicEditorSection({
             layout={block.sceneLayout}
             bgSrc={bgSrc}
             characterLayers={layerSrcs}
+            bust={{
+              src: assetPreviewSrcById[block.bust?.assetId ?? ""],
+              side: block.bust?.side ?? "left",
+              width: block.bust?.width ?? 38,
+            }}
             charSrc={fallbackCharSrc}
             canEdit={canEdit}
             onChange={(newLayout) => {

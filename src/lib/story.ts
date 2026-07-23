@@ -1,4 +1,4 @@
-export const STORY_SCHEMA_VERSION = "1.11.0";
+export const STORY_SCHEMA_VERSION = "1.12.0";
 
 export type BlockType =
   | "title"
@@ -300,6 +300,7 @@ export interface CinematicBlock extends BaseBlock {
   sceneLayout: SceneLayout;
   /** Multiple character image layers with z-ordering */
   characterLayers: CharacterLayer[];
+  bust?: BustConfig;
   videoAssetId: string | null;
   voiceAssetId: string | null;
   autoAdvanceSeconds: number | null;
@@ -312,6 +313,7 @@ export interface CinematicNarration {
   body: string;
   continueTargetBlockId: string | null;
   continueTargetNarrationId: string | null;
+  bustAssetId?: string | null;
 }
 
 export interface DialogueResponse {
@@ -330,6 +332,7 @@ export interface DialogueLine {
   speaker: string;
   text: string;
   voiceAssetId: string | null;
+  bustAssetId?: string | null;
   /** Conditions that must ALL be met for this line to trigger */
   conditions: DialogueLineCondition[];
   /** If conditions fail, jump to this line instead (null = skip responses) */
@@ -388,6 +391,31 @@ export function defaultChoiceOptionLayout(label: ChoiceLabel): SceneLayerLayout 
   return { ...layout };
 }
 
+export interface BustConfig {
+  assetId: string | null;
+  side: "left" | "right";
+  width: number;
+}
+
+export const DEFAULT_BUST_CONFIG: BustConfig = {
+  assetId: null,
+  side: "left",
+  width: 38,
+};
+
+function normalizeBustConfig(value: unknown): BustConfig {
+  if (!value || typeof value !== "object") return { ...DEFAULT_BUST_CONFIG };
+  const candidate = value as Partial<BustConfig>;
+  return {
+    assetId: typeof candidate.assetId === "string" && candidate.assetId ? candidate.assetId : null,
+    side: candidate.side === "right" ? "right" : "left",
+    width:
+      typeof candidate.width === "number" && Number.isFinite(candidate.width)
+        ? Math.min(70, Math.max(20, candidate.width))
+        : DEFAULT_BUST_CONFIG.width,
+  };
+}
+
 function migrateLegacyChoiceOptionLayout(
   layout: SceneLayerLayout,
   label: ChoiceLabel,
@@ -417,6 +445,7 @@ export interface DialogueBlock extends BaseBlock {
   sceneLayout: SceneLayout;
   /** Multiple character/NPC image layers with z-ordering */
   characterLayers: CharacterLayer[];
+  bust?: BustConfig;
   lines: DialogueLine[];
   startLineId: string;
 }
@@ -428,6 +457,7 @@ export interface GameplayBlock extends BaseBlock {
   backgroundAssetId: string | null;
   sceneLayout: SceneLayout;
   voiceAssetId: string | null;
+  bust?: BustConfig;
   /** V3: simplified objects with 5 types */
   objects: GameplayObject[];
   /** Expected button press order (button object IDs). */
@@ -516,6 +546,7 @@ export interface ChoiceBlock extends BaseBlock {
   sceneLayout: SceneLayout;
   /** Scene-only characters used in text mode (independent from choice options). */
   characterLayers: CharacterLayer[];
+  bust?: BustConfig;
   voiceAssetId: string | null;
   choices: ChoiceOption[];
 }
@@ -740,6 +771,7 @@ export function createDefaultLine(speaker?: string): DialogueLine {
     speaker: speaker ?? "Narrateur",
     text: "",
     voiceAssetId: null,
+    bustAssetId: null,
     conditions: [],
     fallbackLineId: null,
     continueTargetBlockId: null,
@@ -754,6 +786,7 @@ export function createDefaultCinematicNarration(): CinematicNarration {
     body: "",
     continueTargetBlockId: null,
     continueTargetNarrationId: null,
+    bustAssetId: null,
   };
 }
 
@@ -1104,6 +1137,7 @@ export function createBlock(type: BlockType, position: XYPosition): StoryBlock {
       characterAssetId: null,
       sceneLayout: { ...DEFAULT_SCENE_LAYOUT },
       characterLayers: [],
+      bust: { ...DEFAULT_BUST_CONFIG },
       videoAssetId: null,
       voiceAssetId: null,
       autoAdvanceSeconds: null,
@@ -1123,6 +1157,7 @@ export function createBlock(type: BlockType, position: XYPosition): StoryBlock {
       npcImageAssetId: null,
       sceneLayout: { ...DEFAULT_SCENE_LAYOUT },
       characterLayers: [],
+      bust: { ...DEFAULT_BUST_CONFIG },
       lines: [firstLine],
       startLineId: firstLine.id,
     };
@@ -1138,6 +1173,7 @@ export function createBlock(type: BlockType, position: XYPosition): StoryBlock {
       backgroundAssetId: null,
       sceneLayout: { ...DEFAULT_SCENE_LAYOUT },
       characterLayers: [],
+      bust: { ...DEFAULT_BUST_CONFIG },
       voiceAssetId: null,
       choices: [createDefaultChoiceOption("A"), createDefaultChoiceOption("B")],
     };
@@ -1208,6 +1244,7 @@ export function createBlock(type: BlockType, position: XYPosition): StoryBlock {
     backgroundAssetId: null,
     sceneLayout: { ...DEFAULT_SCENE_LAYOUT },
     voiceAssetId: null,
+    bust: { ...DEFAULT_BUST_CONFIG },
     objects: [],
     buttonSequence: [],
     buttonSequenceSuccessBlockId: null,
@@ -1427,6 +1464,7 @@ export function normalizeGameplayBlock(block: GameplayBlock): GameplayBlock {
     backgroundAssetId: block.backgroundAssetId ?? null,
     sceneLayout: normalizeSceneLayout(raw.sceneLayout),
     voiceAssetId: block.voiceAssetId ?? null,
+    bust: normalizeBustConfig(raw.bust),
     objects,
     buttonSequence,
     buttonSequenceSuccessBlockId,
@@ -1541,11 +1579,13 @@ export function normalizeStoryBlock(block: StoryBlock): StoryBlock {
             : null,
         sceneLayout,
         characterLayers: migrateCharacterLayers(raw, normalizeCharacterLayers(raw.characterLayers), sceneLayout),
+        bust: normalizeBustConfig(raw.bust),
         lines: [{
           id: lineId,
           speaker: oldSpeaker,
           text: oldText,
           voiceAssetId: oldVoice,
+          bustAssetId: null,
           conditions: [],
           fallbackLineId: null,
           continueTargetBlockId: null,
@@ -1570,12 +1610,17 @@ export function normalizeStoryBlock(block: StoryBlock): StoryBlock {
           : null,
       sceneLayout,
       characterLayers: migrateCharacterLayers(raw, normalizeCharacterLayers(raw.characterLayers), sceneLayout),
+      bust: normalizeBustConfig(raw.bust),
       lines: Array.isArray(block.lines)
         ? block.lines.map((line) => ({
             ...line,
             speaker: line.speaker ?? "Narrateur",
             text: line.text ?? "",
             voiceAssetId: line.voiceAssetId ?? null,
+            bustAssetId:
+              typeof (line as unknown as Record<string, unknown>).bustAssetId === "string"
+                ? (line as unknown as Record<string, unknown>).bustAssetId as string
+                : null,
             conditions: normalizeConditions((line as unknown as Record<string, unknown>).conditions),
             fallbackLineId: typeof (line as unknown as Record<string, unknown>).fallbackLineId === "string" ? (line as unknown as Record<string, unknown>).fallbackLineId as string : null,
             continueTargetBlockId:
@@ -1602,7 +1647,7 @@ export function normalizeStoryBlock(block: StoryBlock): StoryBlock {
     const sceneLayout = normalizeSceneLayout(raw.sceneLayout);
     const rawNarrations = Array.isArray(raw.narrations) ? raw.narrations : [];
     const normalizedNarrations = rawNarrations
-      .map((item) => {
+      .map<CinematicNarration | null>((item) => {
         if (!item || typeof item !== "object") return null;
         const narration = item as Record<string, unknown>;
         return {
@@ -1630,9 +1675,13 @@ export function normalizeStoryBlock(block: StoryBlock): StoryBlock {
             typeof narration.continueTargetNarrationId === "string" && narration.continueTargetNarrationId
               ? narration.continueTargetNarrationId
               : null,
+          bustAssetId:
+            typeof narration.bustAssetId === "string" && narration.bustAssetId
+              ? narration.bustAssetId
+              : null,
         };
       })
-      .filter((item): item is CinematicNarration => Boolean(item));
+      .filter((item): item is CinematicNarration => item !== null);
     const fallbackNarration = {
       id:
         typeof raw.startNarrationId === "string" && raw.startNarrationId
@@ -1642,16 +1691,18 @@ export function normalizeStoryBlock(block: StoryBlock): StoryBlock {
       body: typeof raw.body === "string" ? raw.body : "",
       continueTargetBlockId: null,
       continueTargetNarrationId: null,
+      bustAssetId: null,
     };
     const narrations =
       normalizedNarrations.length > 0 ? normalizedNarrations : [fallbackNarration];
+    const firstNarration = narrations[0] ?? fallbackNarration;
     const startNarrationId =
       typeof raw.startNarrationId === "string" &&
       narrations.some((item) => item.id === raw.startNarrationId)
         ? raw.startNarrationId
-        : narrations[0].id;
+        : firstNarration.id;
     const startNarration =
-      narrations.find((item) => item.id === startNarrationId) ?? narrations[0];
+      narrations.find((item) => item.id === startNarrationId) ?? firstNarration;
     return {
       ...block,
       entryEffects: normalizeVariableEffects(raw.entryEffects),
@@ -1696,6 +1747,7 @@ export function normalizeStoryBlock(block: StoryBlock): StoryBlock {
         option.label,
         rawChoices.length,
       ),
+      bust: normalizeBustConfig(raw.bust),
       zIndex:
         typeof (option as unknown as Record<string, unknown>).zIndex === "number" &&
         Number.isFinite((option as unknown as Record<string, unknown>).zIndex)
@@ -1734,6 +1786,7 @@ export function normalizeStoryBlock(block: StoryBlock): StoryBlock {
       backgroundAssetId: block.backgroundAssetId ?? null,
       sceneLayout,
       characterLayers: migratedTextCharacterLayers,
+      bust: normalizeBustConfig(rawChoice.bust),
       voiceAssetId: block.voiceAssetId ?? null,
       choices: normalizedChoices,
     };

@@ -5,7 +5,7 @@ import {
   EditorNode,
   computePartBlockSets,
 } from "@/components/author-studio-core";
-import { PartEndBlock, ProjectMeta, StoryBlock } from "@/lib/story";
+import { ProjectMeta, StoryBlock } from "@/lib/story";
 
 interface UseStudioPartsOptions {
   nodes: EditorNode[];
