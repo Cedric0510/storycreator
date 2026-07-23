@@ -180,3 +180,26 @@ test("un compte non admin ne voit pas l'entree Administration", async ({ page })
   await expect(menuPanel.getByRole("button", { name: "Compte" })).toBeVisible();
   await expect(menuPanel.getByRole("button", { name: "Administration" })).toHaveCount(0);
 });
+
+test("l'inspecteur de bloc ne deborde pas horizontalement", async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 900 });
+  await page.route("**/*.mp4", (route) => route.abort());
+  await page.goto("/");
+  await page.getByLabel("Email").fill(ADMIN_EMAIL);
+  await page.getByLabel("Mot de passe").fill(ADMIN_PASSWORD);
+  await page.getByRole("button", { name: "Se connecter" }).click();
+  await page.waitForURL("**/studio", { timeout: 60_000 });
+
+  await page.locator(".react-flow__node").first().click();
+  const inspector = page.locator(".panel-right");
+  await expect(inspector).toBeVisible();
+  await expect.poll(() => inspector.evaluate((element) =>
+    element.scrollWidth <= element.clientWidth + 1,
+  )).toBe(true);
+
+  await page.getByRole("button", { name: "Gameplay" }).click();
+  await page.locator(".react-flow__node").last().click();
+  await expect.poll(() => inspector.evaluate((element) =>
+    element.scrollWidth <= element.clientWidth + 1,
+  )).toBe(true);
+});

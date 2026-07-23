@@ -808,9 +808,54 @@ label {
 
 .panel-right-shell > .panel-right {
   flex: 1 1 auto;
+  width: 100%;
+  min-width: 0;
+  max-width: 100%;
   min-height: 0;
   height: 100%;
-  overflow: auto;
+  overflow-x: hidden;
+  overflow-y: auto;
+}
+
+.panel-right .inspector-panel-header,
+.panel-right .inspector-stack,
+.panel-right .inspector-section,
+.panel-right .inspector-section-content,
+.panel-right .inspector-block-editor,
+.panel-right .form-stack,
+.panel-right .subsection,
+.panel-right .editor-group,
+.panel-right .editor-group-content,
+.panel-right .grid-two,
+.panel-right .row-inline,
+.panel-right .asset-line {
+  width: 100%;
+  min-width: 0;
+  max-width: 100%;
+}
+
+.panel-right input,
+.panel-right textarea,
+.panel-right select,
+.panel-right button,
+.panel-right label,
+.panel-right .title-with-help {
+  min-width: 0;
+  max-width: 100%;
+}
+
+.panel-right input[type="file"] {
+  overflow: hidden;
+}
+
+.panel-right .asset-line {
+  flex-wrap: wrap;
+}
+
+.panel-right .asset-line > * {
+  min-width: 0;
+  max-width: 100%;
+  overflow-wrap: anywhere;
 }
 
 .panel-right-edge-toggle {
