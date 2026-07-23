@@ -36,6 +36,7 @@ import {
   sanitizeFileName,
   validateStoryBlocks,
 } from "@/lib/story";
+import { normalizeCommerceCatalog } from "@/lib/commerce";
 
 interface UseStudioAssetsParams {
   blocks: StoryBlock[];
@@ -277,6 +278,7 @@ export function useStudioAssets({
         startBlockId: project.info.startBlockId,
         updatedAt: project.info.updatedAt,
         chapters: project.chapters,
+        commerce: normalizeCommerceCatalog(project.commerce, project.chapters),
       },
       studio: {
         openedValidatedChapterIds: persistedOpenedValidatedChapterIds,
@@ -529,6 +531,10 @@ export function useStudioAssets({
         items,
         hero,
         chapters: Array.isArray(projectData.chapters) ? projectData.chapters : [],
+        commerce: normalizeCommerceCatalog(
+          projectData.commerce,
+          Array.isArray(projectData.chapters) ? projectData.chapters : [],
+        ),
         members: [
           { id: createId("member"), name: "Auteur", role: "owner" },
         ],

@@ -560,6 +560,17 @@ export interface Chapter {
   validated: boolean;
 }
 
+export interface CommerceProduct {
+  id: string;
+  name: string;
+  googlePlayProductId: string;
+  chapterIds: string[];
+}
+
+export interface CommerceCatalog {
+  products: CommerceProduct[];
+}
+
 export interface ProjectMeta {
   info: ProjectInfo;
   variables: VariableDefinition[];
@@ -570,6 +581,7 @@ export interface ProjectMeta {
   editingLockMemberId: string | null;
   logs: AuditLogEntry[];
   chapters: Chapter[];
+  commerce?: CommerceCatalog;
 }
 
 export interface ValidationIssue {

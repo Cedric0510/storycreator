@@ -3578,3 +3578,35 @@ label {
   .studio-header .nav-indicators { display: none; }
   .studio-header-actions { width: auto; margin-left: auto; flex-wrap: nowrap; }
 }
+.commerce-panel {
+  overflow-y: auto;
+}
+
+.commerce-product {
+  border-top: 1px solid rgba(65, 184, 131, 0.28);
+}
+
+.commerce-product > small {
+  display: block;
+  margin: 4px 0 10px;
+  color: var(--muted);
+  overflow-wrap: anywhere;
+}
+
+.commerce-chapter-list {
+  display: grid;
+  gap: 6px;
+}
+
+.commerce-chapter-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 9px;
+  border: 1px solid rgba(148, 163, 184, 0.24);
+  border-radius: 8px;
+}
+
+.commerce-chapter-row input {
+  width: auto;
+}

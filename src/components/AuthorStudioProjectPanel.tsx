@@ -5,6 +5,7 @@ import { CollapsibleSection } from "@/components/CollapsibleSection";
 import { HelpHint } from "@/components/HelpHint";
 import type { StudioLeftSection } from "@/components/StudioLeftNavigation";
 import { BlockType, ProjectMeta, blockTypeColor } from "@/lib/story";
+import { AuthorStudioCommercePanel } from "@/components/AuthorStudioCommercePanel";
 
 const BLOCK_LIBRARY_ITEMS: ReadonlyArray<{ type: BlockType; label: string }> = [
   { type: "title", label: "Ecran titre" },
@@ -73,6 +74,9 @@ export function AuthorStudioProjectPanel({
   };
 
   return (
+    activeSection === "commerce" ? (
+      <AuthorStudioCommercePanel project={project} setProject={setProject} canEdit={canEdit} />
+    ) : (
     <aside className="panel panel-left">
       {activeSection === "project" && (
       <CollapsibleSection
@@ -397,5 +401,6 @@ export function AuthorStudioProjectPanel({
       </CollapsibleSection>
       )}
     </aside>
+    )
   );
 }

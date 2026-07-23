@@ -6,6 +6,7 @@ export type StudioLeftSection =
   | "blocks"
   | "variables"
   | "items"
+  | "commerce"
   | "logs";
 
 interface StudioLeftNavigationProps {
@@ -48,6 +49,12 @@ const NAV_ITEMS: ReadonlyArray<{
     label: "Objets histoire",
     color: "#d55d88",
     icon: <path d="M5 8.5 12 4l7 4.5v7L12 20l-7-4.5v-7ZM5 8.5l7 4.5 7-4.5M12 13v7" />,
+  },
+  {
+    id: "commerce",
+    label: "Monétisation",
+    color: "#41b883",
+    icon: <path d="M12 2v20M17 6.5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6" />,
   },
   {
     id: "logs",
