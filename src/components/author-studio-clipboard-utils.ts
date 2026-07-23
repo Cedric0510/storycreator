@@ -12,7 +12,12 @@ import {
 } from "../lib/story";
 
 export function isClipboardEligibleBlock(block: StoryBlock) {
-  return block.type !== "chapter_start" && block.type !== "chapter_end";
+  return (
+    block.type !== "chapter_start"
+    && block.type !== "chapter_end"
+    && block.type !== "part_start"
+    && block.type !== "part_end"
+  );
 }
 
 export function filterClipboardEligibleBlocks(blocks: StoryBlock[]) {

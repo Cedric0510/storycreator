@@ -52,6 +52,7 @@ import {
   blockFromNode,
   blockToNode,
   computeChapterBlockSets,
+  computePartBlockSets,
   buildStudioChangeFingerprint,
   buildEdge,
   buildInitialStudio,
@@ -85,6 +86,7 @@ import {
   BlockType,
   Chapter,
   ChapterEndBlock,
+  Part,
   ProjectMeta,
   StoryBlock,
   ValidationIssue,
@@ -108,6 +110,7 @@ import {
   normalizeProjectChapters,
   normalizeProjectHero,
   normalizeProjectItems,
+  normalizeProjectParts,
   placeImportedNodes,
   remapBlockForZipImport,
   withCollapsedChapterFolders,
@@ -155,10 +158,14 @@ export function AuthorStudioApp() {
   const MAX_TOASTS = 8;
   const [seed] = useState<InitialStudio>(() => buildInitialStudio());
   const initialProject = useMemo<ProjectMeta>(
-    () => ({
-      ...seed.project,
-      chapters: normalizeProjectChapters(seed.project.chapters),
-    }),
+    () => {
+      const chapters = normalizeProjectChapters(seed.project.chapters);
+      return {
+        ...seed.project,
+        chapters,
+        parts: normalizeProjectParts(seed.project.parts, chapters),
+      };
+    },
     [seed.project],
   );
   const [nodes, setNodes] = useState<EditorNode[]>(seed.nodes);
@@ -172,6 +179,7 @@ export function AuthorStudioApp() {
     project.info.startBlockId,
   );
   const [openedValidatedChapterIds, setOpenedValidatedChapterIds] = useState<string[]>([]);
+  const [openedValidatedPartIds, setOpenedValidatedPartIds] = useState<string[]>([]);
   const [lastValidation, setLastValidation] = useState<ValidationIssue[]>([]);
   const [statusMessage, setStatusMessage] = useState<string>("");
   const [toasts, setToasts] = useState<Array<{ id: number; text: string; level: "info" | "warn" | "error"; exiting: boolean }>>([]);
@@ -579,6 +587,26 @@ export function AuthorStudioApp() {
     [edgesWithAutoDialogueLinks, nodes, project.chapters],
   );
 
+  const partBlockSets = useMemo(
+    () => computePartBlockSets(nodes, edgesWithAutoDialogueLinks, project.parts),
+    [edgesWithAutoDialogueLinks, nodes, project.parts],
+  );
+
+  const openedValidatedPartIdSet = useMemo(
+    () => new Set(openedValidatedPartIds),
+    [openedValidatedPartIds],
+  );
+
+  const hiddenValidatedPartIds = useMemo(
+    () =>
+      new Set(
+        project.parts
+          .filter((part) => part.validated && !openedValidatedPartIdSet.has(part.id))
+          .map((part) => part.id),
+      ),
+    [openedValidatedPartIdSet, project.parts],
+  );
+
   /** Compute BFS-based block→chapter and build hidden set — both used below */
   const computeChapterContext = useCallback((chapId: string) => {
     const memberIds = chapterBlockSets.get(chapId);
@@ -653,15 +681,18 @@ export function AuthorStudioApp() {
   /** Set of block IDs hidden because their chapter is collapsed or validated/archived. */
   const hiddenBlockIds = useMemo(() => {
     const set = new Set<string>();
-    if (hiddenChapterIds.size === 0) return set;
     for (const [chapterId, memberIds] of chapterBlockSets) {
       if (!hiddenChapterIds.has(chapterId)) continue;
       for (const id of memberIds) {
         set.add(id);
       }
     }
+    for (const [partId, memberIds] of partBlockSets) {
+      if (!hiddenValidatedPartIds.has(partId)) continue;
+      for (const id of memberIds) set.add(id);
+    }
     return set;
-  }, [chapterBlockSets, hiddenChapterIds]);
+  }, [chapterBlockSets, hiddenChapterIds, hiddenValidatedPartIds, partBlockSets]);
 
   /** Validation skips blocks hidden inside collapsed chapters for perf */
   const liveIssues = useMemo(
@@ -793,6 +824,15 @@ export function AuthorStudioApp() {
       setStatusMessage("Chapitre introuvable pour cette fin de chapitre.");
       return;
     }
+    const incompleteParts = project.parts.filter(
+      (part) => part.chapterId === chapterId && !part.validated,
+    );
+    if (validated && incompleteParts.length > 0) {
+      setStatusMessage(
+        `Validation impossible: ${incompleteParts.length} partie(s) du chapitre ne sont pas validees.`,
+      );
+      return;
+    }
 
     setProject((current) => ({
       ...current,
@@ -808,6 +848,10 @@ export function AuthorStudioApp() {
     }));
 
     if (validated) {
+      const chapterPartIds = new Set(
+        project.parts.filter((part) => part.chapterId === chapterId).map((part) => part.id),
+      );
+      setOpenedValidatedPartIds((current) => current.filter((id) => !chapterPartIds.has(id)));
       setOpenedValidatedChapterIds((current) => current.filter((id) => id !== chapterId));
       setNodes((current) => current.filter((node) => node.id !== `folder-${chapterId}`));
       const memberIds = computeChapterContext(chapterId);
@@ -817,7 +861,7 @@ export function AuthorStudioApp() {
     }
 
     setStatusMessage(`Chapitre "${chapter.name}" remis en edition sur le whiteboard.`);
-  }, [blockById, canEdit, computeChapterContext, project.chapters, removeSelectedBlocks, resolveChapterIdForBlock, setStatusMessage]);
+  }, [blockById, canEdit, computeChapterContext, project.chapters, project.parts, removeSelectedBlocks, resolveChapterIdForBlock, setStatusMessage]);
 
   const toggleValidatedChapterVisibility = useCallback((chapterId: string) => {
     const chapter = project.chapters.find((candidate) => candidate.id === chapterId);
@@ -843,6 +887,71 @@ export function AuthorStudioApp() {
     computeChapterContext,
     openedValidatedChapterIdSet,
     project.chapters,
+    removeSelectedBlocks,
+    replaceSelectedBlocks,
+    setStatusMessage,
+  ]);
+
+  const setPartValidationFromEnd = useCallback((partEndBlockId: string, validated: boolean) => {
+    if (!canEdit) return;
+    const endBlock = blockById.get(partEndBlockId);
+    if (!endBlock || endBlock.type !== "part_end" || !endBlock.partId) return;
+    const part = project.parts.find((candidate) => candidate.id === endBlock.partId);
+    if (!part) {
+      setStatusMessage("Partie introuvable pour cette fin de partie.");
+      return;
+    }
+    if (validated && !part.chapterId) {
+      setStatusMessage("Selectionne le chapitre parent avant de valider cette partie.");
+      return;
+    }
+    const memberIds = partBlockSets.get(part.id);
+    const hasStart = nodes.some(
+      (node) => node.data.block.type === "part_start" && node.data.block.partId === part.id,
+    );
+    if (validated && (!hasStart || !memberIds?.has(partEndBlockId))) {
+      setStatusMessage("Relie le debut de partie a cette fin de partie avant de la valider.");
+      return;
+    }
+
+    setProject((current) => ({
+      ...current,
+      parts: current.parts.map((candidate) =>
+        candidate.id === part.id ? { ...candidate, validated } : candidate,
+      ),
+      info: { ...current.info, updatedAt: new Date().toISOString() },
+    }));
+
+    if (validated) {
+      setOpenedValidatedPartIds((current) => current.filter((id) => id !== part.id));
+      removeSelectedBlocks(memberIds ?? new Set<string>());
+      setStatusMessage(`Partie "${part.name}" validee et archivee.`);
+      return;
+    }
+
+    setStatusMessage(`Partie "${part.name}" remise en edition.`);
+  }, [blockById, canEdit, nodes, partBlockSets, project.parts, removeSelectedBlocks, setStatusMessage]);
+
+  const toggleValidatedPartVisibility = useCallback((partId: string) => {
+    const part = project.parts.find((candidate) => candidate.id === partId);
+    if (!part?.validated) return;
+    if (openedValidatedPartIdSet.has(partId)) {
+      setOpenedValidatedPartIds((current) => current.filter((id) => id !== partId));
+      removeSelectedBlocks(partBlockSets.get(partId) ?? new Set<string>());
+      setStatusMessage(`Partie "${part.name}" masquee du whiteboard.`);
+      return;
+    }
+    setOpenedValidatedPartIds((current) => [...current, partId]);
+    const start = nodes.find(
+      (node) => node.data.block.type === "part_start" && node.data.block.partId === partId,
+    );
+    if (start) replaceSelectedBlocks([start.id], start.id);
+    setStatusMessage(`Partie "${part.name}" reouverte sur le whiteboard.`);
+  }, [
+    nodes,
+    openedValidatedPartIdSet,
+    partBlockSets,
+    project.parts,
     removeSelectedBlocks,
     replaceSelectedBlocks,
     setStatusMessage,
@@ -1773,6 +1882,28 @@ export function AuthorStudioApp() {
             updatedAt: new Date().toISOString(),
           },
         }));
+      } else if (type === "part_start") {
+        const partId = createId("part");
+        const partBlock = block as import("@/lib/story").PartStartBlock;
+        partBlock.partId = partId;
+        partBlock.partTitle = "Nouvelle partie";
+        setProject((current) => ({
+          ...current,
+          parts: [
+            ...current.parts,
+            {
+              id: partId,
+              chapterId: null,
+              name: "Nouvelle partie",
+              validated: false,
+            } satisfies Part,
+          ],
+          info: {
+            ...current.info,
+            startBlockId: current.info.startBlockId || block.id,
+            updatedAt: new Date().toISOString(),
+          },
+        }));
       } else if (!project.info.startBlockId) {
         setProject((current) => ({
           ...current,
@@ -1801,6 +1932,7 @@ export function AuthorStudioApp() {
 
     // If deleting a chapter_start, remove the chapter and unassign all blocks
     const deletedChapterId = deleted.type === "chapter_start" ? deleted.chapterId : null;
+    const deletedPartId = deleted.type === "part_start" ? deleted.partId : null;
 
     setNodes((current) =>
       current
@@ -1810,6 +1942,9 @@ export function AuthorStudioApp() {
           // Unassign blocks that belonged to the deleted chapter
           if (deletedChapterId && block.chapterId === deletedChapterId) {
             block = { ...block, chapterId: null };
+          }
+          if (deletedPartId && block.partId === deletedPartId) {
+            block = { ...block, partId: null };
           }
           if (block.type === "chapter_start") {
             const shouldClearPreviousChapter =
@@ -1841,6 +1976,13 @@ export function AuthorStudioApp() {
       chapters: deletedChapterId
         ? current.chapters.filter((ch) => ch.id !== deletedChapterId)
         : current.chapters,
+      parts: current.parts
+        .filter((part) => part.id !== deletedPartId)
+        .map((part) =>
+          deletedChapterId && part.chapterId === deletedChapterId
+            ? { ...part, chapterId: null }
+            : part,
+        ),
       info: {
         ...current.info,
         startBlockId:
@@ -2260,6 +2402,24 @@ export function AuthorStudioApp() {
           ),
         }));
       }
+      if (key === "partTitle" && block.type === "part_start" && block.partId && typeof value === "string") {
+        setProject((current) => ({
+          ...current,
+          parts: current.parts.map((part) =>
+            part.id === block.partId ? { ...part, name: value } : part,
+          ),
+        }));
+      }
+      if (key === "chapterId" && block.type === "part_start" && block.partId) {
+        setProject((current) => ({
+          ...current,
+          parts: current.parts.map((part) =>
+            part.id === block.partId
+              ? { ...part, chapterId: typeof value === "string" ? value : null }
+              : part,
+          ),
+        }));
+      }
       return updated;
     });
   }, [updateSelectedBlock]);
@@ -2664,6 +2824,7 @@ export function AuthorStudioApp() {
     const normalizedFreshProject: ProjectMeta = {
       ...fresh.project,
       chapters: normalizeProjectChapters(fresh.project.chapters),
+      parts: [],
     };
     setProject(normalizedFreshProject);
     setNodes(fresh.nodes);
@@ -2695,12 +2856,15 @@ export function AuthorStudioApp() {
     const rawProject = restoreCandidate.project as ProjectMeta & {
       items?: unknown;
       chapters?: unknown;
+      parts?: unknown;
       hero?: unknown;
     };
+    const normalizedChapters = normalizeProjectChapters(rawProject.chapters);
     const normalizedProject: ProjectMeta = {
       ...restoreCandidate.project,
       items: normalizeProjectItems(rawProject.items),
-      chapters: normalizeProjectChapters(rawProject.chapters),
+      chapters: normalizedChapters,
+      parts: normalizeProjectParts(rawProject.parts, normalizedChapters),
     };
     normalizedProject.hero = normalizeProjectHero(
       rawProject.hero,
@@ -2960,6 +3124,18 @@ export function AuthorStudioApp() {
         importedChapters,
         importedBlocksRaw,
       );
+      const importedParts = normalizeProjectParts(result.project.parts, importedChapters);
+      const usedPartIds = new Set(project.parts.map((part) => part.id));
+      const partIdMap = new Map<string, string>();
+      const remappedImportedParts = importedParts.map((part) => {
+        const id = allocateUniqueId(part.id, "part", usedPartIds);
+        partIdMap.set(part.id, id);
+        return {
+          ...part,
+          id,
+          chapterId: part.chapterId ? chapterIdMap.get(part.chapterId) ?? null : null,
+        };
+      });
 
       const blockIdMap = new Map<string, string>();
       const usedBlockIds = new Set(currentStoryNodes.map((node) => node.id));
@@ -2971,6 +3147,7 @@ export function AuthorStudioApp() {
       const remapMaps: ZipImportMergeMaps = {
         blockIdMap,
         chapterIdMap,
+        partIdMap,
         variableIdMap,
         itemIdMap,
       };
@@ -3004,6 +3181,7 @@ export function AuthorStudioApp() {
         items: mergedItems,
         hero: mergedHero,
         chapters: mergedChapters,
+        parts: [...project.parts, ...remappedImportedParts],
         info: {
           ...project.info,
           startBlockId: project.info.startBlockId ?? importedStartBlockId,
@@ -3172,6 +3350,8 @@ export function AuthorStudioApp() {
               onReplaceItemIcon={replaceItemIcon}
               openedValidatedChapterIds={openedValidatedChapterIds}
               onToggleValidatedChapterVisibility={toggleValidatedChapterVisibility}
+              openedValidatedPartIds={openedValidatedPartIds}
+              onToggleValidatedPartVisibility={toggleValidatedPartVisibility}
             />
           ) : (
             <aside className="panel panel-left">
@@ -3300,6 +3480,7 @@ export function AuthorStudioApp() {
                   onEnsureAssetPreviewSrc={ensureAssetPreviewSrc}
                   onStatusMessage={setStatusMessage}
                   onSetChapterValidationFromEnd={setChapterValidationFromEnd}
+                  onSetPartValidationFromEnd={setPartValidationFromEnd}
                   onSetChapterStartPreviousLink={setChapterStartPreviousLink}
                 />
               </div>

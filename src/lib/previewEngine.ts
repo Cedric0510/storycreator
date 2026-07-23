@@ -299,6 +299,8 @@ function buildPreviewRuntimeState(
     (
       resolvedBlock.type === "chapter_start" ||
       resolvedBlock.type === "chapter_end" ||
+      resolvedBlock.type === "part_start" ||
+      resolvedBlock.type === "part_end" ||
       resolvedBlock.type === "switch"
     )
   ) {

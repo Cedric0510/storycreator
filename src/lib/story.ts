@@ -1,4 +1,4 @@
-export const STORY_SCHEMA_VERSION = "1.10.0";
+export const STORY_SCHEMA_VERSION = "1.11.0";
 
 export type BlockType =
   | "title"
@@ -10,7 +10,9 @@ export type BlockType =
   | "hero_profile"
   | "npc_profile"
   | "chapter_start"
-  | "chapter_end";
+  | "chapter_end"
+  | "part_start"
+  | "part_end";
 export type ChoiceLabel = "A" | "B" | "C" | "D";
 export type ChoiceDisplayMode = "visual" | "text";
 export type GameplayMode = "point_and_click" | "map_move" | "static_scene";
@@ -268,6 +270,7 @@ interface BaseBlock {
   entryEffects: VariableEffect[];
   /** Which chapter this block belongs to (null = default / no chapter) */
   chapterId: string | null;
+  partId: string | null;
 }
 
 export interface TitleBlock extends BaseBlock {
@@ -453,6 +456,17 @@ export interface ChapterEndBlock extends BaseBlock {
   nextBlockId: string | null;
 }
 
+export interface PartStartBlock extends BaseBlock {
+  type: "part_start";
+  partTitle: string;
+  nextBlockId: string | null;
+}
+
+export interface PartEndBlock extends BaseBlock {
+  type: "part_end";
+  nextBlockId: string | null;
+}
+
 export interface ChoiceOption {
   id: string;
   label: ChoiceLabel;
@@ -525,7 +539,9 @@ export type StoryBlock =
   | HeroProfileBlock
   | NpcProfileBlock
   | ChapterStartBlock
-  | ChapterEndBlock;
+  | ChapterEndBlock
+  | PartStartBlock
+  | PartEndBlock;
 
 export interface Member {
   id: string;
@@ -560,6 +576,13 @@ export interface Chapter {
   validated: boolean;
 }
 
+export interface Part {
+  id: string;
+  chapterId: string | null;
+  name: string;
+  validated: boolean;
+}
+
 export interface CommerceProduct {
   id: string;
   name: string;
@@ -581,6 +604,7 @@ export interface ProjectMeta {
   editingLockMemberId: string | null;
   logs: AuditLogEntry[];
   chapters: Chapter[];
+  parts: Part[];
   commerce?: CommerceCatalog;
 }
 
@@ -601,6 +625,8 @@ export const BLOCK_LABELS: Record<BlockType, string> = {
   npc_profile: "Fiche PNJ",
   chapter_start: "Debut chapitre",
   chapter_end: "Fin chapitre",
+  part_start: "Debut partie",
+  part_end: "Fin partie",
 };
 
 export const CHOICE_LABELS: ChoiceLabel[] = ["A", "B", "C", "D"];
@@ -971,7 +997,14 @@ function migrateCharacterLayers(
 
 export function createBlock(type: BlockType, position: XYPosition): StoryBlock {
   const id = createId(type);
-  const base = { id, notes: "", position, entryEffects: [] as VariableEffect[], chapterId: null as string | null };
+  const base = {
+    id,
+    notes: "",
+    position,
+    entryEffects: [] as VariableEffect[],
+    chapterId: null as string | null,
+    partId: null as string | null,
+  };
 
   if (type === "chapter_start") {
     return {
@@ -990,6 +1023,25 @@ export function createBlock(type: BlockType, position: XYPosition): StoryBlock {
       ...base,
       type,
       name: "Fin chapitre",
+      nextBlockId: null,
+    };
+  }
+
+  if (type === "part_start") {
+    return {
+      ...base,
+      type,
+      name: "Debut partie",
+      partTitle: "Nouvelle partie",
+      nextBlockId: null,
+    };
+  }
+
+  if (type === "part_end") {
+    return {
+      ...base,
+      type,
+      name: "Fin partie",
       nextBlockId: null,
     };
   }
@@ -1372,6 +1424,9 @@ export function normalizeStoryBlock(block: StoryBlock): StoryBlock {
   if (typeof raw.chapterId !== "string") {
     (block as unknown as Record<string, unknown>).chapterId = null;
   }
+  if (typeof raw.partId !== "string") {
+    raw.partId = null;
+  }
 
   if (block.type === "chapter_start") {
     return {
@@ -1396,6 +1451,27 @@ export function normalizeStoryBlock(block: StoryBlock): StoryBlock {
       ...block,
       chapterId: block.chapterId ?? null,
       entryEffects: normalizeVariableEffects((block as { entryEffects?: unknown }).entryEffects),
+      nextBlockId: block.nextBlockId ?? null,
+    };
+  }
+
+  if (block.type === "part_start") {
+    return {
+      ...block,
+      chapterId: block.chapterId ?? null,
+      partId: block.partId ?? null,
+      entryEffects: normalizeVariableEffects(block.entryEffects),
+      partTitle: block.partTitle ?? "Partie",
+      nextBlockId: block.nextBlockId ?? null,
+    };
+  }
+
+  if (block.type === "part_end") {
+    return {
+      ...block,
+      chapterId: block.chapterId ?? null,
+      partId: block.partId ?? null,
+      entryEffects: normalizeVariableEffects(block.entryEffects),
       nextBlockId: block.nextBlockId ?? null,
     };
   }
@@ -1831,7 +1907,12 @@ export function getBlockOutgoingTargets(block: StoryBlock) {
     return Array.from(new Set(targets));
   }
 
-  if (block.type === "chapter_start" || block.type === "chapter_end") {
+  if (
+    block.type === "chapter_start"
+    || block.type === "chapter_end"
+    || block.type === "part_start"
+    || block.type === "part_end"
+  ) {
     return block.nextBlockId ? [block.nextBlockId] : [];
   }
 
@@ -1873,6 +1954,8 @@ export function blockTypeColor(type: BlockType) {
   if (type === "npc_profile") return "#0ea5e9";
   if (type === "chapter_start") return "#059669";
   if (type === "chapter_end") return "#dc2626";
+  if (type === "part_start") return "#0d9488";
+  if (type === "part_end") return "#e11d48";
   return "#7c3aed";
 }
 

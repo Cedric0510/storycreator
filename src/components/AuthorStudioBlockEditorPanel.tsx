@@ -24,6 +24,8 @@ import {
   ChapterStartEditorSection,
   HeroProfileEditorSection,
   NpcProfileEditorSection,
+  PartEndEditorSection,
+  PartStartEditorSection,
 } from "@/components/AuthorStudioProfileChapterSections";
 import {
   CinematicNarration,
@@ -115,6 +117,7 @@ interface AuthorStudioBlockEditorPanelProps {
   onEnsureAssetPreviewSrc: (assetId: string) => Promise<string | null>;
   onStatusMessage: (message: string) => void;
   onSetChapterValidationFromEnd: (chapterEndBlockId: string, validated: boolean) => void;
+  onSetPartValidationFromEnd: (partEndBlockId: string, validated: boolean) => void;
   onSetChapterStartPreviousLink: (
     chapterStartBlockId: string,
     previousChapterId: string | null,
@@ -603,6 +606,7 @@ export function AuthorStudioBlockEditorPanel({
   onEnsureAssetPreviewSrc,
   onStatusMessage,
   onSetChapterValidationFromEnd,
+  onSetPartValidationFromEnd,
   onSetChapterStartPreviousLink,
 }: AuthorStudioBlockEditorPanelProps) {
   return (
@@ -863,6 +867,29 @@ export function AuthorStudioBlockEditorPanel({
                 project={project}
                 onSetConnection={onSetConnection}
                 onSetChapterValidationFromEnd={onSetChapterValidationFromEnd}
+              />
+            )}
+
+            {selectedBlock.type === "part_start" && (
+              <PartStartEditorSection
+                block={selectedBlock}
+                canEdit={canEdit}
+                blocks={blocks}
+                project={project}
+                onSetSelectedDynamicField={onSetSelectedDynamicField}
+                onSetConnection={onSetConnection}
+              />
+            )}
+
+            {selectedBlock.type === "part_end" && (
+              <PartEndEditorSection
+                block={selectedBlock}
+                canEdit={canEdit}
+                blocks={blocks}
+                project={project}
+                onSetSelectedDynamicField={onSetSelectedDynamicField}
+                onSetConnection={onSetConnection}
+                onSetPartValidationFromEnd={onSetPartValidationFromEnd}
               />
             )}
             </div>

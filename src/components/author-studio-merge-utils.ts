@@ -392,14 +392,45 @@ export function mergeHeroForZipImport(
 export interface ZipImportMergeMaps {
   blockIdMap: Map<string, string>;
   chapterIdMap: Map<string, string>;
+  partIdMap: Map<string, string>;
   variableIdMap: Map<string, string>;
   itemIdMap: Map<string, string>;
+}
+
+export function normalizeProjectParts(
+  parts: unknown,
+  chapters: ProjectMeta["chapters"],
+): ProjectMeta["parts"] {
+  if (!Array.isArray(parts)) return [];
+  const chapterIds = new Set(chapters.map((chapter) => chapter.id));
+  const seenIds = new Set<string>();
+
+  return parts.flatMap((entry, index) => {
+    if (!entry || typeof entry !== "object") return [];
+    const candidate = entry as Partial<ProjectMeta["parts"][number]>;
+    const id = typeof candidate.id === "string" && candidate.id ? candidate.id : createId("part");
+    if (seenIds.has(id)) return [];
+    seenIds.add(id);
+    return [{
+      id,
+      chapterId:
+        typeof candidate.chapterId === "string" && chapterIds.has(candidate.chapterId)
+          ? candidate.chapterId
+          : null,
+      name:
+        typeof candidate.name === "string" && candidate.name.trim()
+          ? candidate.name.trim()
+          : `Partie ${index + 1}`,
+      validated: candidate.validated === true,
+    }];
+  });
 }
 
 export function remapBlockForZipImport(block: StoryBlock, maps: ZipImportMergeMaps): StoryBlock {
   const remappedCore = {
     id: remapRequiredId(block.id, maps.blockIdMap),
     chapterId: remapOptionalId(block.chapterId, maps.chapterIdMap),
+    partId: remapOptionalId(block.partId, maps.partIdMap),
     entryEffects: remapVariableEffects(block.entryEffects, maps.variableIdMap),
   };
 

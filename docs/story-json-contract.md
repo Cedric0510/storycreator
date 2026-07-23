@@ -1,7 +1,7 @@
 # Contrat `story.json` (Studio Auteur)
 
 Ce document fige le format exporte par l'outil auteur pour la partie lecture.
-Version courante: `schemaVersion = "1.10.0"`.
+Version courante: `schemaVersion = "1.11.0"`.
 
 Source de verite cote code: `serializeBlock` + `exportZip`
 (author-studio) et `storyLoader.ts` (story-player-mobile). Les scenarios de
@@ -12,7 +12,7 @@ executables de ce contrat: les deux moteurs doivent produire les memes traces.
 
 ```json
 {
-  "schemaVersion": "1.10.0",
+  "schemaVersion": "1.11.0",
   "exportedAt": "2026-07-18T10:00:00.000Z",
   "project": {
     "id": "project_xxx",
@@ -21,7 +21,8 @@ executables de ce contrat: les deux moteurs doivent produire les memes traces.
     "synopsis": "...",
     "startBlockId": "title_xxx",
     "updatedAt": "2026-07-18T10:00:00.000Z",
-    "chapters": []
+    "chapters": [],
+    "parts": []
   },
   "studio": { "openedValidatedChapterIds": [] },
   "variables": [],
@@ -34,6 +35,7 @@ executables de ce contrat: les deux moteurs doivent produire les memes traces.
 
 - `studio` est un etat d'edition (reimport dans l'outil auteur); le lecteur l'ignore.
 - `project.chapters[]`: `{ id, name, collapsed, validated? }` (organisation editeur).
+- `project.parts[]`: `{ id, chapterId, name, validated }` (subdivision editoriale d'un chapitre).
 
 ## Variables
 
@@ -59,10 +61,17 @@ Dans tous les tableaux d'effets exportes, chaque effet est
 Champs communs a tous les blocs:
 - `id`, `type`, `name`, `position: { x, y }`, `notes`
 - `chapterId`: string | null (rattachement chapitre)
+- `partId`: string | null (rattachement partie)
 - `entryEffects[]`: effets appliques a l'ENTREE du bloc
 
 Types: `title | cinematic | dialogue | choice | switch | gameplay |
-hero_profile | npc_profile | chapter_start | chapter_end`.
+hero_profile | npc_profile | chapter_start | chapter_end | part_start | part_end`.
+
+### `part_start` et `part_end`
+
+- `part_start`: `partTitle`, `partId`, `chapterId`, `nextBlockId`
+- `part_end`: `partId`, `chapterId`, `nextBlockId`
+- Le lecteur traverse ces frontieres sans afficher d'ecran intermediaire.
 
 ### `title`
 

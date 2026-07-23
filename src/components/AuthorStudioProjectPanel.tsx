@@ -18,6 +18,8 @@ const BLOCK_LIBRARY_ITEMS: ReadonlyArray<{ type: BlockType; label: string }> = [
   { type: "npc_profile", label: "Fiche PNJ" },
   { type: "chapter_start", label: "Debut chapitre" },
   { type: "chapter_end", label: "Fin chapitre" },
+  { type: "part_start", label: "Debut partie" },
+  { type: "part_end", label: "Fin partie" },
 ];
 
 interface AuthorStudioProjectPanelProps {
@@ -38,6 +40,8 @@ interface AuthorStudioProjectPanelProps {
   onReplaceItemIcon: (itemId: string, file: File) => void;
   openedValidatedChapterIds: string[];
   onToggleValidatedChapterVisibility: (chapterId: string) => void;
+  openedValidatedPartIds: string[];
+  onToggleValidatedPartVisibility: (partId: string) => void;
 }
 
 export function AuthorStudioProjectPanel({
@@ -58,12 +62,17 @@ export function AuthorStudioProjectPanel({
   onReplaceItemIcon,
   openedValidatedChapterIds,
   onToggleValidatedChapterVisibility,
+  openedValidatedPartIds,
+  onToggleValidatedPartVisibility,
 }: AuthorStudioProjectPanelProps) {
   const [newItemName, setNewItemName] = useState("");
   const [newItemIconFile, setNewItemIconFile] = useState<File | null>(null);
   const [itemIconInputKey, setItemIconInputKey] = useState(0);
   const openedValidatedChapterIdSet = new Set(openedValidatedChapterIds);
+  const openedValidatedPartIdSet = new Set(openedValidatedPartIds);
   const validatedChapters = project.chapters.filter((chapter) => chapter.validated);
+  const validatedParts = project.parts.filter((part) => part.validated);
+  const [expandedChapterIds, setExpandedChapterIds] = useState<string[]>([]);
 
   const submitCreateItem = () => {
     const created = onCreateItem(newItemName, newItemIconFile);
@@ -155,26 +164,68 @@ export function AuthorStudioProjectPanel({
           </HelpHint>
         }
       >
-        {validatedChapters.length === 0 ? (
-          <p className="empty-placeholder">Aucun chapitre valide pour le moment.</p>
+        {validatedChapters.length === 0 && validatedParts.length === 0 ? (
+          <p className="empty-placeholder">Aucun chapitre ou partie valide pour le moment.</p>
         ) : (
-          <ul className="list-compact">
+          <ul className="list-compact validated-content-tree">
             {validatedChapters.map((chapter, index) => {
               const isOpen = openedValidatedChapterIdSet.has(chapter.id);
+              const isExpanded = expandedChapterIds.includes(chapter.id);
+              const chapterParts = validatedParts.filter((part) => part.chapterId === chapter.id);
               return (
-                <li key={chapter.id} className="variable-line">
-                  <span>
-                    {index + 1}. {chapter.name}
-                  </span>
-                  <button
-                    className="button-secondary"
-                    onClick={() => onToggleValidatedChapterVisibility(chapter.id)}
-                  >
-                    {isOpen ? "Masquer" : "Ouvrir"}
-                  </button>
+                <li key={chapter.id} className="validated-content-entry">
+                  <div className="variable-line">
+                    <button
+                      className="validated-content-toggle"
+                      onClick={() =>
+                        setExpandedChapterIds((current) =>
+                          current.includes(chapter.id)
+                            ? current.filter((id) => id !== chapter.id)
+                            : [...current, chapter.id],
+                        )
+                      }
+                      aria-expanded={isExpanded}
+                    >
+                      {chapterParts.length > 0 ? (isExpanded ? "▾" : "▸") : "•"} {index + 1}. {chapter.name}
+                    </button>
+                    <button
+                      className="button-secondary"
+                      onClick={() => onToggleValidatedChapterVisibility(chapter.id)}
+                    >
+                      {isOpen ? "Masquer" : "Ouvrir"}
+                    </button>
+                  </div>
+                  {isExpanded && chapterParts.length > 0 && (
+                    <ul className="validated-part-list">
+                      {chapterParts.map((part) => (
+                        <li key={part.id} className="variable-line">
+                          <span>{part.name}</span>
+                          <button
+                            className="button-secondary"
+                            onClick={() => onToggleValidatedPartVisibility(part.id)}
+                          >
+                            {openedValidatedPartIdSet.has(part.id) ? "Masquer" : "Ouvrir"}
+                          </button>
+                        </li>
+                      ))}
+                    </ul>
+                  )}
                 </li>
               );
             })}
+            {validatedParts
+              .filter((part) => !validatedChapters.some((chapter) => chapter.id === part.chapterId))
+              .map((part) => (
+                <li key={part.id} className="variable-line validated-standalone-part">
+                  <span>{part.name}</span>
+                  <button
+                    className="button-secondary"
+                    onClick={() => onToggleValidatedPartVisibility(part.id)}
+                  >
+                    {openedValidatedPartIdSet.has(part.id) ? "Masquer" : "Ouvrir"}
+                  </button>
+                </li>
+              ))}
           </ul>
         )}
       </CollapsibleSection>

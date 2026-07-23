@@ -47,7 +47,7 @@ test("parcours coeur: connexion, export ZIP, reimport, preview", async ({ page }
     project: { title: string; startBlockId: string | null };
     blocks: Array<{ id: string; type: string }>;
   };
-  expect(story.schemaVersion).toBe("1.10.0");
+  expect(story.schemaVersion).toBe("1.11.0");
   expect(story.blocks).toHaveLength(1);
   expect(story.blocks[0].type).toBe("title");
   expect(story.project.startBlockId).toBe(story.blocks[0].id);
@@ -202,4 +202,24 @@ test("l'inspecteur de bloc ne deborde pas horizontalement", async ({ page }) => 
   await expect.poll(() => inspector.evaluate((element) =>
     element.scrollWidth <= element.clientWidth + 1,
   )).toBe(true);
+});
+
+test("cree et configure les frontieres de partie", async ({ page }) => {
+  await page.route("**/*.mp4", (route) => route.abort());
+  await page.goto("/");
+  await page.getByLabel("Email").fill(ADMIN_EMAIL);
+  await page.getByLabel("Mot de passe").fill(ADMIN_PASSWORD);
+  await page.getByRole("button", { name: "Se connecter" }).click();
+  await page.waitForURL("**/studio", { timeout: 60_000 });
+
+  await page.getByRole("button", { name: "Debut chapitre" }).click();
+  await page.getByLabel("Titre du chapitre").fill("Chapitre test");
+  await page.getByRole("button", { name: "Debut partie" }).click();
+  await page.getByLabel("Titre de la partie").fill("Partie test");
+  await page.getByLabel("Chapitre parent").selectOption({ label: "Chapitre test" });
+  await page.getByRole("button", { name: "Fin partie" }).click();
+  await page.getByLabel("Partie cloturee").selectOption({ label: "Partie test" });
+
+  await expect(page.locator(".react-flow__node")).toHaveCount(4);
+  await expect(page.getByRole("button", { name: "Valider cette partie" })).toBeVisible();
 });

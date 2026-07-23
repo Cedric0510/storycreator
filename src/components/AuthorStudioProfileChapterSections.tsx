@@ -7,9 +7,115 @@ import {
   ChapterStartBlock,
   HeroProfileBlock,
   NpcProfileBlock,
+  PartEndBlock,
+  PartStartBlock,
   ProjectMeta,
   StoryBlock,
 } from "@/lib/story";
+
+interface PartStartEditorSectionProps {
+  block: PartStartBlock;
+  canEdit: boolean;
+  blocks: StoryBlock[];
+  project: ProjectMeta;
+  onSetSelectedDynamicField: (key: string, value: unknown) => void;
+  onSetConnection: (sourceId: string, sourceHandle: string, targetId: string | null) => void;
+}
+
+export function PartStartEditorSection({
+  block,
+  canEdit,
+  blocks,
+  project,
+  onSetSelectedDynamicField,
+  onSetConnection,
+}: PartStartEditorSectionProps) {
+  return (
+    <>
+      <label>
+        Titre de la partie
+        <input
+          value={block.partTitle}
+          onChange={(event) => onSetSelectedDynamicField("partTitle", event.target.value)}
+          disabled={!canEdit}
+        />
+      </label>
+      <label>
+        Chapitre parent
+        <select
+          value={block.chapterId ?? ""}
+          onChange={(event) => onSetSelectedDynamicField("chapterId", event.target.value || null)}
+          disabled={!canEdit}
+        >
+          <option value="">Selectionner un chapitre</option>
+          {project.chapters.map((chapter) => (
+            <option key={chapter.id} value={chapter.id}>{chapter.name}</option>
+          ))}
+        </select>
+      </label>
+      <NextBlockSelect
+        selectedBlockId={block.id}
+        nextBlockId={block.nextBlockId}
+        blocks={blocks}
+        canEdit={canEdit}
+        onChange={(targetId) => onSetConnection(block.id, "next", targetId)}
+      />
+    </>
+  );
+}
+
+interface PartEndEditorSectionProps {
+  block: PartEndBlock;
+  canEdit: boolean;
+  blocks: StoryBlock[];
+  project: ProjectMeta;
+  onSetSelectedDynamicField: (key: string, value: unknown) => void;
+  onSetConnection: (sourceId: string, sourceHandle: string, targetId: string | null) => void;
+  onSetPartValidationFromEnd: (partEndBlockId: string, validated: boolean) => void;
+}
+
+export function PartEndEditorSection({
+  block,
+  canEdit,
+  blocks,
+  project,
+  onSetSelectedDynamicField,
+  onSetConnection,
+  onSetPartValidationFromEnd,
+}: PartEndEditorSectionProps) {
+  const part = project.parts.find((candidate) => candidate.id === block.partId);
+  return (
+    <>
+      <label>
+        Partie cloturee
+        <select
+          value={block.partId ?? ""}
+          onChange={(event) => onSetSelectedDynamicField("partId", event.target.value || null)}
+          disabled={!canEdit}
+        >
+          <option value="">Selectionner une partie</option>
+          {project.parts.map((candidate) => (
+            <option key={candidate.id} value={candidate.id}>{candidate.name}</option>
+          ))}
+        </select>
+      </label>
+      <button
+        className="button-secondary"
+        onClick={() => onSetPartValidationFromEnd(block.id, !(part?.validated ?? false))}
+        disabled={!canEdit || !part}
+      >
+        {part?.validated ? "Retirer validation partie" : "Valider cette partie"}
+      </button>
+      <NextBlockSelect
+        selectedBlockId={block.id}
+        nextBlockId={block.nextBlockId}
+        blocks={blocks}
+        canEdit={canEdit}
+        onChange={(targetId) => onSetConnection(block.id, "next", targetId)}
+      />
+    </>
+  );
+}
 
 interface HeroProfileEditorSectionProps {
   block: HeroProfileBlock;
@@ -382,7 +488,11 @@ export function ChapterAssignmentSelect({
   canEdit,
   onSetSelectedDynamicField,
 }: ChapterAssignmentSelectProps) {
-  if (block.type === "chapter_start") return null;
+  if (
+    block.type === "chapter_start"
+    || block.type === "part_start"
+    || block.type === "part_end"
+  ) return null;
   if (project.chapters.length === 0) return null;
   const chapterLabel = block.type === "chapter_end" ? "Ce block cloture quel chapitre?" : "Chapitre";
 

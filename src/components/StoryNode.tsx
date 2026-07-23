@@ -279,6 +279,8 @@ function blockSummary(block: StoryBlock) {
   if (block.type === "switch") return `${block.cases.length} cas`;
   if (block.type === "chapter_start") return block.chapterTitle || "Chapitre sans titre";
   if (block.type === "chapter_end") return "Sortie de chapitre";
+  if (block.type === "part_start") return block.partTitle || "Partie sans titre";
+  if (block.type === "part_end") return "Sortie de partie";
   if (block.type === "hero_profile") return "Fiche du hero (visuel)";
   if (block.type === "npc_profile") return `${block.npcName || "PNJ"} (${block.imageAssetIds.length} image(s))`;
   const objectCount = block.objects?.length ?? 0;
@@ -307,6 +309,12 @@ function blockHelp(block: StoryBlock) {
   }
   if (block.type === "chapter_end") {
     return "Fin de chapitre: portail de sortie vers un autre bloc en dehors du chapitre.";
+  }
+  if (block.type === "part_start") {
+    return "Debut d'une partie appartenant a un chapitre.";
+  }
+  if (block.type === "part_end") {
+    return "Fin d'une partie, avec validation et passage a la suite.";
   }
   if (block.type === "hero_profile") {
     return "Bloc visuel de reference du hero, relie aux donnees definies dans la fiche hero du projet.";
@@ -473,6 +481,16 @@ export function StoryNode({ data, selected }: NodeProps<StoryEditorNode>) {
       ) : data.block.type === "chapter_end" ? (
         <div className="story-node-footer">
           <span>Sortie chapitre</span>
+          <Handle
+            type="source"
+            id="next"
+            position={Position.Right}
+            className="story-node-handle"
+          />
+        </div>
+      ) : data.block.type === "part_start" || data.block.type === "part_end" ? (
+        <div className="story-node-footer">
+          <span>{data.block.type === "part_start" ? "Partie" : "Sortie partie"}</span>
           <Handle
             type="source"
             id="next"

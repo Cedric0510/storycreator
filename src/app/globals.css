@@ -3655,3 +3655,37 @@ label {
 .commerce-chapter-row input {
   width: auto;
 }
+
+.validated-content-tree,
+.validated-part-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.validated-content-entry {
+  display: grid;
+  gap: 6px;
+}
+
+.validated-content-toggle {
+  flex: 1;
+  min-width: 0;
+  padding: 4px 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  text-align: left;
+}
+
+.validated-part-list {
+  display: grid;
+  gap: 6px;
+  margin-left: 14px;
+  padding-left: 10px;
+  border-left: 2px solid rgba(13, 148, 136, 0.35);
+}
+
+.validated-standalone-part {
+  border-left: 3px solid #0d9488;
+}

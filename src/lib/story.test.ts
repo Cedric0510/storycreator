@@ -1323,6 +1323,22 @@ describe("story cinematic block (multi-character)", () => {
       ),
     ).toBe(true);
   });
+
+  it("creates and normalizes part boundary blocks", () => {
+    const start = createBlock("part_start", { x: 10, y: 20 });
+    const end = createBlock("part_end", { x: 30, y: 40 });
+
+    expect(start.type).toBe("part_start");
+    if (start.type !== "part_start") throw new Error("part_start attendu");
+    expect(start.partId).toBeNull();
+    expect(start.chapterId).toBeNull();
+    expect(getBlockOutgoingTargets({ ...start, nextBlockId: end.id })).toEqual([end.id]);
+    expect(normalizeStoryBlock(end)).toMatchObject({
+      type: "part_end",
+      partId: null,
+      chapterId: null,
+    });
+  });
 });
 
 

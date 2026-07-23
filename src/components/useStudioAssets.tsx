@@ -278,6 +278,7 @@ export function useStudioAssets({
         startBlockId: project.info.startBlockId,
         updatedAt: project.info.updatedAt,
         chapters: project.chapters,
+        parts: project.parts,
         commerce: normalizeCommerceCatalog(project.commerce, project.chapters),
       },
       studio: {
@@ -531,6 +532,7 @@ export function useStudioAssets({
         items,
         hero,
         chapters: Array.isArray(projectData.chapters) ? projectData.chapters : [],
+        parts: Array.isArray(projectData.parts) ? projectData.parts : [],
         commerce: normalizeCommerceCatalog(
           projectData.commerce,
           Array.isArray(projectData.chapters) ? projectData.chapters : [],

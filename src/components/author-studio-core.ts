@@ -4,6 +4,7 @@ import { StoryNodeData } from "@/components/StoryNode";
 import {
   AssetRef,
   Chapter,
+  Part,
   CharacterLayer,
   ChoiceLabel,
   DEFAULT_CHARACTER_LAYOUT,
@@ -225,6 +226,47 @@ export function computeChapterBlockSets(
     }
 
     result.set(chapter.id, memberIds);
+  }
+
+  return result;
+}
+
+export function computePartBlockSets(
+  nodes: EditorNode[],
+  edges: Array<Pick<EditorEdge, "source" | "target">>,
+  parts: Part[],
+): Map<string, Set<string>> {
+  const result = new Map<string, Set<string>>();
+  const blocks = new Map(nodes.map((node) => [node.id, node.data.block] as const));
+  const starts = new Map<string, EditorNode>();
+
+  for (const node of nodes) {
+    const block = node.data.block;
+    if (block.type === "part_start" && block.partId) starts.set(block.partId, node);
+  }
+
+  for (const part of parts) {
+    const start = starts.get(part.id);
+    if (!start) continue;
+    const members = new Set<string>();
+    const queue = [start.id];
+
+    while (queue.length > 0) {
+      const id = queue.shift()!;
+      if (members.has(id)) continue;
+      members.add(id);
+      const block = blocks.get(id);
+      if (!block || block.type === "part_end" || block.type === "chapter_end") continue;
+
+      for (const edge of edges) {
+        if (edge.source !== id || members.has(edge.target)) continue;
+        const target = blocks.get(edge.target);
+        if (target?.type === "part_start" && target.partId !== part.id) continue;
+        queue.push(edge.target);
+      }
+    }
+
+    result.set(part.id, members);
   }
 
   return result;
@@ -454,7 +496,12 @@ export function collectAssetIds(block: StoryBlock) {
   if (block.type === "npc_profile") {
     return block.imageAssetIds.filter((value): value is string => Boolean(value));
   }
-  if (block.type === "chapter_start" || block.type === "chapter_end") {
+  if (
+    block.type === "chapter_start"
+    || block.type === "chapter_end"
+    || block.type === "part_start"
+    || block.type === "part_end"
+  ) {
     return [];
   }
   if (block.type === "switch") {
@@ -545,6 +592,7 @@ export function buildInitialStudio(): InitialStudio {
     activeMemberId: ownerId,
     editingLockMemberId: ownerId,
     chapters: [],
+    parts: [],
     logs: [
       {
         id: createId("log"),
@@ -812,6 +860,7 @@ export function serializeBlock(
   assetRefs: Record<string, AssetRef>,
 ) {
   const chapterId = block.chapterId ?? null;
+  const partId = block.partId ?? null;
 
   if (block.type === "chapter_start") {
     return {
@@ -821,6 +870,7 @@ export function serializeBlock(
       position: block.position,
       notes: block.notes,
       chapterId,
+      partId,
       entryEffects: serializeEffects(block.entryEffects ?? [], variableNameById),
       chapterTitle: block.chapterTitle,
       linkedFromChapterId: block.linkedFromChapterId,
@@ -837,7 +887,23 @@ export function serializeBlock(
       position: block.position,
       notes: block.notes,
       chapterId,
+      partId,
       entryEffects: serializeEffects(block.entryEffects ?? [], variableNameById),
+      nextBlockId: block.nextBlockId,
+    };
+  }
+
+  if (block.type === "part_start" || block.type === "part_end") {
+    return {
+      id: block.id,
+      type: block.type,
+      name: block.name,
+      position: block.position,
+      notes: block.notes,
+      chapterId,
+      partId,
+      entryEffects: serializeEffects(block.entryEffects ?? [], variableNameById),
+      ...(block.type === "part_start" ? { partTitle: block.partTitle } : {}),
       nextBlockId: block.nextBlockId,
     };
   }
@@ -850,6 +916,7 @@ export function serializeBlock(
       position: block.position,
       notes: block.notes,
       chapterId,
+      partId,
       entryEffects: serializeEffects(block.entryEffects ?? [], variableNameById),
       storyTitle: block.storyTitle,
       subtitle: block.subtitle,
@@ -887,6 +954,7 @@ export function serializeBlock(
       position: block.position,
       notes: block.notes,
       chapterId,
+      partId,
       entryEffects: serializeEffects(block.entryEffects ?? [], variableNameById),
       heading: startNarration?.heading ?? block.heading,
       body: startNarration?.body ?? block.body,
@@ -924,6 +992,7 @@ export function serializeBlock(
       position: block.position,
       notes: block.notes,
       chapterId,
+      partId,
       entryEffects: serializeEffects(block.entryEffects ?? [], variableNameById),
       backgroundPath: assetPath(block.backgroundAssetId, assetRefs),
       characterPath: assetPath(block.characterAssetId, assetRefs),
@@ -969,6 +1038,7 @@ export function serializeBlock(
       position: block.position,
       notes: block.notes,
       chapterId,
+      partId,
       entryEffects: serializeEffects(block.entryEffects ?? [], variableNameById),
       displayMode: block.displayMode,
       prompt: block.prompt,
@@ -1010,6 +1080,7 @@ export function serializeBlock(
       position: block.position,
       notes: block.notes,
       chapterId,
+      partId,
       entryEffects: serializeEffects(block.entryEffects ?? [], variableNameById),
       variableId: block.variableId,
       variableName: block.variableId
@@ -1051,6 +1122,7 @@ export function serializeBlock(
       position: block.position,
       notes: block.notes,
       chapterId,
+      partId,
       entryEffects: serializeEffects(block.entryEffects ?? [], variableNameById),
     };
   }
@@ -1063,6 +1135,7 @@ export function serializeBlock(
       position: block.position,
       notes: block.notes,
       chapterId,
+      partId,
       entryEffects: serializeEffects(block.entryEffects ?? [], variableNameById),
       npcName: block.npcName,
       npcLore: block.npcLore,
@@ -1083,6 +1156,7 @@ export function serializeBlock(
     position: block.position,
     notes: block.notes,
     chapterId,
+    partId,
     entryEffects: serializeEffects(block.entryEffects ?? [], variableNameById),
     mode: "point_and_click",
     objective: block.objective,
@@ -1147,6 +1221,7 @@ export function deserializeBlockFromExport(
     position: (raw.position as { x: number; y: number }) ?? { x: 0, y: 0 },
     entryEffects: deserializeEffects(raw.entryEffects),
     chapterId: typeof raw.chapterId === "string" ? raw.chapterId : null,
+    partId: typeof raw.partId === "string" ? raw.partId : null,
   };
 
   if (type === "chapter_start") {
@@ -1168,6 +1243,23 @@ export function deserializeBlockFromExport(
     return normalizeStoryBlock({
       ...base,
       type: "chapter_end",
+      nextBlockId: (raw.nextBlockId as string) ?? null,
+    });
+  }
+
+  if (type === "part_start") {
+    return normalizeStoryBlock({
+      ...base,
+      type: "part_start",
+      partTitle: (raw.partTitle as string) ?? "Partie",
+      nextBlockId: (raw.nextBlockId as string) ?? null,
+    });
+  }
+
+  if (type === "part_end") {
+    return normalizeStoryBlock({
+      ...base,
+      type: "part_end",
       nextBlockId: (raw.nextBlockId as string) ?? null,
     });
   }
