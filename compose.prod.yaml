@@ -1,0 +1,16 @@
+services:
+  studio:
+    build:
+      context: .
+      args:
+        NEXT_PUBLIC_BACKEND_MODE: cadarium
+        NEXT_PUBLIC_CADARIUM_API_URL: /api/cadarium
+        NEXT_PUBLIC_ENABLE_SELF_SIGNUP: "false"
+    restart: unless-stopped
+    environment:
+      CADARIUM_API_URL: ${CADARIUM_API_URL:-https://api.cadarium.fr}
+      ENABLE_HTTP_BASIC: ${ENABLE_HTTP_BASIC:-false}
+      BETA_HTTP_BASIC_USER: ${BETA_HTTP_BASIC_USER:-}
+      BETA_HTTP_BASIC_PASS: ${BETA_HTTP_BASIC_PASS:-}
+    ports:
+      - "127.0.0.1:3000:3000"

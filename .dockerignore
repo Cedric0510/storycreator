@@ -1,0 +1,14 @@
+node_modules
+.next
+.next-e2e
+out
+coverage
+test-results
+playwright-report
+.git
+.vercel
+.env
+.env.*
+!.env.example
+Dockerfile
+compose.prod.yaml
