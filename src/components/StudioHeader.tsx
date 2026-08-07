@@ -90,6 +90,17 @@ export function StudioHeader({
           {validationControl}
         </div>
 
+        <button
+          type="button"
+          className="nav-preview-shortcut"
+          aria-label="Apercu rapide"
+          title="Apercu rapide"
+          disabled={!canPreview}
+          onClick={onPreview}
+        >
+          <MenuIcon name="preview" />
+        </button>
+
         <span className={`nav-user-avatar${authEmail ? " nav-user-avatar-active" : ""}`} title={authEmail ?? "Aucun compte connecte"}>
           {authInitial}
         </span>

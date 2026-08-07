@@ -572,6 +572,30 @@ label {
   text-align: center;
 }
 
+.nav-preview-shortcut {
+  width: 34px;
+  height: 34px;
+  border-radius: 999px;
+  border: 1px solid #b0c3d4;
+  background: #eff5fb;
+  color: #6a7f96;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  flex-shrink: 0;
+  transition: border-color 0.15s ease, background 0.15s ease, transform 0.15s ease;
+}
+
+.nav-preview-shortcut:hover:not(:disabled) {
+  transform: translateY(-1px);
+}
+
+.nav-preview-shortcut:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
 .nav-user-avatar {
   width: 34px;
   height: 34px;
@@ -3585,6 +3609,15 @@ label:has(> input[type="file"]) > input[type="file"] {
   border-color: rgba(163, 230, 53, 0.58);
   background: rgba(54, 83, 20, 0.45);
   color: #d9f99d;
+}
+.studio-header .nav-preview-shortcut {
+  border-color: rgba(186, 230, 253, 0.34);
+  background: rgba(15, 31, 51, 0.9);
+  color: #dbeafe;
+}
+.studio-header .nav-preview-shortcut:hover:not(:disabled) {
+  border-color: rgba(163, 230, 53, 0.55);
+  background: rgba(30, 49, 70, 0.96);
 }
 
 .studio-main-menu { position: relative; }
