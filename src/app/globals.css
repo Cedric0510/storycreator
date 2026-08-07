@@ -848,6 +848,44 @@ label {
   overflow: hidden;
 }
 
+/* Champs fichier: le texte natif du navigateur ("Aucun fichier selectionne")
+   ne reflete jamais l'etat reel -- la valeur du champ est volontairement
+   remise a zero apres chaque selection pour permettre de rechoisir le meme
+   fichier. On masque donc ce controle natif et on transforme son label en
+   bouton cliquable; le vrai nom du fichier reste affiche juste en dessous
+   (deja fourni par renderAssetAttachment / les apercus de buste). */
+label:has(> input[type="file"]) {
+  display: inline-flex;
+  flex-direction: row;
+  align-items: center;
+  width: fit-content;
+  max-width: 100%;
+  gap: 0;
+  cursor: pointer;
+  border: 1px solid #99b1c5;
+  border-radius: 10px;
+  padding: 9px 12px;
+  background: #f4f9ff;
+  color: #12324b;
+  font-weight: 600;
+  font-size: 13px;
+  transition: transform 0.12s ease, filter 0.12s ease;
+}
+
+label:has(> input[type="file"]):hover {
+  transform: translateY(-1px);
+}
+
+label:has(> input[type="file"]:disabled) {
+  opacity: 0.5;
+  cursor: not-allowed;
+  pointer-events: none;
+}
+
+label:has(> input[type="file"]) > input[type="file"] {
+  display: none;
+}
+
 .panel-right .asset-line {
   flex-wrap: wrap;
 }
@@ -2646,15 +2684,18 @@ label {
   z-index: 1;
 }
 
-/* ── Textbox (cinematic / dialogue) ── */
+/* ── Textbox (cinematic / dialogue) ──
+   Reproduit le panneau bottomOverlay de Story (StoryPlayer.tsx):
+   fond uni rgba(8,15,28,0.84) + liseré ambre, sans dégradé. */
 .preview-vn-textbox {
   position: relative;
   z-index: 5;
   display: flex;
   align-items: flex-end;
-  gap: 6px;
-  padding: 12px 14px;
-  background: linear-gradient(to top, rgba(4, 12, 24, 0.92) 60%, transparent);
+  gap: 8px;
+  padding: 10px 12px 16px;
+  background: rgba(8, 15, 28, 0.84);
+  border-top: 1px solid rgba(251, 191, 36, 0.34);
 }
 
 /* Keep cinematic text layer above character layers (same fix approach as dialogue area). */
@@ -2666,22 +2707,27 @@ label {
   flex: 1;
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: 8px;
+  padding-right: 40px;
+}
+
+.preview-vn-cinematic-textbox .preview-vn-textbox-inner {
+  border-left: 2px solid rgba(251, 191, 36, 0.72);
+  padding-left: 6px;
 }
 
 .preview-vn-speaker {
-  font-size: 13px;
-  font-weight: 700;
-  color: #7ec8f8;
-  text-shadow: 0 1px 6px rgba(0, 0, 0, 0.6);
+  font-size: 14px;
+  font-weight: 800;
+  letter-spacing: 0.25px;
+  color: #fbbf24;
 }
 
 .preview-vn-text {
   font-size: 14px;
-  line-height: 1.55;
-  color: #e8f0f8;
+  line-height: 1.45;
+  color: #eaf3fd;
   margin: 0;
-  text-shadow: 0 1px 4px rgba(0, 0, 0, 0.5);
 }
 
 .preview-vn-next-btn {
@@ -2700,6 +2746,32 @@ label {
 
 .preview-vn-next-btn:hover {
   background: rgba(255, 255, 255, 0.2);
+}
+
+/* Bouton rond ambre des zones de texte, identique au nextButton de Story. */
+.preview-vn-textbox .preview-vn-next-btn,
+.preview-vn-dialogue-box .preview-vn-next-btn {
+  position: absolute;
+  right: 12px;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 34px;
+  height: 34px;
+  padding: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  background: rgba(69, 45, 10, 0.78);
+  border: 1px solid rgba(251, 191, 36, 0.58);
+  color: #fbbf24;
+  font-size: 14px;
+  box-shadow: 0 2px 5px rgba(245, 158, 11, 0.22);
+}
+
+.preview-vn-textbox .preview-vn-next-btn:hover,
+.preview-vn-dialogue-box .preview-vn-next-btn:hover {
+  background: rgba(99, 66, 16, 0.9);
 }
 
 .preview-vn-next-btn:disabled {
@@ -2772,53 +2844,82 @@ label {
   filter: brightness(1.15);
 }
 
-/* ── DIALOGUE area (textbox + responses) ── */
+/* ── DIALOGUE area (textbox + responses) ──
+   Même panneau uni que Story ; le liseré est porté par la zone entière. */
 .preview-vn-dialogue-area {
   position: relative;
   z-index: 20;
   display: flex;
   flex-direction: column;
-  background: linear-gradient(to top, rgba(4, 12, 24, 0.94) 70%, transparent);
-  padding-top: 20px;
+  background: rgba(8, 15, 28, 0.84);
+  border-top: 1px solid rgba(251, 191, 36, 0.34);
+  padding-top: 10px;
 }
 
 .preview-vn-dialogue-area .preview-vn-textbox {
   background: none;
+  border-top: none;
+  padding-top: 0;
   padding-bottom: 6px;
+}
+
+.preview-vn-dialogue-box {
+  position: relative;
+  z-index: 20;
+  padding: 10px 52px 16px 12px;
+  background: rgba(8, 15, 28, 0.84);
+  border-top: 1px solid rgba(251, 191, 36, 0.34);
+  color: #eaf3fd;
+  font-size: 14px;
 }
 
 .preview-vn-responses {
   display: flex;
   flex-direction: column;
-  gap: 6px;
-  padding: 4px 14px 14px;
+  gap: 8px;
+  padding: 4px 12px 14px;
 }
 
+/* Cartes de réponse identiques au style response de Story. */
 .preview-vn-response-btn {
+  position: relative;
   display: flex;
-  align-items: center;
-  gap: 8px;
-  background: rgba(255, 255, 255, 0.07);
-  border: 1px solid rgba(255, 255, 255, 0.14);
-  border-radius: 10px;
-  padding: 9px 12px;
-  color: #d6e6f4;
-  font-size: 13px;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 3px;
+  background: rgba(15, 23, 42, 0.82);
+  border: 1px solid rgba(186, 230, 253, 0.28);
+  border-radius: 14px;
+  padding: 10px 34px 10px 12px;
+  color: #eaf3fd;
+  font-size: 14px;
+  line-height: 1.45;
   cursor: pointer;
   text-align: left;
   transition: background 0.15s, border-color 0.15s;
 }
 
+.preview-vn-response-btn::after {
+  content: "\276F";
+  position: absolute;
+  right: 12px;
+  top: 50%;
+  transform: translateY(-50%);
+  color: #fbbf24;
+  font-size: 14px;
+}
+
 .preview-vn-response-btn:hover {
-  background: rgba(100, 180, 255, 0.15);
-  border-color: rgba(100, 180, 255, 0.35);
+  background: rgba(125, 211, 252, 0.38);
+  border-color: #e0f2fe;
 }
 
 .preview-vn-response-btn strong {
   flex-shrink: 0;
-  color: #7ec8f8;
-  font-size: 12px;
-  min-width: 18px;
+  color: #fbbf24;
+  font-size: 13px;
+  font-weight: 800;
+  letter-spacing: 0.25px;
 }
 
 /* ── CHOICE area ── */

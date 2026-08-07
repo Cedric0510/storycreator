@@ -27,6 +27,7 @@ export interface DialogueEditorSectionProps {
   blocks: StoryBlock[];
   project: ProjectMeta;
   assetPreviewSrcById: Record<string, string>;
+  getAssetFileName: (assetId: string | null) => string;
   onSetSelectedDynamicField: (key: string, value: unknown) => void;
   onUpdateSelectedBlock: (updater: (block: StoryBlock) => StoryBlock) => void;
   onAssetInput: (fieldName: string) => (event: ChangeEvent<HTMLInputElement>) => void;
@@ -34,7 +35,7 @@ export interface DialogueEditorSectionProps {
   onUnlinkDialogueNpcProfile: (dialogueBlockId: string) => void;
   onAddDialogueLine: (afterLineId?: string) => void;
   onRemoveDialogueLine: (lineId: string) => void;
-  onUpdateDialogueLineField: (lineId: string, field: string, value: string | null) => void;
+  onUpdateDialogueLineField: (lineId: string, field: string, value: string | number | null) => void;
   onDialogueLineVoiceInput: (lineId: string) => (event: ChangeEvent<HTMLInputElement>) => void;
   renderLineVoiceAttachment: (lineId: string, assetId: string | null) => ReactNode;
   onAddDialogueLineResponse: (lineId: string) => void;
@@ -60,6 +61,7 @@ export function DialogueEditorSection({
   blocks,
   project,
   assetPreviewSrcById,
+  getAssetFileName,
   onSetSelectedDynamicField,
   onUpdateSelectedBlock,
   onAssetInput,
@@ -153,6 +155,7 @@ export function DialogueEditorSection({
         bust={block.bust}
         canEdit={canEdit}
         assetPreviewSrcById={assetPreviewSrcById}
+        getAssetFileName={getAssetFileName}
         onRegisterAsset={onRegisterAsset}
         onEnsureAssetPreviewSrc={onEnsureAssetPreviewSrc}
         onChange={(bust) =>
@@ -624,6 +627,50 @@ export function DialogueEditorSection({
               }}
             />
           </label>
+          <small>
+            {line.bustAssetId ? getAssetFileName(line.bustAssetId) : "Aucun fichier selectionne"}
+          </small>
+          {line.bustAssetId && assetPreviewSrcById[line.bustAssetId] && (
+            <div
+              className="bust-editor-preview"
+              role="img"
+              aria-label="Apercu du buste de cette replique"
+              style={{ backgroundImage: `url("${assetPreviewSrcById[line.bustAssetId]}")` }}
+            />
+          )}
+          <div className="grid-two">
+            <label>
+              Cote du buste
+              <select
+                value={line.bustSide ?? "default"}
+                disabled={!canEdit}
+                onChange={(event) =>
+                  onUpdateDialogueLineField(
+                    line.id,
+                    "bustSide",
+                    event.target.value === "default" ? null : event.target.value,
+                  )
+                }
+              >
+                <option value="default">Par defaut (buste du bloc)</option>
+                <option value="left">Gauche</option>
+                <option value="right">Droite</option>
+              </select>
+            </label>
+            <label>
+              Largeur ({line.bustWidth ?? block.bust?.width ?? 38}%)
+              <input
+                type="range"
+                min={20}
+                max={70}
+                value={line.bustWidth ?? block.bust?.width ?? 38}
+                disabled={!canEdit}
+                onChange={(event) =>
+                  onUpdateDialogueLineField(line.id, "bustWidth", Number(event.target.value))
+                }
+              />
+            </label>
+          </div>
           <button
             className="button-secondary"
             disabled={!canEdit || !line.bustAssetId}

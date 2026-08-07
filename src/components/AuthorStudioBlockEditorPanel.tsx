@@ -62,7 +62,7 @@ interface AuthorStudioBlockEditorPanelProps {
   renderAssetAttachmentWithRemove: (assetId: string | null, onRemove: () => void) => ReactNode;
   onAddDialogueLine: (afterLineId?: string) => void;
   onRemoveDialogueLine: (lineId: string) => void;
-  onUpdateDialogueLineField: (lineId: string, field: string, value: string | null) => void;
+  onUpdateDialogueLineField: (lineId: string, field: string, value: string | number | null) => void;
   onDialogueLineVoiceInput: (lineId: string) => (event: ChangeEvent<HTMLInputElement>) => void;
   renderLineVoiceAttachment: (lineId: string, assetId: string | null) => ReactNode;
   onAddDialogueLineResponse: (lineId: string) => void;
@@ -114,6 +114,7 @@ interface AuthorStudioBlockEditorPanelProps {
   onGameplayScenePointerMove: (event: ReactPointerEvent<HTMLDivElement>) => void;
   onGameplayScenePointerEnd: (event: ReactPointerEvent<HTMLDivElement>) => void;
   assetPreviewSrcById: Record<string, string>;
+  getAssetFileName: (assetId: string | null) => string;
   onRegisterAsset: (file: File) => string;
   onEnsureAssetPreviewSrc: (assetId: string) => Promise<string | null>;
   onStatusMessage: (message: string) => void;
@@ -131,6 +132,7 @@ interface CinematicEditorSectionProps {
   canEdit: boolean;
   blocks: StoryBlock[];
   assetPreviewSrcById: Record<string, string>;
+  getAssetFileName: (assetId: string | null) => string;
   onSetSelectedDynamicField: (key: string, value: unknown) => void;
   onUpdateSelectedBlock: (updater: (block: StoryBlock) => StoryBlock) => void;
   onSetConnection: (sourceId: string, sourceHandle: string, targetId: string | null) => void;
@@ -146,6 +148,7 @@ function CinematicEditorSection({
   canEdit,
   blocks,
   assetPreviewSrcById,
+  getAssetFileName,
   onSetSelectedDynamicField,
   onUpdateSelectedBlock,
   onSetConnection,
@@ -344,6 +347,64 @@ function CinematicEditorSection({
               }}
             />
           </label>
+          <small>
+            {narration.bustAssetId ? getAssetFileName(narration.bustAssetId) : "Aucun fichier selectionne"}
+          </small>
+          {narration.bustAssetId && assetPreviewSrcById[narration.bustAssetId] && (
+            <div
+              className="bust-editor-preview"
+              role="img"
+              aria-label="Apercu du buste de cette narration"
+              style={{ backgroundImage: `url("${assetPreviewSrcById[narration.bustAssetId]}")` }}
+            />
+          )}
+          <div className="grid-two">
+            <label>
+              Cote du buste
+              <select
+                value={narration.bustSide ?? "default"}
+                disabled={!canEdit}
+                onChange={(event) => {
+                  const nextSide = event.target.value === "default" ? null : event.target.value === "right" ? "right" : "left";
+                  onUpdateSelectedBlock((candidate) => {
+                    if (candidate.type !== "cinematic") return candidate;
+                    return {
+                      ...candidate,
+                      narrations: candidate.narrations.map((item) =>
+                        item.id === narration.id ? { ...item, bustSide: nextSide } : item,
+                      ),
+                    };
+                  });
+                }}
+              >
+                <option value="default">Par defaut (buste du bloc)</option>
+                <option value="left">Gauche</option>
+                <option value="right">Droite</option>
+              </select>
+            </label>
+            <label>
+              Largeur ({narration.bustWidth ?? block.bust?.width ?? 38}%)
+              <input
+                type="range"
+                min={20}
+                max={70}
+                value={narration.bustWidth ?? block.bust?.width ?? 38}
+                disabled={!canEdit}
+                onChange={(event) => {
+                  const nextWidth = Number(event.target.value);
+                  onUpdateSelectedBlock((candidate) => {
+                    if (candidate.type !== "cinematic") return candidate;
+                    return {
+                      ...candidate,
+                      narrations: candidate.narrations.map((item) =>
+                        item.id === narration.id ? { ...item, bustWidth: nextWidth } : item,
+                      ),
+                    };
+                  });
+                }}
+              />
+            </label>
+          </div>
           <button
             className="button-secondary"
             disabled={!canEdit || !narration.bustAssetId}
@@ -388,6 +449,7 @@ function CinematicEditorSection({
         bust={block.bust}
         canEdit={canEdit}
         assetPreviewSrcById={assetPreviewSrcById}
+        getAssetFileName={getAssetFileName}
         onRegisterAsset={onRegisterAsset}
         onEnsureAssetPreviewSrc={onEnsureAssetPreviewSrc}
         onChange={(bust) =>
@@ -661,6 +723,7 @@ export function AuthorStudioBlockEditorPanel({
   onGameplayScenePointerMove,
   onGameplayScenePointerEnd,
   assetPreviewSrcById,
+  getAssetFileName,
   onRegisterAsset,
   onEnsureAssetPreviewSrc,
   onStatusMessage,
@@ -773,6 +836,7 @@ export function AuthorStudioBlockEditorPanel({
                 canEdit={canEdit}
                 blocks={blocks}
                 assetPreviewSrcById={assetPreviewSrcById}
+                getAssetFileName={getAssetFileName}
                 onSetSelectedDynamicField={onSetSelectedDynamicField}
                 onUpdateSelectedBlock={onUpdateSelectedBlock}
                 onSetConnection={onSetConnection}
@@ -791,6 +855,7 @@ export function AuthorStudioBlockEditorPanel({
                 blocks={blocks}
                 project={project}
                 assetPreviewSrcById={assetPreviewSrcById}
+                getAssetFileName={getAssetFileName}
                 onSetSelectedDynamicField={onSetSelectedDynamicField}
                 onUpdateSelectedBlock={onUpdateSelectedBlock}
                 onAssetInput={onAssetInput}
@@ -837,6 +902,7 @@ export function AuthorStudioBlockEditorPanel({
                 onEnsureAssetPreviewSrc={onEnsureAssetPreviewSrc}
                 onStatusMessage={onStatusMessage}
                 assetPreviewSrcById={assetPreviewSrcById}
+                getAssetFileName={getAssetFileName}
               />
             )}
 
@@ -899,6 +965,7 @@ export function AuthorStudioBlockEditorPanel({
                 onGameplayScenePointerMove={onGameplayScenePointerMove}
                 onGameplayScenePointerEnd={onGameplayScenePointerEnd}
                 assetPreviewSrcById={assetPreviewSrcById}
+                getAssetFileName={getAssetFileName}
                 onRegisterAsset={onRegisterAsset}
                 onEnsureAssetPreviewSrc={onEnsureAssetPreviewSrc}
                 onStatusMessage={onStatusMessage}

@@ -45,6 +45,7 @@ export interface ChoiceEditorSectionProps {
   onEnsureAssetPreviewSrc: (assetId: string) => Promise<string | null>;
   onStatusMessage: (message: string) => void;
   assetPreviewSrcById: Record<string, string>;
+  getAssetFileName: (assetId: string | null) => string;
 }
 
 export function ChoiceEditorSection({
@@ -70,6 +71,7 @@ export function ChoiceEditorSection({
   onEnsureAssetPreviewSrc,
   onStatusMessage,
   assetPreviewSrcById,
+  getAssetFileName,
 }: ChoiceEditorSectionProps) {
   const choiceVisualSceneLayers = block.choices
     .map((option) => ({
@@ -148,6 +150,7 @@ export function ChoiceEditorSection({
         bust={block.bust}
         canEdit={canEdit}
         assetPreviewSrcById={assetPreviewSrcById}
+        getAssetFileName={getAssetFileName}
         onRegisterAsset={onRegisterAsset}
         onEnsureAssetPreviewSrc={onEnsureAssetPreviewSrc}
         onChange={(bust) =>

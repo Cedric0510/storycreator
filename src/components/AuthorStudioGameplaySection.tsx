@@ -62,6 +62,7 @@ export interface GameplayEditorSectionProps {
   onGameplayScenePointerMove: (event: ReactPointerEvent<HTMLDivElement>) => void;
   onGameplayScenePointerEnd: (event: ReactPointerEvent<HTMLDivElement>) => void;
   assetPreviewSrcById: Record<string, string>;
+  getAssetFileName: (assetId: string | null) => string;
   onRegisterAsset: (file: File) => string;
   onEnsureAssetPreviewSrc: (assetId: string) => Promise<string | null>;
   onStatusMessage: (message: string) => void;
@@ -109,6 +110,7 @@ export function GameplayEditorSection({
   onGameplayScenePointerMove,
   onGameplayScenePointerEnd,
   assetPreviewSrcById,
+  getAssetFileName,
   onRegisterAsset,
   onEnsureAssetPreviewSrc,
   onStatusMessage,
@@ -206,6 +208,7 @@ export function GameplayEditorSection({
         bust={block.bust}
         canEdit={canEdit}
         assetPreviewSrcById={assetPreviewSrcById}
+        getAssetFileName={getAssetFileName}
         onRegisterAsset={onRegisterAsset}
         onEnsureAssetPreviewSrc={onEnsureAssetPreviewSrc}
         onChange={(bust) =>

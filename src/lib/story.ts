@@ -314,6 +314,10 @@ export interface CinematicNarration {
   continueTargetBlockId: string | null;
   continueTargetNarrationId: string | null;
   bustAssetId?: string | null;
+  /** Cote du buste pour cette narration. null = herite du cote du bloc. */
+  bustSide?: "left" | "right" | null;
+  /** Largeur du buste (%) pour cette narration. null = herite de la largeur du bloc. */
+  bustWidth?: number | null;
 }
 
 export interface DialogueResponse {
@@ -333,6 +337,10 @@ export interface DialogueLine {
   text: string;
   voiceAssetId: string | null;
   bustAssetId?: string | null;
+  /** Cote du buste pour cette replique. null = herite du cote du bloc. */
+  bustSide?: "left" | "right" | null;
+  /** Largeur du buste (%) pour cette replique. null = herite de la largeur du bloc. */
+  bustWidth?: number | null;
   /** Conditions that must ALL be met for this line to trigger */
   conditions: DialogueLineCondition[];
   /** If conditions fail, jump to this line instead (null = skip responses) */
@@ -772,6 +780,8 @@ export function createDefaultLine(speaker?: string): DialogueLine {
     text: "",
     voiceAssetId: null,
     bustAssetId: null,
+    bustSide: null,
+    bustWidth: null,
     conditions: [],
     fallbackLineId: null,
     continueTargetBlockId: null,
@@ -787,6 +797,8 @@ export function createDefaultCinematicNarration(): CinematicNarration {
     continueTargetBlockId: null,
     continueTargetNarrationId: null,
     bustAssetId: null,
+    bustSide: null,
+    bustWidth: null,
   };
 }
 
@@ -1621,6 +1633,15 @@ export function normalizeStoryBlock(block: StoryBlock): StoryBlock {
               typeof (line as unknown as Record<string, unknown>).bustAssetId === "string"
                 ? (line as unknown as Record<string, unknown>).bustAssetId as string
                 : null,
+            bustSide:
+              (line as unknown as Record<string, unknown>).bustSide === "left"
+                || (line as unknown as Record<string, unknown>).bustSide === "right"
+                ? (line as unknown as Record<string, unknown>).bustSide as "left" | "right"
+                : null,
+            bustWidth:
+              typeof (line as unknown as Record<string, unknown>).bustWidth === "number"
+                ? (line as unknown as Record<string, unknown>).bustWidth as number
+                : null,
             conditions: normalizeConditions((line as unknown as Record<string, unknown>).conditions),
             fallbackLineId: typeof (line as unknown as Record<string, unknown>).fallbackLineId === "string" ? (line as unknown as Record<string, unknown>).fallbackLineId as string : null,
             continueTargetBlockId:
@@ -1679,6 +1700,12 @@ export function normalizeStoryBlock(block: StoryBlock): StoryBlock {
             typeof narration.bustAssetId === "string" && narration.bustAssetId
               ? narration.bustAssetId
               : null,
+          bustSide:
+            narration.bustSide === "left" || narration.bustSide === "right"
+              ? narration.bustSide
+              : null,
+          bustWidth:
+            typeof narration.bustWidth === "number" ? narration.bustWidth : null,
         };
       })
       .filter((item): item is CinematicNarration => item !== null);
@@ -1692,6 +1719,8 @@ export function normalizeStoryBlock(block: StoryBlock): StoryBlock {
       continueTargetBlockId: null,
       continueTargetNarrationId: null,
       bustAssetId: null,
+      bustSide: null,
+      bustWidth: null,
     };
     const narrations =
       normalizedNarrations.length > 0 ? normalizedNarrations : [fallbackNarration];

@@ -973,6 +973,8 @@ export function serializeBlock(
         continueTargetBlockId: narration.continueTargetBlockId,
         continueTargetNarrationId: narration.continueTargetNarrationId,
         bustPath: assetPath(narration.bustAssetId ?? null, assetRefs),
+        bustSide: narration.bustSide ?? null,
+        bustWidth: narration.bustWidth ?? null,
       })),
       startNarrationId: startNarration?.id ?? block.startNarrationId,
       backgroundPath: assetPath(block.backgroundAssetId, assetRefs),
@@ -1034,6 +1036,8 @@ export function serializeBlock(
         text: line.text,
         voicePath: assetPath(line.voiceAssetId, assetRefs),
         bustPath: assetPath(line.bustAssetId ?? null, assetRefs),
+        bustSide: line.bustSide ?? null,
+        bustWidth: line.bustWidth ?? null,
         conditions: line.conditions,
         fallbackLineId: line.fallbackLineId,
         continueTargetBlockId: line.continueTargetBlockId,
@@ -1351,6 +1355,8 @@ export function deserializeBlockFromExport(
         continueTargetNarrationId:
           typeof item.continueTargetNarrationId === "string" ? item.continueTargetNarrationId : null,
         bustAssetId: resolveAssetId(item.bustPath, pathToAssetId),
+        bustSide: item.bustSide === "left" || item.bustSide === "right" ? item.bustSide : null,
+        bustWidth: typeof item.bustWidth === "number" ? item.bustWidth : null,
       })),
       startNarrationId:
         typeof raw.startNarrationId === "string" ? raw.startNarrationId : "",
@@ -1377,6 +1383,8 @@ export function deserializeBlockFromExport(
       text: (line.text as string) ?? "",
       voiceAssetId: resolveAssetId(line.voicePath, pathToAssetId),
       bustAssetId: resolveAssetId(line.bustPath, pathToAssetId),
+      bustSide: line.bustSide === "left" || line.bustSide === "right" ? line.bustSide : null,
+      bustWidth: typeof line.bustWidth === "number" ? line.bustWidth : null,
       conditions: Array.isArray(line.conditions) ? line.conditions as DialogueLine["conditions"] : [],
       fallbackLineId: typeof line.fallbackLineId === "string" ? line.fallbackLineId : null,
       continueTargetBlockId:

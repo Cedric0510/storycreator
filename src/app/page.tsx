@@ -28,6 +28,12 @@ export default function Home() {
         setIntroDone(true);
       });
     }
+
+    // Filet de securite: si la video cale ou ne signale jamais sa fin
+    // (onglet en arriere-plan, codec, reseau), la carte doit apparaitre
+    // quand meme -- sans quoi la connexion est impossible.
+    const fallback = window.setTimeout(() => setIntroDone(true), 9000);
+    return () => window.clearTimeout(fallback);
   }, []);
 
   const handleLogin = async () => {
@@ -46,7 +52,7 @@ export default function Home() {
   };
 
   return (
-    <main className="portal-root portal-root-video">
+    <main className="portal-root portal-root-video" onClick={() => setIntroDone(true)}>
       <video
         ref={videoRef}
         className="portal-intro-video"

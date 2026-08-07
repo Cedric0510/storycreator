@@ -6,6 +6,7 @@ interface AuthorStudioBustEditorProps {
   bust: BustConfig | undefined;
   canEdit: boolean;
   assetPreviewSrcById: Record<string, string>;
+  getAssetFileName: (assetId: string | null) => string;
   onRegisterAsset: (file: File) => string;
   onEnsureAssetPreviewSrc: (assetId: string) => Promise<string | null>;
   onChange: (bust: BustConfig) => void;
@@ -15,6 +16,7 @@ export function AuthorStudioBustEditor({
   bust,
   canEdit,
   assetPreviewSrcById,
+  getAssetFileName,
   onRegisterAsset,
   onEnsureAssetPreviewSrc,
   onChange,
@@ -47,6 +49,7 @@ export function AuthorStudioBustEditor({
         Image du buste
         <input type="file" accept="image/*" onChange={selectAsset} disabled={!canEdit} />
       </label>
+      <small>{value.assetId ? getAssetFileName(value.assetId) : "Aucun fichier selectionne"}</small>
       {previewSrc && (
         <div
           className="bust-editor-preview"

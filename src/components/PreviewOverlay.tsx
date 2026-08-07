@@ -474,8 +474,8 @@ export function PreviewOverlay({
                 <div className="preview-vn-textbox preview-vn-cinematic-textbox">
                   <PreviewBust
                     src={bustSrc}
-                    side={previewBlock.bust?.side ?? "left"}
-                    width={previewBlock.bust?.width ?? 38}
+                    side={currentNarration?.bustSide ?? previewBlock.bust?.side ?? "left"}
+                    width={currentNarration?.bustWidth ?? previewBlock.bust?.width ?? 38}
                   />
                   <div className="preview-vn-textbox-inner">
                     {currentNarration?.heading && (
@@ -490,7 +490,7 @@ export function PreviewOverlay({
                       text={currentNarration?.body || "…"}
                     />
                   </div>
-                  <button className="preview-vn-next-btn" onClick={onContinue}>▶</button>
+                  <button className="preview-vn-next-btn" onClick={onContinue} aria-label="Continuer">{"❯"}</button>
                 </div>
               </div>
             );
@@ -514,7 +514,7 @@ export function PreviewOverlay({
                 <div className="preview-vn-scene">
                   <div className="preview-vn-dialogue-box">
                     <p style={{ fontStyle: "italic", opacity: 0.7 }}>Aucune ligne de dialogue disponible (conditions non remplies).</p>
-                    <button className="preview-vn-next-btn" onClick={onContinue}>▶</button>
+                    <button className="preview-vn-next-btn" onClick={onContinue} aria-label="Continuer">{"❯"}</button>
                   </div>
                 </div>
               );
@@ -589,8 +589,8 @@ export function PreviewOverlay({
                 <div className="preview-vn-dialogue-area">
                   <PreviewBust
                     src={bustSrc}
-                    side={previewBlock.bust?.side ?? "left"}
-                    width={previewBlock.bust?.width ?? 38}
+                    side={currentLine.bustSide ?? previewBlock.bust?.side ?? "left"}
+                    width={currentLine.bustWidth ?? previewBlock.bust?.width ?? 38}
                   />
                   <div className="preview-vn-textbox">
                     <div className="preview-vn-textbox-inner">
@@ -610,7 +610,7 @@ export function PreviewOverlay({
                         onClick={onContinue}
                         aria-label="Continuer"
                       >
-                        <span aria-hidden>{"\u25B6"}</span>
+                        <span aria-hidden>{"\u276F"}</span>
                       </button>
                     )}
                   </div>

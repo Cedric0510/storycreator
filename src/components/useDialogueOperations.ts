@@ -142,7 +142,7 @@ export function useDialogueOperations({
     logAction("remove_dialogue_line", `${block.id} line ${lineId}`);
   };
 
-  const updateDialogueLineField = (lineId: string, field: string, value: string | null) => {
+  const updateDialogueLineField = (lineId: string, field: string, value: string | number | null) => {
     if (!asDialogue()) return;
     updateSelectedBlock((b) => {
       if (b.type !== "dialogue") return b;

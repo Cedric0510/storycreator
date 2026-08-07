@@ -3428,6 +3428,7 @@ export function AuthorStudioApp() {
                   onGameplayScenePointerMove={onGameplayScenePointerMove}
                   onGameplayScenePointerEnd={onGameplayScenePointerEnd}
                   assetPreviewSrcById={assetPreviewSrcById}
+                  getAssetFileName={getAssetFileName}
                   onRegisterAsset={registerAsset}
                   onEnsureAssetPreviewSrc={ensureAssetPreviewSrc}
                   onStatusMessage={setStatusMessage}
