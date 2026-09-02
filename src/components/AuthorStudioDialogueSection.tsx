@@ -5,18 +5,16 @@ import { EditorGroup } from "@/components/EditorGroup";
 import { PlayerTextInput } from "@/components/PlayerTextFormatting";
 import { AuthorStudioBustEditor } from "@/components/AuthorStudioBustEditor";
 import {
-  SceneComposer,
+  CharacterLayersManager,
+  ExpandableSceneComposer,
   SceneCopyPaste,
 } from "@/components/AuthorStudioSceneComposer";
 import {
   BLOCK_LABELS,
-  CharacterLayer,
-  DEFAULT_CHARACTER_LAYOUT,
   DialogueBlock,
   NpcProfileBlock,
   ProjectMeta,
   StoryBlock,
-  createId,
 } from "@/lib/story";
 
 type EffectField = "variableId" | "delta";
@@ -166,140 +164,41 @@ export function DialogueEditorSection({
       />
 
       {/* --- Character layers (multi-character with z-index) --- */}
-      <div className="section-title-row">
-        <div className="title-with-help">
-          <h3>Personnages ({layers.length}/5)</h3>
-          <HelpHint title="Personnages">
-            Ajoute jusqu&apos;a 5 images de personnages. Le cran (1-5) determine le plan : 1 = premier
-            plan (devant), 5 = arriere-plan (derriere). Chaque personnage a sa propre position
-            dans le compositeur de scene.
-          </HelpHint>
-        </div>
-        {layers.length < 5 && (
-          <label className="button-secondary" style={{ cursor: "pointer", margin: 0 }}>
-            + personnage
-            <input
-              type="file"
-              accept="image/*"
-              style={{ display: "none" }}
-              onChange={(event) => {
-                if (!canEdit) return;
-                const file = event.target.files?.[0];
-                if (!file) return;
-                const assetId = onRegisterAsset(file);
-                void onEnsureAssetPreviewSrc(assetId);
-                const newLayer: CharacterLayer = {
-                  id: createId("clayer"),
-                  assetId,
-                  label: `Perso ${layers.length + 1}`,
-                  zIndex: Math.min(layers.length + 1, 5),
-                  layout: { ...DEFAULT_CHARACTER_LAYOUT },
-                };
-                onUpdateSelectedBlock((b) =>
-                  b.type === "dialogue"
-                    ? { ...b, characterLayers: [...(b.characterLayers ?? []), newLayer] }
-                    : b,
-                );
-                onStatusMessage(`Personnage ajoute: ${file.name}`);
-                event.target.value = "";
-              }}
-              disabled={!canEdit}
-            />
-          </label>
-        )}
-      </div>
-      {layers.length === 0 && (
-        <small className="empty-placeholder">Aucun personnage. Clique &quot;+ personnage&quot; pour en ajouter.</small>
-      )}
-      {layers.map((layer, layerIdx) => (
-        <div key={layer.id} className="choice-card" style={{ padding: "6px 8px" }}>
-          <div className="effect-row" style={{ gridTemplateColumns: "1fr 80px 28px", alignItems: "center" }}>
-            <input
-              type="text"
-              value={layer.label}
-              placeholder="Nom"
-              onChange={(event) =>
-                onUpdateSelectedBlock((b) => {
-                  if (b.type !== "dialogue") return b;
-                  return {
-                    ...b,
-                    characterLayers: (b.characterLayers ?? []).map((l, i) =>
-                      i !== layerIdx ? l : { ...l, label: event.target.value },
-                    ),
-                  };
-                })
-              }
-              disabled={!canEdit}
-            />
-            <select
-              value={layer.zIndex}
-              onChange={(event) =>
-                onUpdateSelectedBlock((b) => {
-                  if (b.type !== "dialogue") return b;
-                  return {
-                    ...b,
-                    characterLayers: (b.characterLayers ?? []).map((l, i) =>
-                      i !== layerIdx ? l : { ...l, zIndex: Number(event.target.value) },
-                    ),
-                  };
-                })
-              }
-              disabled={!canEdit}
-            >
-              <option value={1}>Cran 1</option>
-              <option value={2}>Cran 2</option>
-              <option value={3}>Cran 3</option>
-              <option value={4}>Cran 4</option>
-              <option value={5}>Cran 5</option>
-            </select>
-            <button
-              className="button-danger"
-              onClick={() =>
-                onUpdateSelectedBlock((b) => {
-                  if (b.type !== "dialogue") return b;
-                  return {
-                    ...b,
-                    characterLayers: (b.characterLayers ?? []).filter((_, i) => i !== layerIdx),
-                  };
-                })
-              }
-              disabled={!canEdit}
-              title="Retirer ce personnage"
-            >
-              x
-            </button>
-          </div>
-          <div className="asset-line">
-            <small>{assetPreviewSrcById[layer.assetId ?? ""] ? "Image chargee" : "Aucune image"}</small>
-            <label className="button-secondary" style={{ cursor: "pointer", margin: 0, fontSize: "0.75rem" }}>
-              Changer
-              <input
-                type="file"
-                accept="image/*"
-                style={{ display: "none" }}
-                onChange={(event) => {
-                  if (!canEdit) return;
-                  const file = event.target.files?.[0];
-                  if (!file) return;
-                  const assetId = onRegisterAsset(file);
-                  void onEnsureAssetPreviewSrc(assetId);
-                  onUpdateSelectedBlock((b) => {
-                    if (b.type !== "dialogue") return b;
-                    return {
-                      ...b,
-                      characterLayers: (b.characterLayers ?? []).map((l, i) =>
-                        i !== layerIdx ? l : { ...l, assetId },
-                      ),
-                    };
-                  });
-                  event.target.value = "";
-                }}
-                disabled={!canEdit}
-              />
-            </label>
-          </div>
-        </div>
-      ))}
+      <CharacterLayersManager
+        layers={layers}
+        canEdit={canEdit}
+        assetPreviewSrcById={assetPreviewSrcById}
+        onRegisterAsset={onRegisterAsset}
+        onEnsureAssetPreviewSrc={onEnsureAssetPreviewSrc}
+        onStatusMessage={onStatusMessage}
+        onAddLayer={(newLayer) =>
+          onUpdateSelectedBlock((b) =>
+            b.type === "dialogue"
+              ? { ...b, characterLayers: [...(b.characterLayers ?? []), newLayer] }
+              : b,
+          )
+        }
+        onUpdateLayer={(layerIdx, patch) =>
+          onUpdateSelectedBlock((b) => {
+            if (b.type !== "dialogue") return b;
+            return {
+              ...b,
+              characterLayers: (b.characterLayers ?? []).map((l, i) =>
+                i !== layerIdx ? l : { ...l, ...patch },
+              ),
+            };
+          })
+        }
+        onRemoveLayer={(layerIdx) =>
+          onUpdateSelectedBlock((b) => {
+            if (b.type !== "dialogue") return b;
+            return {
+              ...b,
+              characterLayers: (b.characterLayers ?? []).filter((_, i) => i !== layerIdx),
+            };
+          })
+        }
+      />
 
       {/* --- Scene Composer --- */}
       {(() => {
@@ -316,22 +215,20 @@ export function DialogueEditorSection({
         const hasAnyAsset = block.backgroundAssetId || layerSrcs.length > 0;
         if (!hasAnyAsset) return null;
         return (
-          <SceneComposer
+          <ExpandableSceneComposer
+            format={project.info.format}
             layout={block.sceneLayout}
             bgSrc={bgSrc}
             characterLayers={layerSrcs}
-            bust={{
-              src: assetPreviewSrcById[block.bust?.assetId ?? ""],
-              side: block.bust?.side ?? "left",
-              width: block.bust?.width ?? 38,
-            }}
+            bustConfig={block.bust}
+            assetPreviewSrcById={assetPreviewSrcById}
             canEdit={canEdit}
-            onChange={(newLayout) => {
+            onChange={(newLayout) =>
               onUpdateSelectedBlock((b) =>
                 b.type === "dialogue" ? { ...b, sceneLayout: newLayout } : b,
-              );
-            }}
-            onChangeCharacterLayout={(layerId, newLayerLayout) => {
+              )
+            }
+            onChangeCharacterLayout={(layerId, newLayerLayout) =>
               onUpdateSelectedBlock((b) => {
                 if (b.type !== "dialogue") return b;
                 return {
@@ -340,8 +237,45 @@ export function DialogueEditorSection({
                     l.id !== layerId ? l : { ...l, layout: newLayerLayout },
                   ),
                 };
-              });
-            }}
+              })
+            }
+            side={
+              <CharacterLayersManager
+                layers={layers}
+                canEdit={canEdit}
+                assetPreviewSrcById={assetPreviewSrcById}
+                onRegisterAsset={onRegisterAsset}
+                onEnsureAssetPreviewSrc={onEnsureAssetPreviewSrc}
+                onStatusMessage={onStatusMessage}
+                onAddLayer={(newLayer) =>
+                  onUpdateSelectedBlock((b) =>
+                    b.type === "dialogue"
+                      ? { ...b, characterLayers: [...(b.characterLayers ?? []), newLayer] }
+                      : b,
+                  )
+                }
+                onUpdateLayer={(layerIdx, patch) =>
+                  onUpdateSelectedBlock((b) => {
+                    if (b.type !== "dialogue") return b;
+                    return {
+                      ...b,
+                      characterLayers: (b.characterLayers ?? []).map((l, i) =>
+                        i !== layerIdx ? l : { ...l, ...patch },
+                      ),
+                    };
+                  })
+                }
+                onRemoveLayer={(layerIdx) =>
+                  onUpdateSelectedBlock((b) => {
+                    if (b.type !== "dialogue") return b;
+                    return {
+                      ...b,
+                      characterLayers: (b.characterLayers ?? []).filter((_, i) => i !== layerIdx),
+                    };
+                  })
+                }
+              />
+            }
           />
         );
       })()}

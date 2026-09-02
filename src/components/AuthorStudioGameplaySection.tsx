@@ -16,7 +16,7 @@ import { HelpHint } from "@/components/HelpHint";
 import { EditorGroup } from "@/components/EditorGroup";
 import { AuthorStudioBustEditor } from "@/components/AuthorStudioBustEditor";
 import {
-  SceneComposer,
+  ExpandableSceneComposer,
   SceneCopyPaste,
 } from "@/components/AuthorStudioSceneComposer";
 import {
@@ -225,82 +225,89 @@ export function GameplayEditorSection({
             : "Deplace le fond ou les objets a la souris"}
         </small>
       </div>
-      <SceneComposer
-        layout={block.sceneLayout}
-        bgSrc={assetPreviewSrcById[block.backgroundAssetId ?? ""]}
-        bust={{
-          src: assetPreviewSrcById[block.bust?.assetId ?? ""],
-          side: block.bust?.side ?? "left",
-          width: block.bust?.width ?? 38,
-        }}
-        canEdit={canEdit}
-        onChange={(newLayout) => {
-          onUpdateSelectedBlock((b) =>
-            b.type === "gameplay" ? { ...b, sceneLayout: newLayout } : b,
-          );
-        }}
-        onSceneClick={onGameplaySceneClick}
-        onScenePointerMove={onGameplayScenePointerMove}
-        onScenePointerUp={onGameplayScenePointerEnd}
-        onScenePointerCancel={onGameplayScenePointerEnd}
-      >
-        {[...block.objects]
-          .sort((a, b) => a.zIndex - b.zIndex)
-          .map((obj) => (
-            <div
-              key={obj.id}
-              className={`pointclick-overlay-box ${
-                gameplayPlacementTarget?.objectId === obj.id ? "pointclick-overlay-active" : ""
-              } pointclick-type-${obj.objectType}`}
-              style={{
-                left: `${obj.x}%`,
-                top: `${obj.y}%`,
-                width: `${obj.width}%`,
-                height: `${obj.height}%`,
-                zIndex: obj.zIndex + 10,
-                backgroundImage: assetPreviewSrcById[obj.assetId ?? ""]
-                  ? `url(${assetPreviewSrcById[obj.assetId ?? ""]})`
-                  : undefined,
-                opacity: obj.visibleByDefault ? 1 : 0.45,
-              }}
-              onPointerDown={(event) => onStartGameplayObjectDrag(event, obj.id)}
-              onClick={(event) => event.stopPropagation()}
-            >
-              {!assetPreviewSrcById[obj.assetId ?? ""] && <span>{obj.name || "Objet"}</span>}
-              {canEdit && (
+      {(() => {
+        const objectOverlayChildren = (
+          <>
+            {[...block.objects]
+              .sort((a, b) => a.zIndex - b.zIndex)
+              .map((obj) => (
                 <div
-                  className="pointclick-resize-handle"
-                  onPointerDown={(event) => { event.stopPropagation(); onStartGameplayObjectResize(event, obj.id); }}
-                />
-              )}
-            </div>
-          ))}
+                  key={obj.id}
+                  className={`pointclick-overlay-box ${
+                    gameplayPlacementTarget?.objectId === obj.id ? "pointclick-overlay-active" : ""
+                  } pointclick-type-${obj.objectType}`}
+                  style={{
+                    left: `${obj.x}%`,
+                    top: `${obj.y}%`,
+                    width: `${obj.width}%`,
+                    height: `${obj.height}%`,
+                    zIndex: obj.zIndex + 10,
+                    backgroundImage: assetPreviewSrcById[obj.assetId ?? ""]
+                      ? `url(${assetPreviewSrcById[obj.assetId ?? ""]})`
+                      : undefined,
+                    opacity: obj.visibleByDefault ? 1 : 0.45,
+                  }}
+                  onPointerDown={(event) => onStartGameplayObjectDrag(event, obj.id)}
+                  onClick={(event) => event.stopPropagation()}
+                >
+                  {!assetPreviewSrcById[obj.assetId ?? ""] && <span>{obj.name || "Objet"}</span>}
+                  {canEdit && (
+                    <div
+                      className="pointclick-resize-handle"
+                      onPointerDown={(event) => { event.stopPropagation(); onStartGameplayObjectResize(event, obj.id); }}
+                    />
+                  )}
+                </div>
+              ))}
 
-        <svg className="pointclick-arrows-svg">
-          {keyLockPairs.map(({ key: k, lock: l }) => {
-            const kx = k.x + k.width / 2;
-            const ky = k.y + k.height / 2;
-            const lx = l.x + l.width / 2;
-            const ly = l.y + l.height / 2;
-            return (
-              <line
-                key={`${k.id}-${l.id}`}
-                x1={`${kx}%`} y1={`${ky}%`}
-                x2={`${lx}%`} y2={`${ly}%`}
-                stroke="#f59e0b"
-                strokeWidth="2"
-                strokeDasharray="6 4"
-                markerEnd="url(#arrowhead)"
-              />
-            );
-          })}
-          <defs>
-            <marker id="arrowhead" markerWidth="8" markerHeight="6" refX="8" refY="3" orient="auto">
-              <polygon points="0 0, 8 3, 0 6" fill="#f59e0b" />
-            </marker>
-          </defs>
-        </svg>
-      </SceneComposer>
+            <svg className="pointclick-arrows-svg">
+              {keyLockPairs.map(({ key: k, lock: l }) => {
+                const kx = k.x + k.width / 2;
+                const ky = k.y + k.height / 2;
+                const lx = l.x + l.width / 2;
+                const ly = l.y + l.height / 2;
+                return (
+                  <line
+                    key={`${k.id}-${l.id}`}
+                    x1={`${kx}%`} y1={`${ky}%`}
+                    x2={`${lx}%`} y2={`${ly}%`}
+                    stroke="#f59e0b"
+                    strokeWidth="2"
+                    strokeDasharray="6 4"
+                    markerEnd="url(#arrowhead)"
+                  />
+                );
+              })}
+              <defs>
+                <marker id="arrowhead" markerWidth="8" markerHeight="6" refX="8" refY="3" orient="auto">
+                  <polygon points="0 0, 8 3, 0 6" fill="#f59e0b" />
+                </marker>
+              </defs>
+            </svg>
+          </>
+        );
+        return (
+          <ExpandableSceneComposer
+            format={project.info.format}
+            layout={block.sceneLayout}
+            bgSrc={assetPreviewSrcById[block.backgroundAssetId ?? ""]}
+            bustConfig={block.bust}
+            assetPreviewSrcById={assetPreviewSrcById}
+            canEdit={canEdit}
+            onChange={(newLayout) =>
+              onUpdateSelectedBlock((b) =>
+                b.type === "gameplay" ? { ...b, sceneLayout: newLayout } : b,
+              )
+            }
+            onSceneClick={onGameplaySceneClick}
+            onScenePointerMove={onGameplayScenePointerMove}
+            onScenePointerUp={onGameplayScenePointerEnd}
+            onScenePointerCancel={onGameplayScenePointerEnd}
+          >
+            {objectOverlayChildren}
+          </ExpandableSceneComposer>
+        );
+      })()}
 
       <label>
         Audio ambiance

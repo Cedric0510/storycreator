@@ -277,6 +277,7 @@ export function useStudioAssets({
         synopsis: project.info.synopsis,
         startBlockId: project.info.startBlockId,
         updatedAt: project.info.updatedAt,
+        format: project.info.format,
         chapters: project.chapters,
         parts: project.parts,
         commerce: normalizeCommerceCatalog(project.commerce, project.chapters),
@@ -527,6 +528,9 @@ export function useStudioAssets({
           startBlockId: (projectData.startBlockId as string) ?? (deserializedBlocks[0]?.id ?? null),
           schemaVersion: (storyData.schemaVersion as string) ?? STORY_SCHEMA_VERSION,
           updatedAt: (projectData.updatedAt as string) ?? new Date().toISOString(),
+          // Retro-compatibilite: les exports anterieurs a la fonctionnalite
+          // format n'ont pas ce champ -- on les traite comme "smartphone".
+          format: projectData.format === "pc" ? "pc" : "smartphone",
         },
         variables,
         items,

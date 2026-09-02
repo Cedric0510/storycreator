@@ -852,7 +852,9 @@ label {
 .panel-right .editor-group-content,
 .panel-right .grid-two,
 .panel-right .row-inline,
-.panel-right .asset-line {
+.panel-right .asset-line,
+.panel-right .scene-composer,
+.panel-right .scene-composer-scene {
   width: 100%;
   min-width: 0;
   max-width: 100%;
@@ -1539,6 +1541,123 @@ label:has(> input[type="file"]) > input[type="file"] {
   touch-action: none;
 }
 
+/* Projet au format PC: le cadre de composition doit correspondre au ratio
+   paysage reellement vu en Preview/Story, sinon l'auteur compose "a l'aveugle".
+   min-height: 0 -- a la largeur typique de la barre laterale (~300-340px),
+   un min-height fixe plus grand que ratio*largeur ecraserait le 16:9 en
+   quasi-carre et annulerait l'interet meme de cette classe. */
+.scene-composer-scene-pc {
+  min-height: 0;
+  aspect-ratio: 16 / 9;
+}
+
+/* Fenetre "composer en grand": le cadre se dimensionne par rapport au
+   viewport (pas au panneau lateral etroit) en respectant le ratio du
+   format. On combine avec -pc pour le format paysage. */
+.scene-composer-scene-expanded {
+  width: min(64vw, calc(80vh * 9 / 16));
+  min-height: 0;
+  max-height: 80vh;
+  /* overflow: hidden (herite de .scene-composer-scene) -- seul l'interieur
+     du cadre est visible, exactement comme dans Preview/Story. Le fond est
+     volontairement plus grand que le cadre (voir DEFAULT_SCENE_LAYOUT /
+     computeCoverFitLayout): l'excedent existe dans les donnees et devient
+     visible en le faisant glisser dans le cadre, jamais avant. */
+}
+
+.scene-composer-scene-expanded.scene-composer-scene-pc {
+  width: min(82vw, calc(68vh * 16 / 9));
+  max-height: 68vh;
+}
+
+.scene-composer-expand-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 400;
+  background: rgba(4, 10, 20, 0.82);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+}
+
+.scene-composer-expand-modal {
+  position: relative;
+  display: flex;
+  gap: 16px;
+  align-items: flex-start;
+  max-width: 96vw;
+  max-height: 92vh;
+  background: #101826;
+  border: 1px solid rgba(186, 230, 253, 0.18);
+  border-radius: 16px;
+  padding: 20px;
+  box-shadow: 0 24px 64px rgba(0, 0, 0, 0.6);
+  overflow: auto;
+}
+
+.scene-composer-expand-close {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  border: 1px solid rgba(186, 230, 253, 0.34);
+  background: rgba(15, 31, 51, 0.9);
+  color: #dbeafe;
+  cursor: pointer;
+  z-index: 1;
+}
+
+.scene-composer-expand-close:hover {
+  border-color: rgba(163, 230, 53, 0.55);
+}
+
+.scene-composer-expand-stage {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  flex-shrink: 0;
+}
+
+.scene-composer-expand-stage .scene-composer {
+  width: auto;
+  background: transparent;
+  border: none;
+  padding: 0;
+}
+
+.scene-composer-expand-side {
+  width: 300px;
+  max-height: 88vh;
+  overflow-y: auto;
+  flex-shrink: 0;
+  /* padding-top degage le bouton de fermeture (coin de la fenetre, pas du panneau) */
+  padding: 48px 4px 4px 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.scene-composer-expand-overlay .scene-composer-expand-side .subsection,
+.scene-composer-expand-overlay .scene-composer-expand-side label {
+  color: #dbeafe;
+}
+
+/* Les titres (Composition de scene / Personnages) n'ont pas de fond propre
+   et heritent sinon de la couleur de texte sombre pensee pour la barre
+   laterale claire -- invisible sur le fond sombre de cette fenetre.
+   Specificite volontairement elevee (3 classes) car cette fenetre est
+   imbriquee dans .panel-right en DOM (juste affichee par-dessus via
+   position:fixed), et ".studio-grid .panel-right h3" imposerait sinon sa
+   propre couleur sombre. */
+.scene-composer-expand-overlay .scene-composer-expand-modal .title-with-help strong,
+.scene-composer-expand-overlay .scene-composer-expand-modal .title-with-help h3,
+.scene-composer-expand-overlay .scene-composer-expand-modal h3 {
+  color: #eaf2fc;
+}
+
 /* When used inside the panel, let the composer pop out wider */
 .scene-composer {
   display: flex;
@@ -2065,6 +2184,13 @@ label:has(> input[type="file"]) > input[type="file"] {
   color: #12324b;
   border-color: #99b1c5;
   background: #f4f9ff;
+}
+
+.button-choice-selected {
+  border-color: #0f766e;
+  background: #dcf4ef;
+  color: #0f5e56;
+  box-shadow: 0 0 0 2px rgba(15, 118, 110, 0.22);
 }
 
 .button-soft {
@@ -2599,6 +2725,21 @@ label:has(> input[type="file"]) > input[type="file"] {
   background: rgba(255, 255, 255, 0.18);
   margin: 6px auto 4px;
   flex-shrink: 0;
+}
+
+/* Cadre PC (paysage): meme bezel sombre que le smartphone, mais forme
+   moniteur plutot que telephone -- pas d'encoche ni de barre d'accueil
+   (omises cote JSX selon projectFormat). */
+.preview-device-pc {
+  width: min(760px, calc(100vw - 420px));
+  height: auto;
+  aspect-ratio: 16 / 9;
+  border-radius: 18px;
+  padding: 14px;
+}
+
+.preview-device-pc .preview-device-screen {
+  border-radius: 8px;
 }
 
 /* ── Wing sidebar panel ── */
@@ -3451,6 +3592,11 @@ label:has(> input[type="file"]) > input[type="file"] {
   .preview-device {
     width: 300px;
     height: min(620px, calc(100vh - 32px));
+  }
+
+  .preview-device-pc {
+    width: min(560px, calc(100vw - 40px));
+    height: auto;
   }
 }
 

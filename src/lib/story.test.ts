@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  computeCoverFitLayout,
   createBlock,
   createDefaultResponse,
   getBlockOutgoingTargets,
@@ -13,6 +14,36 @@ import {
   type GameplayBlock,
   type SwitchBlock,
 } from "./story";
+
+describe("computeCoverFitLayout", () => {
+  it("widens a landscape image placed in a portrait frame, centered horizontally", () => {
+    // Image 16:9 dans un cadre 9:16 (smartphone): l'image doit deborder en largeur.
+    const layout = computeCoverFitLayout(16 / 9, 9 / 16);
+    expect(layout.height).toBe(100);
+    expect(layout.width).toBeGreaterThan(100);
+    expect(layout.y).toBe(0);
+    expect(layout.x).toBe(Math.round((100 - layout.width) / 2));
+  });
+
+  it("heightens a portrait image placed in a landscape frame, centered vertically", () => {
+    // Image 9:16 dans un cadre 16:9 (pc): l'image doit deborder en hauteur.
+    const layout = computeCoverFitLayout(9 / 16, 16 / 9);
+    expect(layout.width).toBe(100);
+    expect(layout.height).toBeGreaterThan(100);
+    expect(layout.x).toBe(0);
+    expect(layout.y).toBe(Math.round((100 - layout.height) / 2));
+  });
+
+  it("keeps a perfectly matching ratio at exactly 100/100 with no offset", () => {
+    const layout = computeCoverFitLayout(9 / 16, 9 / 16);
+    expect(layout).toEqual({ x: 0, y: 0, width: 100, height: 100 });
+  });
+
+  it("falls back to the default margin for invalid input", () => {
+    const layout = computeCoverFitLayout(0, 9 / 16);
+    expect(layout).toEqual({ x: -15, y: -15, width: 130, height: 130 });
+  });
+});
 
 describe("story bust schema", () => {
   it("creates every scene block with the same bust defaults", () => {
@@ -612,7 +643,7 @@ describe("story choice block", () => {
     expect(block.prompt).toBe("Que fais-tu ?");
     expect(block.backgroundAssetId).toBeNull();
     expect(block.sceneLayout).toEqual({
-      background: { x: 0, y: 0, width: 100, height: 100 },
+      background: { x: -15, y: -15, width: 130, height: 130 },
       character: { x: 25, y: 10, width: 50, height: 80 },
     });
     expect(block.characterLayers).toEqual([]);
@@ -708,7 +739,7 @@ describe("story choice block", () => {
     const normalized = normalizeStoryBlock(raw as unknown as ChoiceBlock) as ChoiceBlock;
     expect(normalized.displayMode).toBe("text");
     expect(normalized.sceneLayout).toEqual({
-      background: { x: 0, y: 0, width: 100, height: 100 },
+      background: { x: -15, y: -15, width: 130, height: 130 },
       character: { x: 25, y: 10, width: 50, height: 80 },
     });
     expect(normalized.choices[0].layout).toEqual({ x: 8, y: 18, width: 38, height: 34 });
@@ -1078,7 +1109,7 @@ describe("story dialogue block (multi-line)", () => {
     expect(block.lines[0].continueTargetBlockId).toBeNull();
     // sceneLayout defaults
     expect(block.sceneLayout).toEqual({
-      background: { x: 0, y: 0, width: 100, height: 100 },
+      background: { x: -15, y: -15, width: 130, height: 130 },
       character: { x: 25, y: 10, width: 50, height: 80 },
     });
     // characterLayers defaults
@@ -1124,7 +1155,7 @@ describe("story dialogue block (multi-line)", () => {
     expect(dBlock.startLineId).toBe(dBlock.lines[0].id);
     // sceneLayout is auto-filled even on v1 migration
     expect(dBlock.sceneLayout).toEqual({
-      background: { x: 0, y: 0, width: 100, height: 100 },
+      background: { x: -15, y: -15, width: 130, height: 130 },
       character: { x: 25, y: 10, width: 50, height: 80 },
     });
     // characterLayers migrated (both null -> empty)
@@ -1199,7 +1230,7 @@ describe("story cinematic block (multi-character)", () => {
     expect(block.characterAssetId).toBeNull();
     expect(block.characterLayers).toEqual([]);
     expect(block.sceneLayout).toEqual({
-      background: { x: 0, y: 0, width: 100, height: 100 },
+      background: { x: -15, y: -15, width: 130, height: 130 },
       character: { x: 25, y: 10, width: 50, height: 80 },
     });
   });

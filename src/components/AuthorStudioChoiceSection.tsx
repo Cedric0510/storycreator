@@ -3,16 +3,16 @@ import { ChangeEvent, ReactNode } from "react";
 import { HelpHint } from "@/components/HelpHint";
 import { EditorGroup } from "@/components/EditorGroup";
 import { PlayerTextInput } from "@/components/PlayerTextFormatting";
-import { SceneComposer } from "@/components/AuthorStudioSceneComposer";
+import {
+  CharacterLayersManager,
+  ExpandableSceneComposer,
+} from "@/components/AuthorStudioSceneComposer";
 import { AuthorStudioBustEditor } from "@/components/AuthorStudioBustEditor";
 import {
   BLOCK_LABELS,
-  CharacterLayer,
   ChoiceBlock,
-  DEFAULT_CHARACTER_LAYOUT,
   ProjectMeta,
   StoryBlock,
-  createId,
 } from "@/lib/story";
 
 type ChoiceField = "text" | "targetBlockId" | "heroMemoryVariableId" | "heroMemoryValue";
@@ -182,142 +182,41 @@ export function ChoiceEditorSection({
       </div>
 
       {isTextChoiceMode && (
-        <>
-          <div className="section-title-row">
-            <div className="title-with-help">
-              <h3>Personnages ({choiceTextLayers.length}/5)</h3>
-              <HelpHint title="Personnages">
-                Ajoute jusqu&apos;a 5 personnages independants des options de choix.
-              </HelpHint>
-            </div>
-            {choiceTextLayers.length < 5 && (
-              <label className="button-secondary" style={{ cursor: "pointer", margin: 0 }}>
-                + personnage
-                <input
-                  type="file"
-                  accept="image/*"
-                  style={{ display: "none" }}
-                  onChange={(event) => {
-                    if (!canEdit) return;
-                    const file = event.target.files?.[0];
-                    if (!file) return;
-                    const assetId = onRegisterAsset(file);
-                    void onEnsureAssetPreviewSrc(assetId);
-                    const newLayer: CharacterLayer = {
-                      id: createId("clayer"),
-                      assetId,
-                      label: `Perso ${choiceTextLayers.length + 1}`,
-                      zIndex: Math.min(choiceTextLayers.length + 1, 5),
-                      layout: { ...DEFAULT_CHARACTER_LAYOUT },
-                    };
-                    onUpdateSelectedBlock((candidate) =>
-                      candidate.type === "choice"
-                        ? { ...candidate, characterLayers: [...(candidate.characterLayers ?? []), newLayer] }
-                        : candidate,
-                    );
-                    onStatusMessage(`Personnage ajoute: ${file.name}`);
-                    event.target.value = "";
-                  }}
-                  disabled={!canEdit}
-                />
-              </label>
-            )}
-          </div>
-          {choiceTextLayers.length === 0 && (
-            <small className="empty-placeholder">
-              Aucun personnage. Clique &quot;+ personnage&quot; pour en ajouter.
-            </small>
-          )}
-          {choiceTextLayers.map((layer, layerIdx) => (
-            <div key={layer.id} className="choice-card" style={{ padding: "6px 8px" }}>
-              <div className="effect-row" style={{ gridTemplateColumns: "1fr 80px 28px", alignItems: "center" }}>
-                <input
-                  type="text"
-                  value={layer.label}
-                  placeholder="Nom"
-                  onChange={(event) =>
-                    onUpdateSelectedBlock((candidate) => {
-                      if (candidate.type !== "choice") return candidate;
-                      return {
-                        ...candidate,
-                        characterLayers: (candidate.characterLayers ?? []).map((currentLayer, idx) =>
-                          idx !== layerIdx ? currentLayer : { ...currentLayer, label: event.target.value },
-                        ),
-                      };
-                    })
-                  }
-                  disabled={!canEdit}
-                />
-                <select
-                  value={layer.zIndex}
-                  onChange={(event) =>
-                    onUpdateSelectedBlock((candidate) => {
-                      if (candidate.type !== "choice") return candidate;
-                      return {
-                        ...candidate,
-                        characterLayers: (candidate.characterLayers ?? []).map((currentLayer, idx) =>
-                          idx !== layerIdx ? currentLayer : { ...currentLayer, zIndex: Number(event.target.value) },
-                        ),
-                      };
-                    })
-                  }
-                  disabled={!canEdit}
-                >
-                  <option value={1}>Cran 1</option>
-                  <option value={2}>Cran 2</option>
-                  <option value={3}>Cran 3</option>
-                  <option value={4}>Cran 4</option>
-                  <option value={5}>Cran 5</option>
-                </select>
-                <button
-                  className="button-danger"
-                  onClick={() =>
-                    onUpdateSelectedBlock((candidate) => {
-                      if (candidate.type !== "choice") return candidate;
-                      return {
-                        ...candidate,
-                        characterLayers: (candidate.characterLayers ?? []).filter((_, idx) => idx !== layerIdx),
-                      };
-                    })
-                  }
-                  disabled={!canEdit}
-                  title="Retirer ce personnage"
-                >
-                  x
-                </button>
-              </div>
-              <div className="asset-line">
-                <small>{assetPreviewSrcById[layer.assetId ?? ""] ? "Image chargee" : "Aucune image"}</small>
-                <label className="button-secondary" style={{ cursor: "pointer", margin: 0, fontSize: "0.75rem" }}>
-                  Changer
-                  <input
-                    type="file"
-                    accept="image/*"
-                    style={{ display: "none" }}
-                    onChange={(event) => {
-                      if (!canEdit) return;
-                      const file = event.target.files?.[0];
-                      if (!file) return;
-                      const assetId = onRegisterAsset(file);
-                      void onEnsureAssetPreviewSrc(assetId);
-                      onUpdateSelectedBlock((candidate) => {
-                        if (candidate.type !== "choice") return candidate;
-                        return {
-                          ...candidate,
-                          characterLayers: (candidate.characterLayers ?? []).map((currentLayer, idx) =>
-                            idx !== layerIdx ? currentLayer : { ...currentLayer, assetId },
-                          ),
-                        };
-                      });
-                      event.target.value = "";
-                    }}
-                    disabled={!canEdit}
-                  />
-                </label>
-              </div>
-            </div>
-          ))}
-        </>
+        <CharacterLayersManager
+          layers={choiceTextLayers}
+          canEdit={canEdit}
+          assetPreviewSrcById={assetPreviewSrcById}
+          onRegisterAsset={onRegisterAsset}
+          onEnsureAssetPreviewSrc={onEnsureAssetPreviewSrc}
+          onStatusMessage={onStatusMessage}
+          onAddLayer={(newLayer) =>
+            onUpdateSelectedBlock((candidate) =>
+              candidate.type === "choice"
+                ? { ...candidate, characterLayers: [...(candidate.characterLayers ?? []), newLayer] }
+                : candidate,
+            )
+          }
+          onUpdateLayer={(layerIdx, patch) =>
+            onUpdateSelectedBlock((candidate) => {
+              if (candidate.type !== "choice") return candidate;
+              return {
+                ...candidate,
+                characterLayers: (candidate.characterLayers ?? []).map((currentLayer, idx) =>
+                  idx !== layerIdx ? currentLayer : { ...currentLayer, ...patch },
+                ),
+              };
+            })
+          }
+          onRemoveLayer={(layerIdx) =>
+            onUpdateSelectedBlock((candidate) => {
+              if (candidate.type !== "choice") return candidate;
+              return {
+                ...candidate,
+                characterLayers: (candidate.characterLayers ?? []).filter((_, idx) => idx !== layerIdx),
+              };
+            })
+          }
+        />
       )}
 
       {!hasSceneAssets ? (
@@ -325,15 +224,13 @@ export function ChoiceEditorSection({
           Ajoute un fond ou un personnage pour activer la composition de scene.
         </small>
       ) : (
-        <SceneComposer
+        <ExpandableSceneComposer
+          format={project.info.format}
           layout={block.sceneLayout}
           bgSrc={assetPreviewSrcById[block.backgroundAssetId ?? ""]}
           characterLayers={currentSceneLayers}
-          bust={{
-            src: assetPreviewSrcById[block.bust?.assetId ?? ""],
-            side: block.bust?.side ?? "left",
-            width: block.bust?.width ?? 38,
-          }}
+          bustConfig={block.bust}
+          assetPreviewSrcById={assetPreviewSrcById}
           canEdit={canEdit}
           onChange={(nextSceneLayout) =>
             onUpdateSelectedBlock((candidate) =>
@@ -362,6 +259,45 @@ export function ChoiceEditorSection({
                 ),
               };
             })
+          }
+          side={
+            isTextChoiceMode ? (
+              <CharacterLayersManager
+                layers={choiceTextLayers}
+                canEdit={canEdit}
+                assetPreviewSrcById={assetPreviewSrcById}
+                onRegisterAsset={onRegisterAsset}
+                onEnsureAssetPreviewSrc={onEnsureAssetPreviewSrc}
+                onStatusMessage={onStatusMessage}
+                onAddLayer={(newLayer) =>
+                  onUpdateSelectedBlock((candidate) =>
+                    candidate.type === "choice"
+                      ? { ...candidate, characterLayers: [...(candidate.characterLayers ?? []), newLayer] }
+                      : candidate,
+                  )
+                }
+                onUpdateLayer={(layerIdx, patch) =>
+                  onUpdateSelectedBlock((candidate) => {
+                    if (candidate.type !== "choice") return candidate;
+                    return {
+                      ...candidate,
+                      characterLayers: (candidate.characterLayers ?? []).map((currentLayer, idx) =>
+                        idx !== layerIdx ? currentLayer : { ...currentLayer, ...patch },
+                      ),
+                    };
+                  })
+                }
+                onRemoveLayer={(layerIdx) =>
+                  onUpdateSelectedBlock((candidate) => {
+                    if (candidate.type !== "choice") return candidate;
+                    return {
+                      ...candidate,
+                      characterLayers: (candidate.characterLayers ?? []).filter((_, idx) => idx !== layerIdx),
+                    };
+                  })
+                }
+              />
+            ) : undefined
           }
         />
       )}

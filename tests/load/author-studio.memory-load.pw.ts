@@ -292,6 +292,15 @@ async function requireSignIn(page: Page): Promise<void> {
   await passwordInput.fill(password);
   await page.getByRole("button", { name: "Se connecter" }).click();
   await page.waitForURL("**/studio", { timeout: 60_000 });
+
+  // Le menu de demarrage ("Bienvenue") apparait a chaque chargement du
+  // Studio: on choisit "Nouveau projet" + Smartphone pour repartir sur un
+  // etat par defaut, comme avant son introduction.
+  const startupModal = page.locator(".confirm-modal", { hasText: "Bienvenue" });
+  await startupModal.getByRole("button", { name: "Nouveau projet" }).click();
+  const formatModal = page.locator(".confirm-modal", { hasText: "Nouveau projet" });
+  await formatModal.getByRole("button", { name: "Smartphone (portrait)" }).click();
+  await formatModal.getByRole("button", { name: "Quitter sans sauvegarder" }).click();
 }
 
 async function openMainMenu(page: Page): Promise<ReturnType<Page["locator"]>> {
@@ -311,10 +320,9 @@ async function openMainMenu(page: Page): Promise<ReturnType<Page["locator"]>> {
 async function resetToBlankProject(page: Page): Promise<void> {
   const menuPanel = await openMainMenu(page);
   await menuPanel.getByRole("button", { name: "Nouveau projet" }).click();
-  await page
-    .locator(".confirm-modal")
-    .getByRole("button", { name: "Quitter sans sauvegarder" })
-    .click();
+  const confirmModal = page.locator(".confirm-modal");
+  await confirmModal.getByRole("button", { name: "Smartphone (portrait)" }).click();
+  await confirmModal.getByRole("button", { name: "Quitter sans sauvegarder" }).click();
   await expect(page.locator(".react-flow__node")).toHaveCount(1);
 }
 

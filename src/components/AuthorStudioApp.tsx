@@ -87,10 +87,13 @@ import {
   Chapter,
   ChapterEndBlock,
   Part,
+  PROJECT_FORMAT_LABELS,
+  ProjectFormat,
   ProjectMeta,
   StoryBlock,
   ValidationIssue,
   blockTypeColor,
+  computeCoverFitLayout,
   createBlock,
   createId,
   validateStoryBlocks,
@@ -225,6 +228,12 @@ export function AuthorStudioApp() {
   const [accountBusy, setAccountBusy] = useState(false);
   const actionBusy = authBusy || adminBusy || accountBusy;
   const [newProjectWarningOpen, setNewProjectWarningOpen] = useState(false);
+  const [newProjectFormatChoice, setNewProjectFormatChoice] = useState<ProjectFormat | null>(null);
+  // Menu de demarrage: affiche a chaque (re)chargement du Studio, remplace
+  // l'ancienne pop-up de restauration automatique qui ne proposait que
+  // "reprendre/ignorer" sans les autres options d'ouverture.
+  const [startupMenuOpen, setStartupMenuOpen] = useState(true);
+  const [startupShowCloudList, setStartupShowCloudList] = useState(false);
   const [restoreCandidate, setRestoreCandidate] = useState<StudioSnapshot | null>(null);
   const [restoreCandidateSource, setRestoreCandidateSource] = useState<"local" | "cloud">("local");
   const [pendingCloudProject, setPendingCloudProject] = useState<LoadedCloudProject | null>(null);
@@ -2376,12 +2385,36 @@ export function AuthorStudioApp() {
     });
   }, [updateSelectedBlock]);
 
+  const fitBackgroundToFrame = useCallback(async (assetId: string) => {
+    const src = await ensureAssetPreviewSrc(assetId);
+    if (!src) return;
+    const naturalSize = await new Promise<{ width: number; height: number } | null>((resolve) => {
+      const image = new Image();
+      image.onload = () => resolve({ width: image.naturalWidth, height: image.naturalHeight });
+      image.onerror = () => resolve(null);
+      image.src = src;
+    });
+    if (!naturalSize || naturalSize.width <= 0 || naturalSize.height <= 0) return;
+    const frameAspect = project.info.format === "pc" ? 16 / 9 : 9 / 16;
+    const background = computeCoverFitLayout(naturalSize.width / naturalSize.height, frameAspect);
+    updateSelectedBlock((block) => {
+      if (!("sceneLayout" in block) || !block.sceneLayout) return block;
+      // L'image de fond a pu changer pendant le calcul asynchrone (chargement
+      // de l'asset + decodage des dimensions): si ce n'est plus la meme, ce
+      // resultat est perime et ne doit pas ecraser le cadrage de l'image
+      // actuellement selectionnee.
+      if (!("backgroundAssetId" in block) || block.backgroundAssetId !== assetId) return block;
+      return { ...block, sceneLayout: { ...block.sceneLayout, background } };
+    });
+  }, [ensureAssetPreviewSrc, project.info.format, updateSelectedBlock]);
+
   const onAssetInput = useCallback(
     (fieldName: string) =>
       createAssetInputHandler(fieldName, (targetField, assetId) => {
         setSelectedDynamicField(targetField, assetId);
+        if (targetField === "backgroundAssetId") void fitBackgroundToFrame(assetId);
       }),
-    [createAssetInputHandler, setSelectedDynamicField],
+    [createAssetInputHandler, fitBackgroundToFrame, setSelectedDynamicField],
   );
 
   const clearAsset = useCallback((fieldName: string) => {
@@ -2768,8 +2801,8 @@ export function AuthorStudioApp() {
     logAction("validate", `${errorCount} erreur(s), ${warningCount} warning(s)`);
   };
 
-  const resetStudioToBlank = (options?: { preserveStatusMessage?: boolean }) => {
-    const fresh = buildInitialStudio();
+  const resetStudioToBlank = (options?: { preserveStatusMessage?: boolean; format?: ProjectFormat }) => {
+    const fresh = buildInitialStudio(options?.format ?? "smartphone");
     const freshEdges = fresh.edges.filter(
       (edge) => !isDialogueAutoNextHandle(edge.sourceHandle) && !isCinematicAutoNextHandle(edge.sourceHandle),
     );
@@ -2810,10 +2843,13 @@ export function AuthorStudioApp() {
       chapters?: unknown;
       parts?: unknown;
       hero?: unknown;
+      info?: Partial<ProjectMeta["info"]> & { format?: unknown };
     };
     const normalizedChapters = normalizeProjectChapters(rawProject.chapters);
     const normalizedProject: ProjectMeta = {
       ...restoreCandidate.project,
+      // Retro-compatibilite: sauvegardes/cloud anterieures a la fonctionnalite format.
+      info: { ...restoreCandidate.project.info, format: rawProject.info?.format === "pc" ? "pc" : "smartphone" },
       items: normalizeProjectItems(rawProject.items),
       chapters: normalizedChapters,
       parts: normalizeProjectParts(rawProject.parts, normalizedChapters),
@@ -3031,12 +3067,15 @@ export function AuthorStudioApp() {
   };
 
   const requestNewProject = () => {
+    setNewProjectFormatChoice(null);
     setNewProjectWarningOpen(true);
   };
 
   const confirmNewProjectWithoutSave = () => {
+    if (!newProjectFormatChoice) return;
     setNewProjectWarningOpen(false);
-    resetStudioToBlank();
+    resetStudioToBlank({ format: newProjectFormatChoice });
+    setNewProjectFormatChoice(null);
   };
 
   const handleImportZip = async (event: React.ChangeEvent<HTMLInputElement>) => {
@@ -3304,6 +3343,7 @@ export function AuthorStudioApp() {
               onToggleValidatedChapterVisibility={toggleValidatedChapterVisibility}
               openedValidatedPartIds={openedValidatedPartIds}
               onToggleValidatedPartVisibility={toggleValidatedPartVisibility}
+              onStatusMessage={setStatusMessage}
             />
           ) : (
             <aside className="panel panel-left">
@@ -3714,7 +3754,10 @@ export function AuthorStudioApp() {
         </a>
       </footer>
 
-      {authUser && restoreCandidate && (
+      {/* Le cas "local" est gere depuis le menu de demarrage (bouton "Reprendre
+          le travail en cours"); seul le cas "cloud" (choisi dans ce meme menu
+          ou depuis l'onglet Compte) garde cette confirmation intermediaire. */}
+      {authUser && restoreCandidate && restoreCandidateSource === "cloud" && (
         <div className="confirm-overlay">
           <div className="confirm-modal">
             <h2>{restoreCandidateSource === "cloud" ? "Ouvrir la sauvegarde Cadarium Cloud" : "Travail non exporte detecte"}</h2>
@@ -3741,6 +3784,96 @@ export function AuthorStudioApp() {
         </div>
       )}
 
+      {authUser && startupMenuOpen && (
+        <div className="confirm-overlay">
+          <div className="confirm-modal">
+            <h2>Bienvenue</h2>
+            <p>Que veux-tu faire ?</p>
+            {!startupShowCloudList ? (
+              <div className="form-stack">
+                <button
+                  className="button-secondary"
+                  onClick={() => {
+                    setStartupMenuOpen(false);
+                    // Une sauvegarde locale en attente ne doit pas rester "en
+                    // silence": sans ca, l'effet d'autosave (qui l'attend
+                    // pour ne pas l'ecraser) resterait desactive tout le
+                    // reste de la session.
+                    if (restoreCandidate && restoreCandidateSource === "local") declineRestoreCandidate();
+                    requestNewProject();
+                  }}
+                >
+                  Nouveau projet
+                </button>
+                <button
+                  className="button-secondary"
+                  onClick={() => setStartupShowCloudList(true)}
+                  disabled={!Boolean(authUser && canUseAuthorTools && backend?.projects && backend.assets)}
+                >
+                  Charger un projet (cloud)
+                </button>
+                <button
+                  className="button-secondary"
+                  onClick={() => {
+                    setStartupMenuOpen(false);
+                    if (restoreCandidate && restoreCandidateSource === "local") declineRestoreCandidate();
+                    importZipInputRef.current?.click();
+                  }}
+                >
+                  Importer un projet ZIP
+                </button>
+                <button
+                  className="button-secondary"
+                  onClick={() => {
+                    setStartupMenuOpen(false);
+                    applyRestoreCandidate();
+                  }}
+                  disabled={!(restoreCandidate && restoreCandidateSource === "local")}
+                >
+                  Reprendre le travail en cours
+                </button>
+                {!(restoreCandidate && restoreCandidateSource === "local") && (
+                  <small className="form-hint">
+                    Aucune sauvegarde automatique locale disponible pour le moment.
+                  </small>
+                )}
+              </div>
+            ) : (
+              <div className="form-stack">
+                {cloudProjects.projects.length === 0 ? (
+                  <p className="empty-placeholder">Aucune sauvegarde dans Cadarium Cloud.</p>
+                ) : (
+                  <ul className="cloud-project-list">
+                    {cloudProjects.projects.map((project) => (
+                      <li className="cloud-project-row" key={project.id}>
+                        <div>
+                          <strong>{project.title}</strong>
+                          <small>
+                            Version {project.revision} · {new Date(project.updatedAt).toLocaleString("fr-FR")}
+                          </small>
+                        </div>
+                        <button
+                          className="button-secondary"
+                          onClick={() => {
+                            setStartupMenuOpen(false);
+                            void loadProjectFromCloud(project.id);
+                          }}
+                        >
+                          Ouvrir
+                        </button>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+                <button className="button-secondary" onClick={() => setStartupShowCloudList(false)}>
+                  Retour
+                </button>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
       {newProjectWarningOpen && (
         <div className="confirm-overlay">
           <div className="confirm-modal">
@@ -3751,10 +3884,37 @@ export function AuthorStudioApp() {
                 ? "Attention: exporte un ZIP si tu veux conserver les modifications avant de quitter."
                 : "Pense a exporter un ZIP si besoin avant de quitter ce projet."}
             </p>
+            <div className="form-stack">
+              <p>
+                Choisis le format du nouveau projet. Il ne pourra plus etre change ensuite,
+                sauf via la bascule dediee une fois tous les chapitres valides.
+              </p>
+              <div className="row-inline">
+                <button
+                  type="button"
+                  className={`button-secondary${newProjectFormatChoice === "smartphone" ? " button-choice-selected" : ""}`}
+                  onClick={() => setNewProjectFormatChoice("smartphone")}
+                  disabled={actionBusy}
+                >
+                  {PROJECT_FORMAT_LABELS.smartphone}
+                </button>
+                <button
+                  type="button"
+                  className={`button-secondary${newProjectFormatChoice === "pc" ? " button-choice-selected" : ""}`}
+                  onClick={() => setNewProjectFormatChoice("pc")}
+                  disabled={actionBusy}
+                >
+                  {PROJECT_FORMAT_LABELS.pc}
+                </button>
+              </div>
+            </div>
             <div className="confirm-actions">
               <button
                 className="button-secondary"
-                onClick={() => setNewProjectWarningOpen(false)}
+                onClick={() => {
+                  setNewProjectWarningOpen(false);
+                  setNewProjectFormatChoice(null);
+                }}
                 disabled={actionBusy}
               >
                 Annuler
@@ -3762,7 +3922,7 @@ export function AuthorStudioApp() {
               <button
                 className="button-danger"
                 onClick={confirmNewProjectWithoutSave}
-                disabled={actionBusy}
+                disabled={actionBusy || !newProjectFormatChoice}
               >
                 Quitter sans sauvegarder
               </button>
@@ -3780,6 +3940,7 @@ export function AuthorStudioApp() {
           previewGameplayProgressLabel={previewGameplayProgressLabel}
           previewInventoryItems={previewInventoryItems}
           equippedInventoryItemId={previewState?.equippedInventoryItemId ?? null}
+          projectFormat={project.info.format}
           projectVariables={project.variables}
           assetPreviewSrcById={assetPreviewSrcById}
           blockById={blockById}

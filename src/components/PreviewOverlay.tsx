@@ -5,7 +5,7 @@ import { PointerEvent as ReactPointerEvent, useCallback, useRef, useState } from
 
 import { FormattedPlayerText } from "@/components/PlayerTextFormatting";
 import { PreviewRuntimeState } from "@/components/usePreviewRuntime";
-import { GameplayBlock, StoryBlock } from "@/lib/story";
+import { GameplayBlock, ProjectFormat, StoryBlock } from "@/lib/story";
 
 function PreviewBust({
   src,
@@ -39,6 +39,7 @@ export interface PreviewOverlayProps {
   previewGameplayProgressLabel: string;
   previewInventoryItems: { id: string; name: string; iconAssetId: string | null; quantity: number }[];
   equippedInventoryItemId: string | null;
+  projectFormat: ProjectFormat;
   projectVariables: { id: string; name: string }[];
   assetPreviewSrcById: Record<string, string>;
   blockById: Map<string, StoryBlock>;
@@ -300,6 +301,7 @@ export function PreviewOverlay({
   previewGameplayProgressLabel,
   previewInventoryItems,
   equippedInventoryItemId,
+  projectFormat,
   projectVariables,
   assetPreviewSrcById,
   blockById,
@@ -324,9 +326,9 @@ export function PreviewOverlay({
       {/* Left wing — reserved for future options */}
       <div className="preview-wing preview-wing-left" />
 
-      {/* Smartphone device */}
-      <div className="preview-device">
-        <div className="preview-device-notch" />
+      {/* Appareil simule: smartphone (portrait) ou PC (paysage) selon le format du projet */}
+      <div className={`preview-device${projectFormat === "pc" ? " preview-device-pc" : ""}`}>
+        {projectFormat === "smartphone" && <div className="preview-device-notch" />}
         <div className="preview-device-screen">
           {/* ── Status bar ── */}
           <header className="preview-status-bar">
@@ -961,8 +963,8 @@ export function PreviewOverlay({
           })()}
           </div>
 
-          {/* ── Home indicator ── */}
-          <div className="preview-device-home" />
+          {/* ── Home indicator (smartphone uniquement) ── */}
+          {projectFormat === "smartphone" && <div className="preview-device-home" />}
         </div>
       </div>
 

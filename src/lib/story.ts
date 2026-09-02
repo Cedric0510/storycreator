@@ -376,9 +376,33 @@ export interface SceneLayout {
 }
 
 export const DEFAULT_SCENE_LAYOUT: SceneLayout = {
-  background: { x: 0, y: 0, width: 100, height: 100 },
+  // Marge de secours quand on ne connait pas encore les dimensions reelles
+  // de l'image (avant chargement). Des qu'une image de fond est importee,
+  // computeCoverFitLayout calcule la marge exacte necessaire et remplace
+  // cette valeur -- sans cette marge, deplacer le fond ne revelerait jamais
+  // rien de nouveau (le rognage "cover" serait fige a la taille du cadre).
+  background: { x: -15, y: -15, width: 130, height: 130 },
   character:  { x: 25, y: 10, width: 50, height: 80 },
 };
+
+/**
+ * Calcule le cadrage minimal du fond (couvre tout le cadre, sans marge
+ * inutile) pour une image dont le ratio naturel differe de celui du cadre.
+ * L'image reste centree par defaut; l'auteur peut ensuite la deplacer
+ * (glisser dans le compositeur) pour choisir quelle partie reste visible --
+ * rien n'est perdu, l'integralite de l'image existe dans la boite calculee.
+ */
+export function computeCoverFitLayout(imageAspect: number, frameAspect: number): SceneLayerLayout {
+  if (!Number.isFinite(imageAspect) || imageAspect <= 0 || !Number.isFinite(frameAspect) || frameAspect <= 0) {
+    return { ...DEFAULT_SCENE_LAYOUT.background };
+  }
+  if (imageAspect > frameAspect) {
+    const width = Math.round((imageAspect / frameAspect) * 100);
+    return { x: Math.round((100 - width) / 2), y: 0, width, height: 100 };
+  }
+  const height = Math.round((frameAspect / imageAspect) * 100);
+  return { x: 0, y: Math.round((100 - height) / 2), width: 100, height };
+}
 
 const DEFAULT_CHOICE_OPTION_LAYOUTS: Record<ChoiceLabel, SceneLayerLayout> = {
   A: { x: 8, y: 18, width: 38, height: 34 },
@@ -621,6 +645,16 @@ export interface AuditLogEntry {
   details: string;
 }
 
+/** Format cible du projet. Determine le ratio de composition des scenes
+ * (Preview + lecteur). Choisi a la creation, fige ensuite: seule la bascule
+ * guidee depuis l'onglet Chapitres peut le changer. */
+export type ProjectFormat = "smartphone" | "pc";
+
+export const PROJECT_FORMAT_LABELS: Record<ProjectFormat, string> = {
+  smartphone: "Smartphone (portrait)",
+  pc: "PC (paysage)",
+};
+
 export interface ProjectInfo {
   id: string;
   title: string;
@@ -629,6 +663,7 @@ export interface ProjectInfo {
   startBlockId: string | null;
   schemaVersion: string;
   updatedAt: string;
+  format: ProjectFormat;
 }
 
 export interface Chapter {

@@ -1,4 +1,4 @@
-import { ChangeEvent, MouseEvent, PointerEvent as ReactPointerEvent, ReactNode, useCallback } from "react";
+import { ChangeEvent, MouseEvent, PointerEvent as ReactPointerEvent, ReactNode, useCallback, useState } from "react";
 
 import { normalizeDelta } from "@/components/author-studio-core";
 import { GameplayPlacementTarget } from "@/components/author-studio-types";
@@ -16,7 +16,8 @@ import { DialogueEditorSection } from "@/components/AuthorStudioDialogueSection"
 import { ChoiceEditorSection } from "@/components/AuthorStudioChoiceSection";
 import { GameplayEditorSection } from "@/components/AuthorStudioGameplaySection";
 import {
-  SceneComposer,
+  CharacterLayersManager,
+  ExpandableSceneComposer,
   SceneCopyPaste,
 } from "@/components/AuthorStudioSceneComposer";
 import {
@@ -33,12 +34,10 @@ import {
   CharacterLayer,
   ChapterEndBlock,
   CinematicBlock,
-  DEFAULT_CHARACTER_LAYOUT,
   GameplayObject,
   ProjectMeta,
   StoryBlock,
   createDefaultCinematicNarration,
-  createId,
 } from "@/lib/story";
 
 type ChoiceField = "text" | "targetBlockId" | "heroMemoryVariableId" | "heroMemoryValue";
@@ -131,6 +130,7 @@ interface CinematicEditorSectionProps {
   block: CinematicBlock;
   canEdit: boolean;
   blocks: StoryBlock[];
+  project: ProjectMeta;
   assetPreviewSrcById: Record<string, string>;
   getAssetFileName: (assetId: string | null) => string;
   onSetSelectedDynamicField: (key: string, value: unknown) => void;
@@ -147,6 +147,7 @@ function CinematicEditorSection({
   block,
   canEdit,
   blocks,
+  project,
   assetPreviewSrcById,
   getAssetFileName,
   onSetSelectedDynamicField,
@@ -160,7 +161,6 @@ function CinematicEditorSection({
 }: CinematicEditorSectionProps) {
   const layers = block.characterLayers ?? [];
   const narrations = block.narrations ?? [];
-
   const withLegacyCharacterAsset = useCallback((nextLayers: CharacterLayer[]) => {
     const legacyCharacterAssetId =
       nextLayers.find((layer) => layer.assetId)?.assetId ?? null;
@@ -459,131 +459,37 @@ function CinematicEditorSection({
         }
       />
 
-      <div className="section-title-row">
-        <div className="title-with-help">
-          <h3>Personnages ({layers.length}/5)</h3>
-          <HelpHint title="Personnages">
-            Ajoute jusqu&apos;a 5 images. Le cran (1-5) determine le plan : 1 = premier plan,
-            5 = arriere-plan.
-          </HelpHint>
-        </div>
-        {layers.length < 5 && (
-          <label className="button-secondary" style={{ cursor: "pointer", margin: 0 }}>
-            + personnage
-            <input
-              type="file"
-              accept="image/*"
-              style={{ display: "none" }}
-              onChange={(event) => {
-                if (!canEdit) return;
-                const file = event.target.files?.[0];
-                if (!file) return;
-                const assetId = onRegisterAsset(file);
-                void onEnsureAssetPreviewSrc(assetId);
-                const newLayer: CharacterLayer = {
-                  id: createId("clayer"),
-                  assetId,
-                  label: `Perso ${layers.length + 1}`,
-                  zIndex: Math.min(layers.length + 1, 5),
-                  layout: { ...DEFAULT_CHARACTER_LAYOUT },
-                };
-                onUpdateSelectedBlock((b) => {
-                  if (b.type !== "cinematic") return b;
-                  const nextLayers = [...(b.characterLayers ?? []), newLayer];
-                  return { ...b, ...withLegacyCharacterAsset(nextLayers) };
-                });
-                onStatusMessage(`Personnage ajoute: ${file.name}`);
-                event.target.value = "";
-              }}
-              disabled={!canEdit}
-            />
-          </label>
-        )}
-      </div>
-      {layers.length === 0 && (
-        <small className="empty-placeholder">Aucun personnage. Clique &quot;+ personnage&quot; pour en ajouter.</small>
-      )}
-      {layers.map((layer, layerIdx) => (
-        <div key={layer.id} className="choice-card" style={{ padding: "6px 8px" }}>
-          <div className="effect-row" style={{ gridTemplateColumns: "1fr 80px 28px", alignItems: "center" }}>
-            <input
-              type="text"
-              value={layer.label}
-              placeholder="Nom"
-              onChange={(event) =>
-                onUpdateSelectedBlock((b) => {
-                  if (b.type !== "cinematic") return b;
-                  const nextLayers = (b.characterLayers ?? []).map((l, i) =>
-                    i !== layerIdx ? l : { ...l, label: event.target.value },
-                  );
-                  return { ...b, ...withLegacyCharacterAsset(nextLayers) };
-                })
-              }
-              disabled={!canEdit}
-            />
-            <select
-              value={layer.zIndex}
-              onChange={(event) =>
-                onUpdateSelectedBlock((b) => {
-                  if (b.type !== "cinematic") return b;
-                  const nextLayers = (b.characterLayers ?? []).map((l, i) =>
-                    i !== layerIdx ? l : { ...l, zIndex: Number(event.target.value) },
-                  );
-                  return { ...b, ...withLegacyCharacterAsset(nextLayers) };
-                })
-              }
-              disabled={!canEdit}
-            >
-              <option value={1}>Cran 1</option>
-              <option value={2}>Cran 2</option>
-              <option value={3}>Cran 3</option>
-              <option value={4}>Cran 4</option>
-              <option value={5}>Cran 5</option>
-            </select>
-            <button
-              className="button-danger"
-              onClick={() =>
-                onUpdateSelectedBlock((b) => {
-                  if (b.type !== "cinematic") return b;
-                  const nextLayers = (b.characterLayers ?? []).filter((_, i) => i !== layerIdx);
-                  return { ...b, ...withLegacyCharacterAsset(nextLayers) };
-                })
-              }
-              disabled={!canEdit}
-              title="Retirer ce personnage"
-            >
-              x
-            </button>
-          </div>
-          <div className="asset-line">
-            <small>{assetPreviewSrcById[layer.assetId ?? ""] ? "Image chargee" : "Aucune image"}</small>
-            <label className="button-secondary" style={{ cursor: "pointer", margin: 0, fontSize: "0.75rem" }}>
-              Changer
-              <input
-                type="file"
-                accept="image/*"
-                style={{ display: "none" }}
-                onChange={(event) => {
-                  if (!canEdit) return;
-                  const file = event.target.files?.[0];
-                  if (!file) return;
-                  const assetId = onRegisterAsset(file);
-                  void onEnsureAssetPreviewSrc(assetId);
-                  onUpdateSelectedBlock((b) => {
-                    if (b.type !== "cinematic") return b;
-                    const nextLayers = (b.characterLayers ?? []).map((l, i) =>
-                      i !== layerIdx ? l : { ...l, assetId },
-                    );
-                    return { ...b, ...withLegacyCharacterAsset(nextLayers) };
-                  });
-                  event.target.value = "";
-                }}
-                disabled={!canEdit}
-              />
-            </label>
-          </div>
-        </div>
-      ))}
+      <CharacterLayersManager
+        layers={layers}
+        canEdit={canEdit}
+        assetPreviewSrcById={assetPreviewSrcById}
+        onRegisterAsset={onRegisterAsset}
+        onEnsureAssetPreviewSrc={onEnsureAssetPreviewSrc}
+        onStatusMessage={onStatusMessage}
+        onAddLayer={(newLayer) =>
+          onUpdateSelectedBlock((b) => {
+            if (b.type !== "cinematic") return b;
+            const nextLayers = [...(b.characterLayers ?? []), newLayer];
+            return { ...b, ...withLegacyCharacterAsset(nextLayers) };
+          })
+        }
+        onUpdateLayer={(layerIdx, patch) =>
+          onUpdateSelectedBlock((b) => {
+            if (b.type !== "cinematic") return b;
+            const nextLayers = (b.characterLayers ?? []).map((l, i) =>
+              i !== layerIdx ? l : { ...l, ...patch },
+            );
+            return { ...b, ...withLegacyCharacterAsset(nextLayers) };
+          })
+        }
+        onRemoveLayer={(layerIdx) =>
+          onUpdateSelectedBlock((b) => {
+            if (b.type !== "cinematic") return b;
+            const nextLayers = (b.characterLayers ?? []).filter((_, i) => i !== layerIdx);
+            return { ...b, ...withLegacyCharacterAsset(nextLayers) };
+          })
+        }
+      />
 
       {/* --- Scene Composer --- */}
       {(() => {
@@ -601,31 +507,62 @@ function CinematicEditorSection({
         const hasAnyAsset = block.backgroundAssetId || layerSrcs.length > 0 || block.characterAssetId;
         if (!hasAnyAsset) return null;
         return (
-          <SceneComposer
+          <ExpandableSceneComposer
+            format={project.info.format}
             layout={block.sceneLayout}
             bgSrc={bgSrc}
             characterLayers={layerSrcs}
-            bust={{
-              src: assetPreviewSrcById[block.bust?.assetId ?? ""],
-              side: block.bust?.side ?? "left",
-              width: block.bust?.width ?? 38,
-            }}
             charSrc={fallbackCharSrc}
+            bustConfig={block.bust}
+            assetPreviewSrcById={assetPreviewSrcById}
             canEdit={canEdit}
-            onChange={(newLayout) => {
+            onChange={(newLayout) =>
               onUpdateSelectedBlock((b) =>
                 b.type === "cinematic" ? { ...b, sceneLayout: newLayout } : b,
-              );
-            }}
-            onChangeCharacterLayout={(layerId, newLayerLayout) => {
+              )
+            }
+            onChangeCharacterLayout={(layerId, newLayerLayout) =>
               onUpdateSelectedBlock((b) => {
                 if (b.type !== "cinematic") return b;
                 const nextLayers = (b.characterLayers ?? []).map((l) =>
                   l.id !== layerId ? l : { ...l, layout: newLayerLayout },
                 );
                 return { ...b, ...withLegacyCharacterAsset(nextLayers) };
-              });
-            }}
+              })
+            }
+            side={
+              <CharacterLayersManager
+                layers={layers}
+                canEdit={canEdit}
+                assetPreviewSrcById={assetPreviewSrcById}
+                onRegisterAsset={onRegisterAsset}
+                onEnsureAssetPreviewSrc={onEnsureAssetPreviewSrc}
+                onStatusMessage={onStatusMessage}
+                onAddLayer={(newLayer) =>
+                  onUpdateSelectedBlock((b) => {
+                    if (b.type !== "cinematic") return b;
+                    const nextLayers = [...(b.characterLayers ?? []), newLayer];
+                    return { ...b, ...withLegacyCharacterAsset(nextLayers) };
+                  })
+                }
+                onUpdateLayer={(layerIdx, patch) =>
+                  onUpdateSelectedBlock((b) => {
+                    if (b.type !== "cinematic") return b;
+                    const nextLayers = (b.characterLayers ?? []).map((l, i) =>
+                      i !== layerIdx ? l : { ...l, ...patch },
+                    );
+                    return { ...b, ...withLegacyCharacterAsset(nextLayers) };
+                  })
+                }
+                onRemoveLayer={(layerIdx) =>
+                  onUpdateSelectedBlock((b) => {
+                    if (b.type !== "cinematic") return b;
+                    const nextLayers = (b.characterLayers ?? []).filter((_, i) => i !== layerIdx);
+                    return { ...b, ...withLegacyCharacterAsset(nextLayers) };
+                  })
+                }
+              />
+            }
           />
         );
       })()}
@@ -835,6 +772,7 @@ export function AuthorStudioBlockEditorPanel({
                 block={selectedBlock}
                 canEdit={canEdit}
                 blocks={blocks}
+                project={project}
                 assetPreviewSrcById={assetPreviewSrcById}
                 getAssetFileName={getAssetFileName}
                 onSetSelectedDynamicField={onSetSelectedDynamicField}

@@ -1,16 +1,19 @@
-import { ReactNode, useCallback, useRef, useState } from "react";
+import { ReactNode, useCallback, useEffect, useRef, useState } from "react";
 
 import { HelpHint } from "@/components/HelpHint";
 import {
   BustConfig,
   CharacterLayer,
   CinematicBlock,
+  DEFAULT_CHARACTER_LAYOUT,
   DEFAULT_SCENE_LAYOUT,
   DialogueBlock,
   GameplayBlock,
+  ProjectFormat,
   SceneLayout,
   SceneLayerLayout,
   StoryBlock,
+  createId,
 } from "@/lib/story";
 
 interface DialogueSceneClipboard {
@@ -359,5 +362,265 @@ export function SceneComposer({
         {children}
       </div>
     </div>
+  );
+}
+
+/**
+ * Fenetre plein ecran generique pour composer une scene en grand: chaque
+ * section (cinematique/dialogue/choix/gameplay) lui fournit son propre
+ * compositeur agrandi +, quand pertinent, ses controles de personnages en
+ * contenu additionnel (side).
+ */
+interface SceneComposerExpandOverlayProps {
+  open: boolean;
+  onClose: () => void;
+  children: ReactNode;
+  side?: ReactNode;
+}
+
+export function SceneComposerExpandOverlay({ open, onClose, children, side }: SceneComposerExpandOverlayProps) {
+  useEffect(() => {
+    if (!open) return;
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") onClose();
+    };
+    document.addEventListener("keydown", onKeyDown);
+    return () => document.removeEventListener("keydown", onKeyDown);
+  }, [open, onClose]);
+
+  if (!open) return null;
+
+  return (
+    <div className="scene-composer-expand-overlay" onClick={onClose}>
+      <div className="scene-composer-expand-modal" onClick={(event) => event.stopPropagation()}>
+        <button
+          type="button"
+          className="scene-composer-expand-close"
+          onClick={onClose}
+          aria-label="Fermer la composition en grand"
+        >
+          ✕
+        </button>
+        <div className="scene-composer-expand-stage">{children}</div>
+        {side && <div className="scene-composer-expand-side">{side}</div>}
+      </div>
+    </div>
+  );
+}
+
+/**
+ * Gestion des personnages (ajout, cran, changement d'image, retrait),
+ * partagee entre cinematique/dialogue/choix (texte) -- dans la barre
+ * laterale normale et dans la fenetre "composer en grand".
+ */
+interface CharacterLayersManagerProps {
+  layers: CharacterLayer[];
+  canEdit: boolean;
+  assetPreviewSrcById: Record<string, string>;
+  onRegisterAsset: (file: File) => string;
+  onEnsureAssetPreviewSrc: (assetId: string) => Promise<string | null>;
+  onStatusMessage: (message: string) => void;
+  onAddLayer: (layer: CharacterLayer) => void;
+  onUpdateLayer: (layerIndex: number, patch: Partial<CharacterLayer>) => void;
+  onRemoveLayer: (layerIndex: number) => void;
+  maxLayers?: number;
+}
+
+export function CharacterLayersManager({
+  layers,
+  canEdit,
+  assetPreviewSrcById,
+  onRegisterAsset,
+  onEnsureAssetPreviewSrc,
+  onStatusMessage,
+  onAddLayer,
+  onUpdateLayer,
+  onRemoveLayer,
+  maxLayers = 5,
+}: CharacterLayersManagerProps) {
+  return (
+    <>
+      <div className="section-title-row">
+        <div className="title-with-help">
+          <h3>Personnages ({layers.length}/{maxLayers})</h3>
+          <HelpHint title="Personnages">
+            Ajoute jusqu&apos;a {maxLayers} images. Le cran (1-{maxLayers}) determine le plan : 1 =
+            premier plan, {maxLayers} = arriere-plan.
+          </HelpHint>
+        </div>
+        {layers.length < maxLayers && (
+          <label className="button-secondary" style={{ cursor: "pointer", margin: 0 }}>
+            + personnage
+            <input
+              type="file"
+              accept="image/*"
+              style={{ display: "none" }}
+              onChange={(event) => {
+                if (!canEdit) return;
+                const file = event.target.files?.[0];
+                if (!file) return;
+                const assetId = onRegisterAsset(file);
+                void onEnsureAssetPreviewSrc(assetId);
+                onAddLayer({
+                  id: createId("clayer"),
+                  assetId,
+                  label: `Perso ${layers.length + 1}`,
+                  zIndex: Math.min(layers.length + 1, maxLayers),
+                  layout: { ...DEFAULT_CHARACTER_LAYOUT },
+                });
+                onStatusMessage(`Personnage ajoute: ${file.name}`);
+                event.target.value = "";
+              }}
+              disabled={!canEdit}
+            />
+          </label>
+        )}
+      </div>
+      {layers.length === 0 && (
+        <small className="empty-placeholder">Aucun personnage. Clique &quot;+ personnage&quot; pour en ajouter.</small>
+      )}
+      {layers.map((layer, layerIdx) => (
+        <div key={layer.id} className="choice-card" style={{ padding: "6px 8px" }}>
+          <div className="effect-row" style={{ gridTemplateColumns: "1fr 80px 28px", alignItems: "center" }}>
+            <input
+              type="text"
+              value={layer.label}
+              placeholder="Nom"
+              onChange={(event) => onUpdateLayer(layerIdx, { label: event.target.value })}
+              disabled={!canEdit}
+            />
+            <select
+              value={layer.zIndex}
+              onChange={(event) => onUpdateLayer(layerIdx, { zIndex: Number(event.target.value) })}
+              disabled={!canEdit}
+            >
+              {Array.from({ length: maxLayers }, (_, i) => i + 1).map((cran) => (
+                <option key={cran} value={cran}>Cran {cran}</option>
+              ))}
+            </select>
+            <button
+              className="button-danger"
+              onClick={() => onRemoveLayer(layerIdx)}
+              disabled={!canEdit}
+              title="Retirer ce personnage"
+            >
+              x
+            </button>
+          </div>
+          <div className="asset-line">
+            <small>{assetPreviewSrcById[layer.assetId ?? ""] ? "Image chargee" : "Aucune image"}</small>
+            <label className="button-secondary" style={{ cursor: "pointer", margin: 0, fontSize: "0.75rem" }}>
+              Changer
+              <input
+                type="file"
+                accept="image/*"
+                style={{ display: "none" }}
+                onChange={(event) => {
+                  if (!canEdit) return;
+                  const file = event.target.files?.[0];
+                  if (!file) return;
+                  const assetId = onRegisterAsset(file);
+                  void onEnsureAssetPreviewSrc(assetId);
+                  onUpdateLayer(layerIdx, { assetId });
+                  event.target.value = "";
+                }}
+                disabled={!canEdit}
+              />
+            </label>
+          </div>
+        </div>
+      ))}
+    </>
+  );
+}
+
+/**
+ * Compositeur de scene + son bouton "Agrandir la composition" + la fenetre
+ * plein ecran correspondante -- les 3 sont toujours utilises ensemble dans
+ * les 4 editeurs de bloc (cinematique/dialogue/choix/gameplay), avec le
+ * meme calcul de classe CSS (format du projet) et de props du buste.
+ * `side` (les controles Personnages, absents pour Gameplay) et `children`
+ * (les objets point-and-click, presents seulement pour Gameplay) restent
+ * fournis par l'appelant: ce sont les seules parties propres a chaque
+ * section, tout le reste est identique.
+ */
+interface ExpandableSceneComposerProps {
+  format: ProjectFormat;
+  layout: SceneLayout;
+  bgSrc: string | undefined;
+  characterLayers?: SceneCharacterLayerInfo[];
+  charSrc?: string | undefined;
+  bustConfig?: BustConfig;
+  assetPreviewSrcById: Record<string, string>;
+  canEdit: boolean;
+  onChange: (layout: SceneLayout) => void;
+  onChangeCharacterLayout?: (layerId: string, layout: SceneLayerLayout) => void;
+  onSceneClick?: (event: React.MouseEvent<HTMLDivElement>) => void;
+  onScenePointerMove?: (event: React.PointerEvent<HTMLDivElement>) => void;
+  onScenePointerUp?: (event: React.PointerEvent<HTMLDivElement>) => void;
+  onScenePointerCancel?: (event: React.PointerEvent<HTMLDivElement>) => void;
+  children?: ReactNode;
+  side?: ReactNode;
+}
+
+export function ExpandableSceneComposer({
+  format,
+  layout,
+  bgSrc,
+  characterLayers,
+  charSrc,
+  bustConfig,
+  assetPreviewSrcById,
+  canEdit,
+  onChange,
+  onChangeCharacterLayout,
+  onSceneClick,
+  onScenePointerMove,
+  onScenePointerUp,
+  onScenePointerCancel,
+  children,
+  side,
+}: ExpandableSceneComposerProps) {
+  const [expandOpen, setExpandOpen] = useState(false);
+  const isPc = format === "pc";
+  const bust = bustConfig
+    ? {
+        src: assetPreviewSrcById[bustConfig.assetId ?? ""],
+        side: bustConfig.side ?? "left" as const,
+        width: bustConfig.width ?? 38,
+      }
+    : undefined;
+  const sharedProps = {
+    layout,
+    bgSrc,
+    characterLayers,
+    charSrc,
+    bust,
+    canEdit,
+    onChange,
+    onChangeCharacterLayout,
+    onSceneClick,
+    onScenePointerMove,
+    onScenePointerUp,
+    onScenePointerCancel,
+  };
+
+  return (
+    <>
+      <SceneComposer {...sharedProps} sceneClassName={isPc ? "scene-composer-scene-pc" : undefined}>
+        {children}
+      </SceneComposer>
+      <button type="button" className="button-secondary" onClick={() => setExpandOpen(true)}>
+        Agrandir la composition
+      </button>
+      <SceneComposerExpandOverlay open={expandOpen} onClose={() => setExpandOpen(false)} side={side}>
+        <SceneComposer
+          {...sharedProps}
+          sceneClassName={`${isPc ? "scene-composer-scene-pc " : ""}scene-composer-scene-expanded`}
+        >
+          {children}
+        </SceneComposer>
+      </SceneComposerExpandOverlay>
+    </>
   );
 }

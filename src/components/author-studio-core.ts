@@ -17,6 +17,7 @@ import {
   GameplayHotspotClickActionType,
   GameplayHotspot,
   GameplayOverlay,
+  ProjectFormat,
   ProjectMeta,
   STORY_SCHEMA_VERSION,
   StoryBlock,
@@ -564,7 +565,7 @@ export function isGameplayCompleted(block: GameplayBlock, interactedObjectIds: S
   return mustInteract.every((id) => interactedObjectIds.has(id));
 }
 
-export function buildInitialStudio(): InitialStudio {
+export function buildInitialStudio(format: ProjectFormat = "smartphone"): InitialStudio {
   const titleBlock = createBlock("title", { x: 70, y: 120 }) as TitleBlock;
 
   titleBlock.name = "Accueil histoire";
@@ -587,6 +588,7 @@ export function buildInitialStudio(): InitialStudio {
       startBlockId: titleBlock.id,
       schemaVersion: STORY_SCHEMA_VERSION,
       updatedAt: new Date().toISOString(),
+      format,
     },
     variables: [
       { id: createId("var"), name: "energie", initialValue: 0 },

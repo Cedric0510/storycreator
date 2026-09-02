@@ -1,7 +1,7 @@
 import { readFile } from "node:fs/promises";
 
 import JSZip from "jszip";
-import { expect, test } from "@playwright/test";
+import { expect, test, type Page } from "@playwright/test";
 
 /**
  * Smoke test du parcours coeur: connexion -> studio -> export ZIP ->
@@ -11,6 +11,19 @@ import { expect, test } from "@playwright/test";
 
 const ADMIN_EMAIL = "e2e-admin@studio.local";
 const ADMIN_PASSWORD = "motdepasse-e2e";
+
+/**
+ * Le menu de demarrage ("Bienvenue") apparait a chaque chargement du
+ * Studio. Les tests attendent un projet vierge -> on choisit toujours
+ * "Nouveau projet" + format Smartphone pour repartir sur l'etat par defaut.
+ */
+async function dismissStartupMenu(page: Page): Promise<void> {
+  const startupModal = page.locator(".confirm-modal", { hasText: "Bienvenue" });
+  await startupModal.getByRole("button", { name: "Nouveau projet" }).click();
+  const formatModal = page.locator(".confirm-modal", { hasText: "Nouveau projet" });
+  await formatModal.getByRole("button", { name: "Smartphone (portrait)" }).click();
+  await formatModal.getByRole("button", { name: "Quitter sans sauvegarder" }).click();
+}
 
 test("parcours coeur: connexion, export ZIP, reimport, preview", async ({ page }) => {
   // La video d'intro retarde l'apparition du formulaire: on la court-circuite
@@ -24,6 +37,7 @@ test("parcours coeur: connexion, export ZIP, reimport, preview", async ({ page }
   await page.getByRole("button", { name: "Se connecter" }).click();
 
   await page.waitForURL("**/studio", { timeout: 60_000 });
+  await dismissStartupMenu(page);
   await expect(page.locator(".react-flow")).toBeVisible();
 
   // Projet vierge: un seul bloc (Ecran titre, bloc de depart).
@@ -134,6 +148,7 @@ test("l'export deduplique les assets au contenu identique", async ({ page }) => 
   await page.getByLabel("Mot de passe").fill(ADMIN_PASSWORD);
   await page.getByRole("button", { name: "Se connecter" }).click();
   await page.waitForURL("**/studio", { timeout: 60_000 });
+  await dismissStartupMenu(page);
   await expect(page.locator(".react-flow")).toBeVisible();
 
   await page.locator('input[type="file"][accept=".zip"]').setInputFiles({
@@ -187,6 +202,7 @@ test("un compte non admin ne voit pas l'entree Administration", async ({ page })
   await page.getByLabel("Mot de passe").fill("motdepasse-e2e");
   await page.getByRole("button", { name: "Se connecter" }).click();
   await page.waitForURL("**/studio", { timeout: 60_000 });
+  await dismissStartupMenu(page);
 
   await page.locator(".studio-menu-trigger").click();
   const menuPanel = page.locator("#studio-main-menu-panel");
@@ -202,6 +218,7 @@ test("l'inspecteur de bloc ne deborde pas horizontalement", async ({ page }) => 
   await page.getByLabel("Mot de passe").fill(ADMIN_PASSWORD);
   await page.getByRole("button", { name: "Se connecter" }).click();
   await page.waitForURL("**/studio", { timeout: 60_000 });
+  await dismissStartupMenu(page);
 
   await page.locator(".react-flow__node").first().click();
   const inspector = page.locator(".panel-right");
@@ -224,6 +241,7 @@ test("cree et configure les frontieres de partie", async ({ page }) => {
   await page.getByLabel("Mot de passe").fill(ADMIN_PASSWORD);
   await page.getByRole("button", { name: "Se connecter" }).click();
   await page.waitForURL("**/studio", { timeout: 60_000 });
+  await dismissStartupMenu(page);
 
   await page.getByRole("button", { name: "Debut chapitre" }).click();
   await page.getByLabel("Titre du chapitre").fill("Chapitre test");

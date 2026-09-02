@@ -4,7 +4,7 @@ import { normalizeDelta, toSlug } from "@/components/author-studio-core";
 import { CollapsibleSection } from "@/components/CollapsibleSection";
 import { HelpHint } from "@/components/HelpHint";
 import type { StudioLeftSection } from "@/components/StudioLeftNavigation";
-import { BlockType, ProjectMeta, blockTypeColor } from "@/lib/story";
+import { BlockType, PROJECT_FORMAT_LABELS, ProjectFormat, ProjectMeta, blockTypeColor, createId } from "@/lib/story";
 import { AuthorStudioCommercePanel } from "@/components/AuthorStudioCommercePanel";
 
 const BLOCK_LIBRARY_ITEMS: ReadonlyArray<{ type: BlockType; label: string }> = [
@@ -42,6 +42,7 @@ interface AuthorStudioProjectPanelProps {
   onToggleValidatedChapterVisibility: (chapterId: string) => void;
   openedValidatedPartIds: string[];
   onToggleValidatedPartVisibility: (partId: string) => void;
+  onStatusMessage: (message: string) => void;
 }
 
 export function AuthorStudioProjectPanel({
@@ -64,6 +65,7 @@ export function AuthorStudioProjectPanel({
   onToggleValidatedChapterVisibility,
   openedValidatedPartIds,
   onToggleValidatedPartVisibility,
+  onStatusMessage,
 }: AuthorStudioProjectPanelProps) {
   const [newItemName, setNewItemName] = useState("");
   const [newItemIconFile, setNewItemIconFile] = useState<File | null>(null);
@@ -73,6 +75,35 @@ export function AuthorStudioProjectPanel({
   const validatedChapters = project.chapters.filter((chapter) => chapter.validated);
   const validatedParts = project.parts.filter((part) => part.validated);
   const [expandedChapterIds, setExpandedChapterIds] = useState<string[]>([]);
+  const [formatSwitchWarningOpen, setFormatSwitchWarningOpen] = useState(false);
+  const [formatSwitchAcknowledged, setFormatSwitchAcknowledged] = useState(false);
+
+  const currentFormat = project.info.format;
+  const nextFormat: ProjectFormat = currentFormat === "pc" ? "smartphone" : "pc";
+  const canSwitchFormat =
+    canEdit && project.chapters.length > 0 && project.chapters.every((chapter) => chapter.validated);
+
+  const confirmFormatSwitch = () => {
+    setProject((current) => {
+      const timestamp = new Date().toISOString();
+      const entry = {
+        id: createId("log"),
+        memberId: current.activeMemberId,
+        timestamp,
+        action: "switch_format",
+        details: `Bascule du format ${PROJECT_FORMAT_LABELS[current.info.format]} vers ${PROJECT_FORMAT_LABELS[nextFormat]}. Tous les chapitres repassent en non-valide.`,
+      };
+      return {
+        ...current,
+        info: { ...current.info, format: nextFormat, updatedAt: timestamp },
+        chapters: current.chapters.map((chapter) => ({ ...chapter, validated: false })),
+        logs: [entry, ...current.logs].slice(0, 250),
+      };
+    });
+    setFormatSwitchWarningOpen(false);
+    setFormatSwitchAcknowledged(false);
+    onStatusMessage(`Projet bascule au format ${PROJECT_FORMAT_LABELS[nextFormat]}. Tous les chapitres sont a revalider.`);
+  };
 
   const submitCreateItem = () => {
     const created = onCreateItem(newItemName, newItemIconFile);
@@ -155,6 +186,37 @@ export function AuthorStudioProjectPanel({
 
       {activeSection === "chapters" && (
       <CollapsibleSection
+        storageKey="project-format"
+        title="Format du projet"
+        headerExtra={
+          <HelpHint title="Format du projet">
+            Choisi a la creation, fige ensuite. La bascule ci-dessous cree une nouvelle
+            composition (le ratio des scenes change) en gardant tout le texte, les
+            branchements et les images existantes -- a toi de retoucher les images qui ne
+            conviennent plus au nouveau cadrage.
+          </HelpHint>
+        }
+      >
+        <p>Format actuel: <strong>{PROJECT_FORMAT_LABELS[currentFormat]}</strong></p>
+        <button
+          className="button-secondary"
+          disabled={!canSwitchFormat}
+          onClick={() => setFormatSwitchWarningOpen(true)}
+        >
+          Basculer vers {PROJECT_FORMAT_LABELS[nextFormat]}
+        </button>
+        {!canSwitchFormat && (
+          <p className="form-hint">
+            {project.chapters.length === 0
+              ? "Cree et valide au moins un chapitre pour pouvoir basculer le format."
+              : "Valide tous les chapitres avant de pouvoir basculer le format."}
+          </p>
+        )}
+      </CollapsibleSection>
+      )}
+
+      {activeSection === "chapters" && (
+      <CollapsibleSection
         storageKey="project-validated-chapters"
         title="Chapitres valides"
         headerExtra={
@@ -229,6 +291,55 @@ export function AuthorStudioProjectPanel({
           </ul>
         )}
       </CollapsibleSection>
+      )}
+
+      {formatSwitchWarningOpen && (
+        <div className="confirm-overlay">
+          <div className="confirm-modal">
+            <h2>Basculer vers {PROJECT_FORMAT_LABELS[nextFormat]}</h2>
+            <p>
+              Cette action transforme <strong>ce projet</strong> pour le format {PROJECT_FORMAT_LABELS[nextFormat]}.
+              Le texte, les branchements, les variables et les images sont conserves tels quels --
+              mais le cadrage change, donc certaines images pourront deborder ou paraitre trop
+              petites tant qu&apos;elles ne sont pas remplacees.
+            </p>
+            <p className="confirm-warning">
+              Rien n&apos;est sauvegarde automatiquement ailleurs. Si tu veux garder une version du
+              projet au format {PROJECT_FORMAT_LABELS[currentFormat]}, exporte un ZIP ou sauvegarde dans le
+              cloud maintenant, avant de continuer.
+            </p>
+            <p className="confirm-warning">
+              Tous les chapitres repasseront en non-valide, car ils devront etre revus visuellement
+              dans le nouveau format.
+            </p>
+            <label className="row-inline">
+              <input
+                type="checkbox"
+                checked={formatSwitchAcknowledged}
+                onChange={(event) => setFormatSwitchAcknowledged(event.target.checked)}
+              />
+              <span>J&apos;ai compris et sauvegarde une copie si je le souhaitais.</span>
+            </label>
+            <div className="confirm-actions">
+              <button
+                className="button-secondary"
+                onClick={() => {
+                  setFormatSwitchWarningOpen(false);
+                  setFormatSwitchAcknowledged(false);
+                }}
+              >
+                Annuler
+              </button>
+              <button
+                className="button-danger"
+                disabled={!formatSwitchAcknowledged}
+                onClick={confirmFormatSwitch}
+              >
+                Confirmer la bascule
+              </button>
+            </div>
+          </div>
+        </div>
       )}
 
       {activeSection === "blocks" && (
